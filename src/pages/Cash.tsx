@@ -1,0 +1,566 @@
+import React, { useState } from 'react';
+import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { Modal } from '../components/ui/Modal';
+import { ActionMenu } from '../components/ui/ActionMenu';
+import { Search, Filter, Download, Plus, ArrowUpRight, ArrowDownRight, Package, AlertCircle } from 'lucide-react';
+import { useData } from '../context/DataContext';
+import { useTablePagination } from '../hooks/useTablePagination';
+
+export function Cash() {
+  const { stockItems, items, branches, updateStock, payments } = useData();
+  const [currency, setCurrency] = useState<'PEN' | 'USD'>('PEN');
+  const [isEgresoOpen, setIsEgresoOpen] = useState(false);
+  const [isLoteOpen, setIsLoteOpen] = useState(false);
+  const [isSaleOpen, setIsSaleOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = useTablePagination();
+
+  const mockMovements = [
+    { date: 'Hoy, 10:30', type: 'Ingreso Cuota', ref: 'PLN-001 / Juan Ruiz', in: '1,200', out: '-', user: 'Ana G.' },
+    { date: 'Hoy, 09:15', type: 'Ingreso Matrícula', ref: 'MAT-2024-002 / María Castro', in: '950', out: '-', user: 'Carlos R.' },
+    { date: 'Ayer, 17:45', type: 'Egreso', ref: 'Pago Proveedor Limpieza', in: '-', out: '350', user: 'Admin' },
+  ];
+
+  const filteredMovements = mockMovements.filter(row => 
+    row.ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    row.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    row.user.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const totalPages = Math.ceil(filteredMovements.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedMovements = filteredMovements.slice(startIndex, endIndex);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+  
+  // Sale state
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [selectedItemId, setSelectedItemId] = useState('');
+  const [saleQty, setSaleQty] = useState(1);
+  const [customerName, setCustomerName] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo');
+  const [receiptType, setReceiptType] = useState('Boleta');
+  const [receiptNumber, setReceiptNumber] = useState('');
+  const [observation, setObservation] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const selectedItem = items.find(i => i.id === selectedItemId);
+  const currentStock = stockItems.find(s => s.itemId === selectedItemId && s.branchId === selectedBranchId);
+  const totalAmount = selectedItem?.salePrice ? selectedItem.salePrice * saleQty : 0;
+
+  const handleSaveSale = () => {
+    setFormError(null);
+    if (!selectedBranchId || !selectedItemId || saleQty <= 0) {
+      setFormError('Por favor complete todos los campos obligatorios.');
+      return;
+    }
+
+    if (!currentStock || currentStock.stock < saleQty) {
+      setFormError('No hay stock suficiente para realizar la venta.');
+      return;
+    }
+    
+    // 1. Deduct stock and generate Kardex
+    updateStock(
+      selectedBranchId,
+      selectedItemId,
+      -saleQty, 
+      'Venta', 
+      `Venta directa en caja a ${customerName || 'Cliente General'}. Comprobante: ${receiptType} ${receiptNumber}`,
+      receiptNumber
+    );
+
+    // 2. Close modal and reset
+    setIsSaleOpen(false);
+    setSelectedItemId('');
+    setSaleQty(1);
+    setCustomerName('');
+    setReceiptNumber('');
+    setObservation('');
+    setFormError(null);
+  };
+
+  const sellableItems = items.filter(i => i.isSold && i.status === 'Activo');
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-text-primary mb-1">Caja</h2>
+          <p className="text-sm text-text-secondary">Movimientos en {currency}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+            <Download size={16} />
+            Exportar
+          </Button>
+          <Button variant="secondary" onClick={() => { setIsSaleOpen(true); setFormError(null); }} className="flex items-center gap-2">
+            <Package size={16} />
+            Venta de artículo
+          </Button>
+          <Button variant="secondary" onClick={() => { setIsLoteOpen(true); setFormError(null); }}>Crear lote de depósito</Button>
+          <Button variant="primary" className="flex items-center gap-2" onClick={() => { setIsEgresoOpen(true); setFormError(null); }}>
+            <Plus size={16} />
+            Registrar egreso
+          </Button>
+        </div>
+      </div>
+
+      {/* Currency Tabs & KPIs */}
+      <div className="flex flex-col gap-4 mb-6">
+        <div className="flex bg-surface-muted p-1 rounded-xl w-fit border border-border-soft">
+          <button 
+            onClick={() => setCurrency('PEN')}
+            className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${currency === 'PEN' ? 'bg-surface shadow-sm text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            Caja PEN (Soles)
+          </button>
+          <button 
+            onClick={() => setCurrency('USD')}
+            className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${currency === 'USD' ? 'bg-surface shadow-sm text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            Caja USD (Dólares)
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card className="p-4">
+            <span className="text-sm font-medium text-text-secondary">Ingresos del período</span>
+            <div className="flex items-center gap-2 mt-2">
+              <ArrowUpRight size={18} className="text-success-text" />
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 24,500' : '$ 8,200'}</h3>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <span className="text-sm font-medium text-text-secondary">Egresos del período</span>
+            <div className="flex items-center gap-2 mt-2">
+              <ArrowDownRight size={18} className="text-danger-text" />
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 3,200' : '$ 450'}</h3>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <span className="text-sm font-medium text-text-secondary">Saldo de caja</span>
+            <div className="mt-2">
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 21,300' : '$ 7,750'}</h3>
+            </div>
+          </Card>
+          <Card className="p-4 bg-surface-muted border-primary-accent/20">
+            <div className="flex justify-between items-start">
+              <span className="text-sm font-medium text-text-secondary">Estado</span>
+              <Badge variant="success">Abierta</Badge>
+            </div>
+            <div className="mt-2 text-xs text-text-muted">
+              Último cierre: Ayer, 18:30
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* Main Content Card (Filters + Table + Pagination) */}
+      <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
+        {/* Filters */}
+        <div className="p-4 border-b border-border-soft">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
+              <input 
+                type="text" 
+                placeholder="Buscar por concepto, comprobante o usuario..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-10 bg-surface border border-border-soft rounded-xl pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-accent focus:ring-1 focus:ring-primary-accent transition-shadow"
+              />
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
+              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+                <option value="">Tipo Movimiento</option>
+                <option value="ingreso">Ingreso</option>
+                <option value="egreso">Egreso</option>
+              </select>
+              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
+                <Filter size={16} />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Data Table */}
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50 sticky top-0 z-10">
+              <tr>
+                <th className="px-6 py-3 font-medium">Fecha</th>
+                <th className="px-6 py-3 font-medium">Tipo</th>
+                <th className="px-6 py-3 font-medium">Concepto / Referencia</th>
+                <th className="px-6 py-3 font-medium text-right">Ingreso</th>
+                <th className="px-6 py-3 font-medium text-right">Egreso</th>
+                <th className="px-6 py-3 font-medium">Usuario</th>
+                <th className="px-6 py-3 font-medium text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-soft">
+              {paginatedMovements.map((row, idx) => (
+                <tr key={idx} className="hover:bg-surface-muted/50 transition-colors even:bg-surface-muted/30">
+                  <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{row.date}</td>
+                  <td className="px-6 py-3">
+                    <Badge variant={row.type.includes('Ingreso') ? 'success' : 'neutral'}>{row.type}</Badge>
+                  </td>
+                  <td className="px-6 py-3 font-medium text-text-primary">{row.ref}</td>
+                  <td className="px-6 py-3 text-right font-medium text-success-text">{row.in !== '-' ? `${currency === 'PEN' ? 'S/' : '$'} ${row.in}` : '-'}</td>
+                  <td className="px-6 py-3 text-right font-medium text-text-primary">{row.out !== '-' ? `${currency === 'PEN' ? 'S/' : '$'} ${row.out}` : '-'}</td>
+                  <td className="px-6 py-3 text-text-secondary">{row.user}</td>
+                  <td className="px-6 py-3 text-right">
+                    <ActionMenu 
+                      items={[
+                        { label: 'Ver detalle', onClick: () => {} },
+                        { label: 'Ver comprobante', onClick: () => {} },
+                        { label: 'Ver matrícula/cuota', onClick: () => {} },
+                        { label: 'Reversar movimiento', onClick: () => {}, danger: true },
+                      ]} 
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <div className="p-4 border-t border-border-soft flex items-center justify-between bg-surface">
+          <span className="text-sm text-text-secondary">
+            Mostrando {filteredMovements.length > 0 ? startIndex + 1 : 0} a {Math.min(endIndex, filteredMovements.length)} de {filteredMovements.length} registros
+          </span>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              Anterior
+            </Button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }).map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentPage(i + 1)}
+                  className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
+                    currentPage === i + 1 
+                      ? 'bg-primary-accent text-white' 
+                      : 'text-text-secondary hover:bg-surface-muted'
+                  }`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+            <Button 
+              variant="ghost" 
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages || totalPages === 0}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Registrar Egreso Modal */}
+      <Modal 
+        isOpen={isEgresoOpen} 
+        onClose={() => setIsEgresoOpen(false)} 
+        title="Registrar Egreso Manual"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setIsEgresoOpen(false)}>Cancelar</Button>
+            <Button variant="primary">Registrar egreso</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Fecha *</label>
+              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Moneda *</label>
+              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+                <option value="PEN">PEN (Soles)</option>
+                <option value="USD">USD (Dólares)</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">Tipo de egreso *</label>
+            <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+              <option value="">Seleccionar tipo</option>
+              <option value="proveedor">Pago a proveedor</option>
+              <option value="reembolso">Reembolso</option>
+              <option value="ajuste">Ajuste de caja</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">Concepto *</label>
+            <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="Descripción del egreso" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">Monto *</label>
+            <input type="number" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="0.00" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Comprobante *</label>
+              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+                <option value="factura">Factura</option>
+                <option value="boleta">Boleta</option>
+                <option value="recibo">Recibo</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">N° Comprobante *</label>
+              <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">Foto / Evidencia *</label>
+            <div className="w-full h-24 border-2 border-dashed border-border-soft rounded-xl flex items-center justify-center text-sm text-text-muted hover:bg-surface-muted transition-colors cursor-pointer">
+              Click para subir archivo
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Crear Lote Modal */}
+      <Modal 
+        isOpen={isLoteOpen} 
+        onClose={() => setIsLoteOpen(false)} 
+        title="Crear Lote de Depósito"
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setIsLoteOpen(false)}>Cancelar</Button>
+            <Button variant="primary">Crear lote y registrar egreso</Button>
+          </div>
+        }
+      >
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Fecha de depósito *</label>
+              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Banco / Cuenta destino *</label>
+              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+                <option value="">Seleccionar cuenta</option>
+                <option value="bcp">BCP - Cuenta Corriente PEN</option>
+                <option value="bbva">BBVA - Recaudadora PEN</option>
+              </select>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-text-primary">Ingresos elegibles para depósito</h3>
+            <div className="border border-border-soft rounded-xl overflow-hidden">
+              <table className="w-full text-sm text-left">
+                <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
+                  <tr>
+                    <th className="px-4 py-3 w-10 text-center"><input type="checkbox" className="rounded border-border-soft text-primary-accent focus:ring-primary-accent" /></th>
+                    <th className="px-4 py-3 font-medium">Fecha</th>
+                    <th className="px-4 py-3 font-medium">Concepto</th>
+                    <th className="px-4 py-3 font-medium text-right">Monto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-soft">
+                  <tr className="hover:bg-surface-muted/50">
+                    <td className="px-4 py-3 text-center"><input type="checkbox" className="rounded border-border-soft text-primary-accent focus:ring-primary-accent" /></td>
+                    <td className="px-4 py-3">Hoy, 10:30</td>
+                    <td className="px-4 py-3">Ingreso Cuota (PLN-001)</td>
+                    <td className="px-4 py-3 text-right font-medium">S/ 1,200</td>
+                  </tr>
+                  <tr className="hover:bg-surface-muted/50">
+                    <td className="px-4 py-3 text-center"><input type="checkbox" className="rounded border-border-soft text-primary-accent focus:ring-primary-accent" /></td>
+                    <td className="px-4 py-3">Hoy, 09:15</td>
+                    <td className="px-4 py-3">Ingreso Matrícula (MAT-2024-002)</td>
+                    <td className="px-4 py-3 text-right font-medium">S/ 950</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-surface-muted border border-border-soft rounded-xl p-4 flex justify-between items-center">
+            <span className="text-sm text-text-secondary">Total a depositar (0 seleccionados)</span>
+            <span className="text-lg font-bold text-text-primary">S/ 0.00</span>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Venta de artículo */}
+      <Modal
+        isOpen={isSaleOpen}
+        onClose={() => setIsSaleOpen(false)}
+        title="Registrar Venta de Artículo"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setIsSaleOpen(false)}>Cancelar</Button>
+            <Button variant="primary" onClick={handleSaveSale}>Confirmar Venta</Button>
+          </div>
+        }
+      >
+        <div className="space-y-6">
+          {formError && (
+             <div className="bg-danger/10 border border-danger/20 rounded-xl p-3 flex gap-2 text-sm text-danger animate-in fade-in slide-in-from-top-1">
+               <AlertCircle size={16} className="shrink-0 mt-0.5" />
+               <p>{formError}</p>
+             </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Sede *</label>
+              <select 
+                className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+              >
+                <option value="">Seleccionar sede...</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Cliente / Referencia</label>
+              <input 
+                type="text" 
+                className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                placeholder="Nombre del cliente"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-4 p-4 bg-surface-muted rounded-xl border border-border-soft">
+            <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+              <Package size={16} />
+              Detalle de Venta
+            </h3>
+            
+            <div className="grid grid-cols-1 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-secondary">Artículo Vendible *</label>
+                <select 
+                  className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                  value={selectedItemId}
+                  onChange={(e) => setSelectedItemId(e.target.value)}
+                >
+                  <option value="">Seleccionar artículo...</option>
+                  {sellableItems.map(i => (
+                    <option key={i.id} value={i.id}>{i.name} - {currency === 'PEN' ? 'S/' : '$'} {i.salePrice}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-text-secondary">Cantidad *</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                    value={saleQty}
+                    onChange={(e) => setSaleQty(parseInt(e.target.value) || 0)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-text-secondary">Precio Unit.</label>
+                  <div className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm flex items-center text-text-muted">
+                    {selectedItem?.salePrice || '0.00'}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-text-secondary">Subtotal</label>
+                  <div className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm flex items-center font-bold text-text-primary">
+                    {totalAmount.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {selectedItemId && selectedBranchId && (
+                <div className={`text-xs p-2 rounded-lg flex items-center gap-2 ${(!currentStock || currentStock.stock < saleQty) ? 'bg-danger/10 text-danger' : 'bg-success/10 text-success-text'}`}>
+                  <AlertCircle size={14} />
+                  Stock en sede: {currentStock?.stock || 0} unidades disponibles.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Método de Pago *</label>
+              <select 
+                className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              >
+                <option value="Efectivo">Efectivo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Yape/Plin">Yape / Plin</option>
+                <option value="Tarjeta">Tarjeta Débito/Crédito</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Comprobante *</label>
+              <div className="flex gap-2">
+                <select 
+                  className="w-24 h-10 bg-surface border border-border-soft rounded-xl px-2 text-sm focus:border-primary-accent outline-none"
+                  value={receiptType}
+                  onChange={(e) => setReceiptType(e.target.value)}
+                >
+                  <option value="Boleta">Boleta</option>
+                  <option value="Factura">Factura</option>
+                  <option value="Recibo">Recibo</option>
+                </select>
+                <input 
+                  type="text" 
+                  className="flex-1 h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                  placeholder="N° Comprobante"
+                  value={receiptNumber}
+                  onChange={(e) => setReceiptNumber(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-text-secondary">Observación</label>
+            <textarea 
+              className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-primary-accent outline-none resize-none"
+              placeholder="Notas adicionales..."
+              value={observation}
+              onChange={(e) => setObservation(e.target.value)}
+            />
+          </div>
+
+          <div className="bg-primary-accent/5 border border-primary-accent/20 rounded-xl p-4 flex justify-between items-center">
+            <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Total a Pagar</span>
+            <span className="text-2xl font-black text-primary-accent">
+              {currency === 'PEN' ? 'S/' : '$'} {totalAmount.toFixed(2)}
+            </span>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
