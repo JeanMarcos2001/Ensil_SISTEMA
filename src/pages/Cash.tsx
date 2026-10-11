@@ -7,10 +7,11 @@ import { ActionMenu } from '../components/ui/ActionMenu';
 import { Search, Filter, Download, Plus, ArrowUpRight, ArrowDownRight, Package, AlertCircle } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
+import { getCurrentPrice } from '../utils/inventory';
 
 export function Cash() {
-  const { stockItems, items, branches, updateStock, payments } = useData();
-  const [currency, setCurrency] = useState<'PEN' | 'USD'>('PEN');
+  const { stockItems, items, branches, updateStock, payments, itemPrices, cashMovements, addCashMovement } = useData();
+  const [currency, setCurrency] = useState<'PEN' | 'USD'>('USD');
   const [isEgresoOpen, setIsEgresoOpen] = useState(false);
   const [isLoteOpen, setIsLoteOpen] = useState(false);
   const [isSaleOpen, setIsSaleOpen] = useState(false);
@@ -18,13 +19,30 @@ export function Cash() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
 
-  const mockMovements = [
-    { date: 'Hoy, 10:30', type: 'Ingreso Cuota', ref: 'PLN-001 / Juan Ruiz', in: '1,200', out: '-', user: 'Ana G.' },
-    { date: 'Hoy, 09:15', type: 'Ingreso Matrícula', ref: 'MAT-2024-002 / María Castro', in: '950', out: '-', user: 'Carlos R.' },
-    { date: 'Ayer, 17:45', type: 'Egreso', ref: 'Pago Proveedor Limpieza', in: '-', out: '350', user: 'Admin' },
-  ];
+  const money = (n: number) => n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  const filteredMovements = mockMovements.filter(row => 
+  // Libro de caja: cada movimiento está en la moneda de su caja (PEN o USD).
+  const boxMovements = cashMovements
+    .filter(m => m.currency === currency)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const applied = boxMovements.filter(m => m.status === 'Aplicado');
+  const totalIn = applied.filter(m => m.kind === 'Ingreso').reduce((acc, m) => acc + m.amount, 0);
+  const totalOut = applied.filter(m => m.kind === 'Egreso').reduce((acc, m) => acc + m.amount, 0);
+
+  const movements = boxMovements.map(m => ({
+    id: m.id,
+    date: formatDate(m.date),
+    kind: m.kind,
+    type: m.concept,
+    ref: m.reference,
+    in: m.kind === 'Ingreso' ? money(m.amount) : '-',
+    out: m.kind === 'Egreso' ? money(m.amount) : '-',
+    user: m.user,
+  }));
+
+  const filteredMovements = movements.filter(row =>
     row.ref.toLowerCase().includes(searchTerm.toLowerCase()) ||
     row.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
     row.user.toLowerCase().includes(searchTerm.toLowerCase())
@@ -48,11 +66,26 @@ export function Cash() {
   const [receiptType, setReceiptType] = useState('Boleta');
   const [receiptNumber, setReceiptNumber] = useState('');
   const [observation, setObservation] = useState('');
+  const [saleCurrency, setSaleCurrency] = useState<'USD' | 'PEN'>('USD');
+  const [saleTC, setSaleTC] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Egreso manual
+  const [egDate, setEgDate] = useState(new Date().toISOString().slice(0, 10));
+  const [egCurrency, setEgCurrency] = useState<'PEN' | 'USD'>('PEN');
+  const [egTC, setEgTC] = useState('');
+  const [egType, setEgType] = useState('');
+  const [egConcept, setEgConcept] = useState('');
+  const [egAmount, setEgAmount] = useState('');
+  const [egDocType, setEgDocType] = useState('Factura');
+  const [egDocNumber, setEgDocNumber] = useState('');
+  const [egError, setEgError] = useState<string | null>(null);
 
   const selectedItem = items.find(i => i.id === selectedItemId);
   const currentStock = stockItems.find(s => s.itemId === selectedItemId && s.branchId === selectedBranchId);
-  const totalAmount = selectedItem?.salePrice ? selectedItem.salePrice * saleQty : 0;
+  // Precio de venta vigente (USD): excepción de la sede si existe, si no el general.
+  const unitPrice = selectedItem ? getCurrentPrice(itemPrices, selectedItem.id, selectedBranchId || 'all')?.amount ?? 0 : 0;
+  const totalAmount = unitPrice * saleQty;
 
   const handleSaveSale = () => {
     setFormError(null);
@@ -61,13 +94,24 @@ export function Cash() {
       return;
     }
 
+    if (!(unitPrice > 0)) {
+      setFormError('El artículo no tiene un precio de venta vigente. Configúrelo en Logística → Catálogo de artículos.');
+      return;
+    }
+
     if (!currentStock || currentStock.stock < saleQty) {
       setFormError('No hay stock suficiente para realizar la venta.');
       return;
     }
     
+    const tc = parseFloat(saleTC);
+    if (saleCurrency === 'PEN' && !(tc > 0)) {
+      setFormError('Indique el tipo de cambio (TC) para cobrar en soles.');
+      return;
+    }
+
     // 1. Deduct stock and generate Kardex
-    updateStock(
+    const stockResult = updateStock(
       selectedBranchId,
       selectedItemId,
       -saleQty, 
@@ -75,8 +119,27 @@ export function Cash() {
       `Venta directa en caja a ${customerName || 'Cliente General'}. Comprobante: ${receiptType} ${receiptNumber}`,
       receiptNumber
     );
+    if (!stockResult.ok) {
+      setFormError(stockResult.error || 'No se pudo descontar el stock.');
+      return;
+    }
 
-    // 2. Close modal and reset
+    // 2. Ingreso a caja: el precio es en USD; si se cobra en soles se registra con su TC.
+    addCashMovement({
+      kind: 'Ingreso',
+      concept: 'Venta de artículo',
+      reference: `${receiptType} ${receiptNumber || 'S/N'} / ${customerName || 'Cliente General'}`,
+      currency: saleCurrency,
+      amount: saleCurrency === 'USD' ? totalAmount : Math.round(totalAmount * tc * 100) / 100,
+      exchangeRate: saleCurrency === 'PEN' ? tc : undefined,
+      amountUSD: totalAmount,
+      method: paymentMethod,
+      branchId: selectedBranchId,
+    });
+    setCurrency(saleCurrency);
+    setSaleTC('');
+
+    // 3. Close modal and reset
     setIsSaleOpen(false);
     setSelectedItemId('');
     setSaleQty(1);
@@ -135,20 +198,20 @@ export function Cash() {
             <span className="text-sm font-medium text-text-secondary">Ingresos del período</span>
             <div className="flex items-center gap-2 mt-2">
               <ArrowUpRight size={18} className="text-success-text" />
-              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 24,500' : '$ 8,200'}</h3>
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/' : '$'} {money(totalIn)}</h3>
             </div>
           </Card>
           <Card className="p-4">
             <span className="text-sm font-medium text-text-secondary">Egresos del período</span>
             <div className="flex items-center gap-2 mt-2">
               <ArrowDownRight size={18} className="text-danger-text" />
-              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 3,200' : '$ 450'}</h3>
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/' : '$'} {money(totalOut)}</h3>
             </div>
           </Card>
           <Card className="p-4">
             <span className="text-sm font-medium text-text-secondary">Saldo de caja</span>
             <div className="mt-2">
-              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/ 21,300' : '$ 7,750'}</h3>
+              <h3 className="text-xl font-semibold text-text-primary">{currency === 'PEN' ? 'S/' : '$'} {money(totalIn - totalOut)}</h3>
             </div>
           </Card>
           <Card className="p-4 bg-surface-muted border-primary-accent/20">
@@ -206,11 +269,11 @@ export function Cash() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
-              {paginatedMovements.map((row, idx) => (
-                <tr key={idx} className="hover:bg-surface-muted/50 transition-colors even:bg-surface-muted/30">
+              {paginatedMovements.map((row) => (
+                <tr key={row.id} className="hover:bg-surface-muted/50 transition-colors even:bg-surface-muted/30">
                   <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{row.date}</td>
                   <td className="px-6 py-3">
-                    <Badge variant={row.type.includes('Ingreso') ? 'success' : 'neutral'}>{row.type}</Badge>
+                    <Badge variant={row.kind === 'Ingreso' ? 'success' : 'neutral'}>{row.type}</Badge>
                   </td>
                   <td className="px-6 py-3 font-medium text-text-primary">{row.ref}</td>
                   <td className="px-6 py-3 text-right font-medium text-success-text">{row.in !== '-' ? `${currency === 'PEN' ? 'S/' : '$'} ${row.in}` : '-'}</td>
@@ -272,27 +335,64 @@ export function Cash() {
       </div>
 
       {/* Registrar Egreso Modal */}
-      <Modal 
-        isOpen={isEgresoOpen} 
-        onClose={() => setIsEgresoOpen(false)} 
+      <Modal
+        isOpen={isEgresoOpen}
+        onClose={() => setIsEgresoOpen(false)}
         title="Registrar Egreso Manual"
         size="md"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsEgresoOpen(false)}>Cancelar</Button>
-            <Button variant="primary">Registrar egreso</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setEgError(null);
+                const amount = parseFloat(egAmount);
+                const tc = parseFloat(egTC);
+                if (!egDate || !egType || !egConcept.trim() || !(amount > 0) || !egDocNumber.trim()) {
+                  setEgError('Complete fecha, tipo, concepto, monto y N° de comprobante.');
+                  return;
+                }
+                if (egCurrency === 'PEN' && !(tc > 0)) {
+                  setEgError('Indique el tipo de cambio (TC) para un egreso en soles.');
+                  return;
+                }
+                addCashMovement({
+                  date: new Date(`${egDate}T12:00:00`).toISOString(),
+                  kind: 'Egreso',
+                  concept: egType,
+                  reference: `${egConcept.trim()} (${egDocType} ${egDocNumber.trim()})`,
+                  currency: egCurrency,
+                  amount,
+                  exchangeRate: egCurrency === 'PEN' ? tc : undefined,
+                  amountUSD: egCurrency === 'USD' ? amount : Math.round((amount / tc) * 100) / 100,
+                  method: 'Efectivo',
+                });
+                setCurrency(egCurrency);
+                setEgConcept(''); setEgAmount(''); setEgDocNumber(''); setEgTC(''); setEgType('');
+                setIsEgresoOpen(false);
+              }}
+            >
+              Registrar egreso
+            </Button>
           </div>
         }
       >
         <div className="space-y-4">
+          {egError && (
+            <div className="bg-danger/10 border border-danger/20 rounded-xl p-3 flex gap-2 text-sm text-danger">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <p>{egError}</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha *</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <input type="date" value={egDate} onChange={e => setEgDate(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Moneda *</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+              <select value={egCurrency} onChange={e => setEgCurrency(e.target.value as 'PEN' | 'USD')} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
                 <option value="PEN">PEN (Soles)</option>
                 <option value="USD">USD (Dólares)</option>
               </select>
@@ -300,39 +400,41 @@ export function Cash() {
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-text-secondary">Tipo de egreso *</label>
-            <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+            <select value={egType} onChange={e => setEgType(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
               <option value="">Seleccionar tipo</option>
-              <option value="proveedor">Pago a proveedor</option>
-              <option value="reembolso">Reembolso</option>
-              <option value="ajuste">Ajuste de caja</option>
+              <option value="Pago a proveedor">Pago a proveedor</option>
+              <option value="Reembolso">Reembolso</option>
+              <option value="Ajuste de caja">Ajuste de caja</option>
             </select>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-text-secondary">Concepto *</label>
-            <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="Descripción del egreso" />
+            <input type="text" value={egConcept} onChange={e => setEgConcept(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="Descripción del egreso" />
           </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">Monto *</label>
-            <input type="number" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="0.00" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Monto *</label>
+              <input type="number" min="0" step="0.01" value={egAmount} onChange={e => setEgAmount(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="0.00" />
+            </div>
+            {egCurrency === 'PEN' && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-secondary">TC (S/ por USD) *</label>
+                <input type="number" min="0" step="0.001" value={egTC} onChange={e => setEgTC(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Comprobante *</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
-                <option value="factura">Factura</option>
-                <option value="boleta">Boleta</option>
-                <option value="recibo">Recibo</option>
+              <select value={egDocType} onChange={e => setEgDocType(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
+                <option value="Factura">Factura</option>
+                <option value="Boleta">Boleta</option>
+                <option value="Recibo">Recibo</option>
               </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">N° Comprobante *</label>
-              <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">Foto / Evidencia *</label>
-            <div className="w-full h-24 border-2 border-dashed border-border-soft rounded-xl flex items-center justify-center text-sm text-text-muted hover:bg-surface-muted transition-colors cursor-pointer">
-              Click para subir archivo
+              <input type="text" value={egDocNumber} onChange={e => setEgDocNumber(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
           </div>
         </div>
@@ -467,7 +569,7 @@ export function Cash() {
                 >
                   <option value="">Seleccionar artículo...</option>
                   {sellableItems.map(i => (
-                    <option key={i.id} value={i.id}>{i.name} - {currency === 'PEN' ? 'S/' : '$'} {i.salePrice}</option>
+                    <option key={i.id} value={i.id}>{i.name} - {(() => { const pr = getCurrentPrice(itemPrices, i.id, selectedBranchId || 'all'); return pr ? `$ ${pr.amount.toFixed(2)}` : 'sin precio'; })()}</option>
                   ))}
                 </select>
               </div>
@@ -486,7 +588,7 @@ export function Cash() {
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-text-secondary">Precio Unit.</label>
                   <div className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm flex items-center text-text-muted">
-                    {selectedItem?.salePrice || '0.00'}
+                    $ {unitPrice.toFixed(2)}
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -519,6 +621,28 @@ export function Cash() {
                 <option value="Yape/Plin">Yape / Plin</option>
                 <option value="Tarjeta">Tarjeta Débito/Crédito</option>
               </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Cobro en *</label>
+              <div className="flex gap-2">
+                <select
+                  className="flex-1 h-10 bg-surface border border-border-soft rounded-xl px-2 text-sm focus:border-primary-accent outline-none"
+                  value={saleCurrency}
+                  onChange={(e) => setSaleCurrency(e.target.value as 'USD' | 'PEN')}
+                >
+                  <option value="USD">USD (Dólares)</option>
+                  <option value="PEN">PEN (Soles)</option>
+                </select>
+                {saleCurrency === 'PEN' && (
+                  <input
+                    type="number" min="0" step="0.001"
+                    className="w-28 h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                    placeholder="TC"
+                    value={saleTC}
+                    onChange={(e) => setSaleTC(e.target.value)}
+                  />
+                )}
+              </div>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Comprobante *</label>
@@ -555,8 +679,13 @@ export function Cash() {
 
           <div className="bg-primary-accent/5 border border-primary-accent/20 rounded-xl p-4 flex justify-between items-center">
             <span className="text-sm font-bold text-text-primary uppercase tracking-wider">Total a Pagar</span>
-            <span className="text-2xl font-black text-primary-accent">
-              {currency === 'PEN' ? 'S/' : '$'} {totalAmount.toFixed(2)}
+            <span className="text-2xl font-black text-primary-accent text-right">
+              $ {totalAmount.toFixed(2)}
+              {saleCurrency === 'PEN' && parseFloat(saleTC) > 0 && (
+                <span className="block text-sm font-semibold text-text-secondary">
+                  S/ {(totalAmount * parseFloat(saleTC)).toFixed(2)} (TC {saleTC})
+                </span>
+              )}
             </span>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
-import { Search, Filter, Plus, Download, Package, AlertTriangle, History, ArrowRight, ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { Search, Filter, Plus, Download, Package, AlertTriangle, History, ArrowRight, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 
@@ -18,6 +18,7 @@ export function Stock() {
   const [isEditMinStockOpen, setIsEditMinStockOpen] = useState(false);
   const [selectedStock, setSelectedStock] = useState<any>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -123,6 +124,16 @@ export function Stock() {
           </Button>
         </div>
       </div>
+
+      {actionError && (
+        <div className="mb-4 bg-danger-tint/50 border border-danger-text/20 rounded-xl p-3 flex items-start gap-2 text-sm text-danger-text">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-danger-text/70 hover:text-danger-text">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -578,7 +589,8 @@ export function Stock() {
             <Button variant="ghost" onClick={() => setIsUnpackOpen(false)}>Cancelar</Button>
             <Button variant="primary" onClick={() => {
               if (selectedStock) {
-                unpackPackage(selectedStock.id);
+                const res = unpackPackage(selectedStock.id);
+                setActionError(res.ok ? null : res.error || 'No se pudo desempaquetar.');
                 setIsUnpackOpen(false);
               }
             }}>Confirmar desempaquetado</Button>
@@ -622,7 +634,8 @@ export function Stock() {
             <Button variant="ghost" onClick={() => setIsPackOpen(false)}>Cancelar</Button>
             <Button variant="primary" onClick={() => {
               if (selectedStock) {
-                packPackage(selectedStock.id);
+                const res = packPackage(selectedStock.id);
+                setActionError(res.ok ? null : res.error || 'No se pudo empaquetar.');
                 setIsPackOpen(false);
               }
             }}>Confirmar empaquetado</Button>
@@ -687,7 +700,7 @@ export function Stock() {
                   const item = items.find(i => i.id === selectedStock.itemId);
                   const branch = branches.find(b => b.id === selectedStock.branchId);
 
-                  addAdjustment({
+                  const res = addAdjustment({
                     branch: branch?.name || 'Desconocida',
                     material: item?.name || 'Artículo desconocido',
                     type: finalType,
@@ -695,6 +708,7 @@ export function Stock() {
                     reason: reasonInput.value || 'Ajuste manual desde Stock',
                     observation: 'Registro generado desde el módulo de Stock'
                   }, selectedStock.id);
+                  setActionError(res.ok ? null : res.error || 'No se pudo registrar el ajuste.');
                   
                   setIsAdjustOpen(false);
                 }

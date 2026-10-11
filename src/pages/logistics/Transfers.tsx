@@ -253,7 +253,12 @@ export function Transfers() {
     });
 
     // Change status to En tránsito (this triggers stock deduction in DataContext)
-    updateTransferStatus(selectedTransfer.id, 'En tránsito');
+    const dispatch = updateTransferStatus(selectedTransfer.id, 'En tránsito');
+    if (!dispatch.ok) {
+      setIsSummaryOpen(false);
+      setFormError(dispatch.error || 'No se pudo despachar la transferencia.');
+      return;
+    }
 
     setIsSummaryOpen(false);
     setIsPreparationOpen(false);

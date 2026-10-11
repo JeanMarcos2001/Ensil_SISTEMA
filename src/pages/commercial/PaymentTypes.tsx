@@ -6,12 +6,18 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
-import { useData, PaymentType } from '../../context/DataContext';
-import { Search, Plus, CreditCard, Calendar, X } from 'lucide-react';
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { useData, PaymentType, ScheduleMode } from '../../context/DataContext';
+import { resolveScheduleMode } from '../../utils/tariffs';
+import { Search, Plus, CreditCard, Calendar, AlertCircle } from 'lucide-react';
+
+const SCHEDULE_MODE_LABELS: Record<ScheduleMode, string> = {
+  inmediato: 'Pago inmediato',
+  intervalo_fijo: 'Cuotas con intervalo fijo',
+  fechas_manuales: 'Fechas manuales',
+};
 
 export function PaymentTypes() {
-  const { paymentTypes, programs, addPaymentType, updatePaymentType, deletePaymentType } = useData();
+  const { paymentTypes, addPaymentType, updatePaymentType, deletePaymentType } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | null>(null);
@@ -39,16 +45,15 @@ export function PaymentTypes() {
     setConfirmConfig({ ...config, isOpen: true });
   };
 
+  const [formError, setFormError] = useState<string | null>(null);
+
   // Form State
   const [formData, setFormData] = useState({
     code: '',
     name: '',
     installments: 1,
     termDays: 30,
-    allowPartial: false,
-    maxPartials: 2,
-    applicablePrograms: [] as string[],
-    applyToAllPrograms: true,
+    scheduleMode: 'intervalo_fijo' as ScheduleMode,
     status: 'Activo' as 'Activo' | 'Inactivo',
     description: ''
   });
@@ -60,10 +65,7 @@ export function PaymentTypes() {
         name: selectedPaymentType.name,
         installments: selectedPaymentType.installments,
         termDays: selectedPaymentType.termDays,
-        allowPartial: selectedPaymentType.allowPartial,
-        maxPartials: selectedPaymentType.maxPartials || 2,
-        applicablePrograms: selectedPaymentType.applicablePrograms,
-        applyToAllPrograms: selectedPaymentType.applicablePrograms.length === programs.length,
+        scheduleMode: resolveScheduleMode(selectedPaymentType),
         status: selectedPaymentType.status,
         description: selectedPaymentType.description || ''
       });
@@ -73,17 +75,15 @@ export function PaymentTypes() {
         name: '',
         installments: 1,
         termDays: 30,
-        allowPartial: false,
-        maxPartials: 2,
-        applicablePrograms: programs.map(p => p.id),
-        applyToAllPrograms: true,
+        scheduleMode: 'intervalo_fijo',
         status: 'Activo',
         description: ''
       });
     }
-  }, [selectedPaymentType, programs]);
+  }, [selectedPaymentType]);
 
   const handleOpenForm = (paymentType?: PaymentType, readOnly = false) => {
+    setFormError(null);
     setSelectedPaymentType(paymentType || null);
     setIsReadOnly(readOnly);
     setIsFormOpen(true);
@@ -98,29 +98,34 @@ export function PaymentTypes() {
     });
   };
 
-  const shouldReduceMotion = useReducedMotion();
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
-    
+    setFormError(null);
+
+    if (formData.scheduleMode === 'inmediato' && formData.installments !== 1) {
+      setFormError('El pago inmediato tiene una sola obligación.');
+      return;
+    }
+    if (formData.scheduleMode !== 'inmediato' && formData.installments < 2) {
+      setFormError('Esta modalidad requiere al menos 2 obligaciones.');
+      return;
+    }
+    if (formData.scheduleMode === 'intervalo_fijo' && formData.termDays < 1) {
+      setFormError('El intervalo entre cuotas debe ser de al menos 1 día.');
+      return;
+    }
+
+    const dataToSave = {
+      ...formData,
+      termDays: formData.scheduleMode === 'inmediato' ? 0 : formData.termDays,
+    };
     if (selectedPaymentType) {
-      updatePaymentType(selectedPaymentType.id, formData);
+      updatePaymentType(selectedPaymentType.id, dataToSave);
     } else {
-      addPaymentType(formData);
+      addPaymentType(dataToSave);
     }
     setIsFormOpen(false);
-  };
-
-  const toggleProgram = (programId: string) => {
-    setFormData(prev => {
-      const isApplicable = prev.applicablePrograms.includes(programId);
-      if (isApplicable) {
-        return { ...prev, applicablePrograms: prev.applicablePrograms.filter(id => id !== programId) };
-      } else {
-        return { ...prev, applicablePrograms: [...prev.applicablePrograms, programId] };
-      }
-    });
   };
 
   const filteredPaymentTypes = paymentTypes.filter(pt => {
@@ -193,9 +198,9 @@ export function PaymentTypes() {
               <tr>
                 <th className="px-6 py-3 font-medium">Código</th>
                 <th className="px-6 py-3 font-medium">Nombre</th>
-                <th className="px-6 py-3 font-medium">Cuotas</th>
-                <th className="px-6 py-3 font-medium">Plazo</th>
-                <th className="px-6 py-3 font-medium">Parciales</th>
+                <th className="px-6 py-3 font-medium">Obligaciones</th>
+                <th className="px-6 py-3 font-medium">Intervalo</th>
+                <th className="px-6 py-3 font-medium">Modalidad</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -216,11 +221,11 @@ export function PaymentTypes() {
                   <td className="px-6 py-3 text-text-secondary">
                     <div className="flex items-center gap-1.5">
                       <Calendar size={14} className="text-text-muted" />
-                      {row.termDays > 0 ? `${row.termDays} días` : 'N/A'}
+                      {resolveScheduleMode(row) === 'intervalo_fijo' && row.termDays > 0 ? `${row.termDays} días` : 'N/A'}
                     </div>
                   </td>
                   <td className="px-6 py-3 text-text-secondary">
-                    {row.allowPartial ? `Sí (Máx ${row.maxPartials})` : 'No'}
+                    {SCHEDULE_MODE_LABELS[resolveScheduleMode(row)]}
                   </td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
@@ -330,6 +335,12 @@ export function PaymentTypes() {
         }
       >
         <form onSubmit={handleSubmit} className="pb-4">
+          {formError && (
+            <div className="mb-6 bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex items-center gap-3 text-danger-text text-sm font-medium">
+              <AlertCircle size={16} />
+              <p>{formError}</p>
+            </div>
+          )}
           <fieldset disabled={isReadOnly} className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-8">
             {/* Columna Izquierda */}
             <div className="space-y-6">
@@ -359,171 +370,80 @@ export function PaymentTypes() {
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-primary">Modalidad del cronograma <span className="text-error">*</span></label>
+                <select
+                  value={formData.scheduleMode}
+                  onChange={(e) => {
+                    const mode = e.target.value as ScheduleMode;
+                    setFormData(prev => ({
+                      ...prev,
+                      scheduleMode: mode,
+                      installments: mode === 'inmediato' ? 1 : Math.max(prev.installments, 2),
+                      termDays: mode === 'inmediato' ? 0 : (prev.termDays || 30),
+                    }));
+                  }}
+                  className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                >
+                  {(Object.keys(SCHEDULE_MODE_LABELS) as ScheduleMode[]).map(m => (
+                    <option key={m} value={m}>{SCHEDULE_MODE_LABELS[m]}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-text-muted">
+                  {formData.scheduleMode === 'inmediato' && 'Una obligación que se paga al momento (Contado).'}
+                  {formData.scheduleMode === 'intervalo_fijo' && 'Cuotas separadas por un intervalo exacto de días (Plan 3, 6, 9…).'}
+                  {formData.scheduleMode === 'fechas_manuales' && 'Obligaciones con fechas acordadas (Contado en 2 partes).'}
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Cantidad de cuotas <span className="text-error">*</span></label>
-                  <input 
-                    type="number" 
-                    min="1" 
+                  <label className="text-sm font-medium text-text-primary">Cantidad de obligaciones <span className="text-error">*</span></label>
+                  <input
+                    type="number"
+                    min="1"
                     required
+                    disabled={formData.scheduleMode === 'inmediato'}
                     value={formData.installments}
                     onChange={(e) => setFormData(prev => ({ ...prev, installments: parseInt(e.target.value) || 1 }))}
-                    className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
-                    placeholder="1" 
+                    className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent disabled:bg-surface-muted disabled:text-text-muted"
+                    placeholder="1"
                   />
-                  <p className="text-xs text-text-muted">1 para contado; 2, 3, 6, 9 según plan.</p>
+                  <p className="text-xs text-text-muted">Sin contar la matrícula, que se define en el Tarifario.</p>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Plazo entre cuotas <span className="text-error">*</span></label>
-                  <div className="relative">
-                    <input 
-                      type="number" 
-                      min="0" 
-                      required
-                      value={formData.termDays}
-                      onChange={(e) => setFormData(prev => ({ ...prev, termDays: parseInt(e.target.value) || 0 }))}
-                      className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-3 pr-12 text-sm focus:outline-none focus:border-primary-accent" 
-                      placeholder="30" 
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">días</span>
+                {formData.scheduleMode === 'intervalo_fijo' && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-text-primary">Intervalo entre cuotas <span className="text-error">*</span></label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={formData.termDays}
+                        onChange={(e) => setFormData(prev => ({ ...prev, termDays: parseInt(e.target.value) || 0 }))}
+                        className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-3 pr-12 text-sm focus:outline-none focus:border-primary-accent"
+                        placeholder="30"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">días</span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
-              <div className="space-y-3">
-                <div className="p-5 bg-surface-muted/30 border border-border-soft rounded-xl space-y-5">
-                  <div className="flex items-center justify-between cursor-pointer group">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium text-text-primary group-hover:text-primary-accent transition-colors">Aplica a todos los programas</p>
-                      <p className="text-xs text-text-secondary">Define si este tipo de pago está disponible para cualquier programa.</p>
-                    </div>
-                    {!isReadOnly && (
-                      <label className="switch">
-                        <input 
-                          type="checkbox" 
-                          checked={formData.applicablePrograms.length === programs.length}
-                          onChange={(e) => {
-                            const isChecked = e.target.checked;
-                            setFormData(prev => ({ 
-                              ...prev, 
-                              applyToAllPrograms: isChecked,
-                              applicablePrograms: isChecked ? programs.map(p => p.id) : []
-                            }));
-                          }}
-                        />
-                        <span className="slider"></span>
-                      </label>
-                    )}
-                  </div>
-
-                  {formData.applicablePrograms.length !== programs.length && (
-                    <div className="pt-4 border-t border-border-soft space-y-4">
-                      <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Programas Seleccionados <span className="text-error">*</span></label>
-                      <div className="p-4 border border-border-soft rounded-xl bg-surface-muted/20 space-y-4">
-                        {/* Selected Tags */}
-                        <div className="flex flex-wrap gap-2 min-h-[32px]">
-                          <AnimatePresence mode="popLayout">
-                            {formData.applicablePrograms.map(programId => {
-                              const program = programs.find(p => p.id === programId);
-                              if (!program) return null;
-                              return (
-                                <motion.div
-                                  layout
-                                  key={program.id}
-                                  initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8, filter: "blur(4px)" }}
-                                  animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, filter: "blur(0px)" }}
-                                  exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8, filter: "blur(4px)" }}
-                                  transition={{ duration: 0.2, type: "spring", bounce: 0 }}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-accent text-white rounded-lg shadow-sm group"
-                                >
-                                  <span className="text-sm font-medium">{program.name}</span>
-                                  {!isReadOnly && (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleProgram(program.id)}
-                                      className="p-0.5 rounded-md hover:bg-white/20 transition-colors focus:outline-none focus:ring-2 focus:ring-white/50"
-                                    >
-                                      <X size={14} />
-                                    </button>
-                                  )}
-                                </motion.div>
-                              );
-                            })}
-                          </AnimatePresence>
-                          {formData.applicablePrograms.length === 0 && (
-                            <span className="text-sm text-text-muted italic py-1.5">Ningún programa seleccionado</span>
-                          )}
-                        </div>
-
-                        {/* Available Programs to Add */}
-                        {!isReadOnly && formData.applicablePrograms.length < programs.length && (
-                          <div className="pt-3 border-t border-border-soft/50">
-                            <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2 font-medium">Programas Disponibles</p>
-                            <div className="flex flex-wrap gap-2">
-                              <AnimatePresence mode="popLayout">
-                                {programs.filter(p => !formData.applicablePrograms.includes(p.id)).map(program => (
-                                  <motion.button
-                                    layout
-                                    key={program.id}
-                                    initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
-                                    animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
-                                    exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
-                                    transition={{ duration: 0.2 }}
-                                    type="button"
-                                    onClick={() => toggleProgram(program.id)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border-soft text-text-secondary rounded-lg hover:border-primary-accent hover:text-primary-accent transition-colors shadow-sm"
-                                  >
-                                    <Plus size={14} />
-                                    <span className="text-sm font-medium">{program.name}</span>
-                                  </motion.button>
-                                ))}
-                              </AnimatePresence>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
 
             {/* Columna Derecha */}
             <div className="space-y-6">
-              <div className="p-5 bg-surface-muted/30 border border-border-soft rounded-xl space-y-5">
-                <h4 className="text-sm font-bold text-text-primary">Pagos Parciales</h4>
-                
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between cursor-pointer group">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium text-text-primary group-hover:text-primary-accent transition-colors">Permite pago parcial</p>
-                      <p className="text-xs text-text-secondary">Recomendado Sí para cuotas; No para contado puro.</p>
-                    </div>
-                    <label className="switch">
-                      <input 
-                        type="checkbox" 
-                        checked={formData.allowPartial}
-                        onChange={(e) => setFormData(prev => ({ ...prev, allowPartial: e.target.checked }))}
-                      />
-                      <span className="slider"></span>
-                    </label>
-                  </div>
-
-                  {formData.allowPartial && (
-                    <div className="space-y-1.5 pt-2">
-                      <label className="text-sm font-medium text-text-primary">Máximo parciales por cuota <span className="text-error">*</span></label>
-                      <input 
-                        type="number" 
-                        min="1" 
-                        required
-                        value={formData.maxPartials}
-                        onChange={(e) => setFormData(prev => ({ ...prev, maxPartials: parseInt(e.target.value) || 1 }))}
-                        className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
-                        placeholder="2" 
-                      />
-                    </div>
-                  )}
-                </div>
+              <div className="p-5 bg-info-tint/40 border border-border-soft rounded-xl space-y-2">
+                <h4 className="text-sm font-bold text-text-primary">Cuotas y partes de pago</h4>
+                <p className="text-xs text-text-secondary">
+                  Una <strong>cuota</strong> es una obligación programada en el tiempo. Una <strong>parte de pago</strong> es una fracción de
+                  un mismo pago hecho en el mismo momento (por ejemplo, una parte por Yape y otra en efectivo).
+                  Las partes se registran en el pago, no en el tipo de pago.
+                </p>
+                <p className="text-xs text-text-secondary">
+                  Qué programas y niveles pueden usar este tipo de pago lo define el <strong>Tarifario</strong>.
+                </p>
               </div>
 
               <div className="space-y-1.5">

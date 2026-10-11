@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
+import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
+import { nextSequentialId } from '../utils/ids';
 
 // Types
 export interface Guardian {
@@ -9,6 +11,13 @@ export interface Guardian {
   email: string;
   parentesco?: string;
   direccion?: string;
+  // Datos del registro de matrícula (asistente)
+  docType?: string;
+  names?: string;
+  lastNameP?: string;
+  lastNameM?: string;
+  birthDate?: string;
+  civilStatus?: string;
   students: number;
   enrollments: number;
   balance: string;
@@ -26,6 +35,17 @@ export interface Student {
   fechaInicio?: string;
   titular: string;
   status: string;
+  // Datos del registro de matrícula (asistente)
+  docType?: string;
+  names?: string;
+  lastNameP?: string;
+  lastNameM?: string;
+  birthDate?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  guardianIds?: string[];
+  relationship?: string; // parentesco con el titular; vacío si es independiente
 }
 
 export interface Enrollment {
@@ -47,6 +67,34 @@ export interface Enrollment {
   verificationDate?: string;
   verifier?: string;
   verificationObservation?: string;
+
+  // Datos del registro de matrícula (asistente)
+  studentId?: string;
+  guardianIds?: string[];
+  dateISO?: string;
+  asesorId?: string;
+  origenId?: string;
+  observation?: string;
+  planId?: string;
+  paymentTypeId?: string;
+  paymentTypeName?: string;
+  tariffId?: string;
+  tariffName?: string;
+  assignedPrice?: number; // costo asignado (USD), con promoción si aplica
+  promotionGroupId?: string;
+  createdAt?: string;
+  createdBy?: string;
+}
+
+/** Grupo promocional: alumnos que comparten una promoción y UN único pago. */
+export interface PromotionGroup {
+  id: string;
+  promotionId: string;
+  currency: 'PEN' | 'USD';
+  totalPrice: number;
+  /** Costo asignado por alumno/matrícula (reparto interno). `studentKey` es la clave del alumno en el registro; luego se enlaza con la matrícula. */
+  allocations: { studentKey: string; enrollmentId?: string; amount: number }[];
+  paymentId?: string; // Pago grupal único
 }
 
 export interface Plan {
@@ -61,6 +109,22 @@ export interface Plan {
   installments: any[];
 }
 
+/**
+ * Parte de un MISMO pago realizado en el mismo momento (p. ej. una parte por Yape y otra en efectivo).
+ * No es una cuota: las cuotas son obligaciones programadas de un plan.
+ */
+export interface PaymentPart {
+  id: string;
+  currency: 'PEN' | 'USD';
+  amount: number;
+  exchangeRate?: number; // TC: obligatorio si currency === 'PEN' y la obligación está en USD
+  method: string;
+  bank?: string;
+  operationNumber?: string;
+  evidence?: string;
+  note?: string;
+}
+
 export interface Payment {
   id: string;
   date: string;
@@ -70,6 +134,34 @@ export interface Payment {
   method: string;
   receipt: string;
   status: string;
+  parts?: PaymentPart[]; // Estructura para la integración del asistente (etapa 5)
+  currency?: 'PEN' | 'USD'; // Moneda de la obligación que cubre el pago
+  promotionGroupId?: string; // Pago grupal: un único pago para todas las matrículas del grupo
+  enrollmentIds?: string[]; // Matrículas cubiertas por este pago
+}
+
+/**
+ * Movimiento de caja. Cada parte de un pago es dinero real en SU moneda (PEN o USD); el equivalente en USD
+ * se calcula con el tipo de cambio de la parte. La configuración comercial siempre es USD.
+ */
+export interface CashMovement {
+  id: string;
+  date: string; // ISO datetime
+  kind: 'Ingreso' | 'Egreso';
+  concept: string;
+  reference: string; // matrícula / alumno / comprobante
+  currency: 'PEN' | 'USD'; // caja en la que se registra
+  amount: number; // en la moneda de la caja
+  exchangeRate?: number;
+  amountUSD: number; // equivalente en USD
+  method: string;
+  bank?: string;
+  operationNumber?: string;
+  branchId?: string;
+  user: string;
+  paymentId?: string;
+  enrollmentIds?: string[];
+  status: 'Aplicado' | 'Reversado';
 }
 
 export type ItemType = 'Material educativo' | 'Herramienta / adicional' | 'Libro' | 'Paquete / kit logístico';
@@ -83,7 +175,9 @@ export interface Item {
   unit: string;
   cost: number;
   isSold: boolean;
+  /** @deprecated El precio de venta vive en `ItemPrice` (general o por sede, con vigencia e historial). */
   salePrice?: number;
+  /** Habilita el artículo para ser elegido dentro de una Receta de matrícula. NO lo entrega automáticamente a todo alumno. */
   isDeliveredOnEnrollment: boolean;
   isPackage: boolean;
   allowUnpacking: boolean;
@@ -97,9 +191,26 @@ export interface Item {
 
   // Libro
   bookType?: 'Individual' | 'Paquete/Juego';
+  /** Obligatorio para libros. Anillado: normalmente material de programa. Encolado: puede ser vendible. */
+  bindingType?: 'Anillado' | 'Encolado';
 
   // Paquete
   composition?: { itemId: string; name: string; quantity: number }[];
+}
+
+/**
+ * Precio de venta de un artículo (USD). Un precio general (`branchId: 'all'`) y/o excepciones por sede.
+ * Cambiar un precio crea una nueva vigencia; no se sobrescribe el histórico.
+ */
+export interface ItemPrice {
+  id: string;
+  itemId: string;
+  branchId: string; // 'all' o id de sede
+  amount: number; // USD
+  validFrom: string; // YYYY-MM-DD
+  validTo?: string; // YYYY-MM-DD; vacío = vigente hasta nueva vigencia
+  createdAt: string;
+  createdBy: string;
 }
 
 export interface StockItem {
@@ -263,7 +374,14 @@ export interface Promotion {
   name: string;
   type: 'Grupal';
   requiredStudents: number;
-  composition: PromotionComposition[];
+  /** Programas/familias elegibles (cualquier combinación de ellos con la cantidad requerida). */
+  eligibleProgramIds?: string[];
+  /** Precio contado/base que debe tener el tarifario vigente de CADA alumno (en la moneda de la promoción). Vacío = sin condición de precio. */
+  requiredBasePrice?: number;
+  /** Permite formar varios grupos con los alumnos del mismo registro (cada alumno solo en un grupo). */
+  allowMultipleGroups?: boolean;
+  /** @deprecated Composición rígida (p. ej. PreKids x1 + Kids x1). Solo se usa si la promoción no define `eligibleProgramIds`. */
+  composition?: PromotionComposition[];
   paymentTypeIds: string[];
   totalPrice: number;
   currency: 'PEN' | 'USD';
@@ -494,42 +612,68 @@ export interface Level {
   description?: string;
 }
 
+/**
+ * Modalidad del cronograma:
+ * - inmediato: una obligación, pago al momento (Contado).
+ * - intervalo_fijo: n cuotas separadas por `termDays` días exactos (Plan 3, 6, 9...).
+ * - fechas_manuales: n obligaciones cuyas fechas se acuerdan (Contado en 2 partes).
+ */
+export type ScheduleMode = 'inmediato' | 'intervalo_fijo' | 'fechas_manuales';
+
 export interface PaymentType {
   id: string;
   code: string;
   name: string;
-  installments: number;
-  termDays: number;
-  allowPartial: boolean;
+  installments: number; // N° de obligaciones del cronograma
+  termDays: number; // Intervalo en días (solo intervalo_fijo)
+  scheduleMode?: ScheduleMode; // Si falta: 1 obligación = inmediato; >1 = intervalo_fijo
+  /** @deprecated Las partes de un pago pertenecen al registro de pago (`Payment.parts`), no al tipo de pago. */
+  allowPartial?: boolean;
+  /** @deprecated Ver `allowPartial`. */
   maxPartials?: number;
-  applicablePrograms: string[]; // IDs of programs
+  /** @deprecated La relación Programa/Nivel + Tipo de pago se resuelve mediante el Tarifario. Sin consumidores; se conserva solo por compatibilidad con datos antiguos. */
+  applicablePrograms?: string[];
   status: 'Activo' | 'Inactivo';
   description?: string;
 }
 
 export interface TariffInstallment {
-  number: number;
+  number: number; // 0 = Matrícula; 1..n = cuotas/partes
   concept: string;
-  amount: number;
+  amount: number; // En líneas `variable`, el monto se define al cobrar (queda en 0)
   dueDays: number;
+  kind?: 'matricula' | 'cuota' | 'unica' | 'parte';
+  variable?: boolean;
 }
 
 export interface Tariff {
   id: string;
   name: string;
   programId: string;
+  levelId?: string; // Opcional: solo si el programa usa niveles; vacío = aplica a todos los niveles
   paymentTypeId: string;
   branchId: string; // 'all' or specific ID
   currency: 'PEN' | 'USD';
   basePrice: number;
-  includesEnrollment: boolean;
+  /** @deprecated La matrícula es una línea del desglose (`installments`, kind 'matricula'). */
+  includesEnrollment?: boolean;
+  /** @deprecated Ver `includesEnrollment`. */
   enrollmentValue?: number;
-  includesMaterials: boolean;
+  /** @deprecated Los materiales se resuelven por Programa/Nivel → Receta → Catálogo; no afectan precio ni cálculos. */
+  includesMaterials?: boolean;
+  /** @deprecated Ver `includesMaterials`. */
   materialsValue?: number;
+  /** Fuente de verdad del total: `basePrice` es la suma de estas líneas (salvo cronogramas con montos variables). */
   installments: TariffInstallment[];
   startDate: string;
   endDate?: string;
   status: 'Activo' | 'Inactivo';
+}
+
+/** Resultado de una operación que mueve stock. `ok: false` = no se aplicó ningún cambio. */
+export interface StockResult {
+  ok: boolean;
+  error?: string;
 }
 
 interface DataContextType {
@@ -541,6 +685,11 @@ interface DataContextType {
   items: Item[];
   setItems: React.Dispatch<React.SetStateAction<Item[]>>;
   stockItems: StockItem[];
+  cashMovements: CashMovement[];
+  addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
+  promotionGroups: PromotionGroup[];
+  itemPrices: ItemPrice[];
+  addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => { ok: boolean; error?: string };
   kardex: KardexEntry[];
   transfers: Transfer[];
   setTransfers: React.Dispatch<React.SetStateAction<Transfer[]>>;
@@ -549,7 +698,7 @@ interface DataContextType {
   shippingMethods: ShippingMethod[];
   setShippingMethods: React.Dispatch<React.SetStateAction<ShippingMethod[]>>;
   adjustments: Adjustment[];
-  addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => void;
+  addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => StockResult;
   schedules: Schedule[];
   counselings: Counseling[];
   trackings: Tracking[];
@@ -583,11 +732,11 @@ interface DataContextType {
   promotions: Promotion[];
   recipes: Recipe[];
   setRecipes: React.Dispatch<React.SetStateAction<Recipe[]>>;
-  unpackPackage: (stockId: string) => void;
-  packPackage: (stockId: string) => void;
-  updateStock: (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string) => void;
+  unpackPackage: (stockId: string) => StockResult;
+  packPackage: (stockId: string) => StockResult;
+  updateStock: (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string) => StockResult;
   updateMinStock: (stockId: string, minStock: number) => void;
-  updateTransferStatus: (id: string, status: Transfer['status']) => void;
+  updateTransferStatus: (id: string, status: Transfer['status']) => StockResult;
   updateTransfer: (id: string, transfer: Partial<Transfer>) => void;
   addTransfer: (transfer: Omit<Transfer, 'id'>) => void;
   addStaff: (staff: Omit<Staff, 'id'>) => void;
@@ -599,7 +748,8 @@ interface DataContextType {
   addGuardian: (guardian: Omit<Guardian, 'id'>) => void;
   updateGuardian: (id: string, guardian: Partial<Guardian>) => void;
   deleteGuardian: (id: string) => void;
-  addEnrollmentFlow: (data: any) => void;
+  /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
+  registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
   addTracking: (tracking: Omit<Tracking, 'id'>) => void;
   registerPayment: (planId: string, installmentId: string, paymentData: any) => void;
   refinanceInstallment: (planId: string, installmentId: string, refinanceData: any) => void;
@@ -634,9 +784,9 @@ interface DataContextType {
   isEnrollmentWizardOpen: boolean;
   setIsEnrollmentWizardOpen: (isOpen: boolean) => void;
   shipments: Shipment[];
-  addShipment: (shipment: Omit<Shipment, 'id'>) => void;
-  updateShipmentStatus: (id: string, status: Shipment['status'], observation?: string) => void;
-  updateShipment: (id: string, shipment: Partial<Shipment>) => void;
+  addShipment: (shipment: Omit<Shipment, 'id'>) => StockResult & { id?: string };
+  updateShipmentStatus: (id: string, status: Shipment['status'], observation?: string) => StockResult;
+  updateShipment: (id: string, shipment: Partial<Shipment>) => StockResult;
   deleteShipment: (id: string) => void;
   notifications: Notification[];
   addNotification: (notification: Omit<Notification, 'id' | 'date' | 'read'>) => void;
@@ -742,7 +892,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       isDeliveredOnEnrollment: true,
       isPackage: false,
       allowUnpacking: false,
-      bookType: 'Individual'
+      bookType: 'Individual',
+      bindingType: 'Encolado'
     },
     { 
       id: 'ITM-MAT-01', 
@@ -808,11 +959,37 @@ export function DataProvider({ children }: { children: ReactNode }) {
     },
   ]);
 
+  const [cashMovements, setCashMovements] = useState<CashMovement[]>([
+    { id: 'CJ-001', date: '2026-10-09T10:30:00.000Z', kind: 'Ingreso', concept: 'Ingreso Cuota', reference: 'PLN-001 / Juan Ruiz', currency: 'PEN', amount: 1200, amountUSD: 0, method: 'Transferencia', user: 'Ana G.', status: 'Aplicado' },
+    { id: 'CJ-002', date: '2026-10-09T09:15:00.000Z', kind: 'Ingreso', concept: 'Ingreso Matrícula', reference: 'MAT-2024-002 / María Castro', currency: 'PEN', amount: 950, amountUSD: 0, method: 'Efectivo', user: 'Carlos R.', status: 'Aplicado' },
+    { id: 'CJ-003', date: '2026-10-08T17:45:00.000Z', kind: 'Egreso', concept: 'Egreso', reference: 'Pago Proveedor Limpieza', currency: 'PEN', amount: 350, amountUSD: 0, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
+  ]);
+  const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
+
+  const addCashMovement = (m: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }): CashMovement => {
+    const created: CashMovement = {
+      ...m,
+      id: `CJ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: m.date ?? new Date().toISOString(),
+      user: currentUser.name,
+      status: 'Aplicado',
+    };
+    setCashMovements(prev => [created, ...prev]);
+    return created;
+  };
+
+  // Precios de venta con vigencia (USD). Semilla: precios generales de los artículos vendibles.
+  const [itemPrices, setItemPrices] = useState<ItemPrice[]>([
+    { id: 'PRC-001', itemId: 'ITM-LIB-K1', branchId: 'all', amount: 60, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
+    { id: 'PRC-002', itemId: 'ITM-HER-01', branchId: 'all', amount: 45, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
+    { id: 'PRC-003', itemId: 'ITM-HER-02', branchId: 'all', amount: 10, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
+  ]);
+
   const [stockItems, setStockItems] = useState<StockItem[]>([
-    { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-PIU', stock: 150, minStock: 50 },
+    { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-PIU', stock: 100, minStock: 50 },
     { id: 'STK-002', itemId: 'ITM-MAT-01', branchId: 'FIL-PIU', stock: 50, minStock: 30 },
     { id: 'STK-003', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-PIU', stock: 25, minStock: 5 },
-    { id: 'STK-004', itemId: 'ITM-HER-01', branchId: 'FIL-PIU', stock: 60, minStock: 10 },
+    { id: 'STK-004', itemId: 'ITM-HER-01', branchId: 'FIL-PIU', stock: 40, minStock: 10 },
     { id: 'STK-005', itemId: 'ITM-HER-02', branchId: 'FIL-PIU', stock: 40, minStock: 5 },
     { id: 'STK-006', itemId: 'ITM-LIB-K1', branchId: 'FIL-CHI', stock: 85, minStock: 40 },
     { id: 'STK-007', itemId: 'ITM-HER-01', branchId: 'FIL-CHI', stock: 5, minStock: 5 },
@@ -827,6 +1004,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'KDX-003', date: '2024-03-14 16:45', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Transferencia Salida', qty: -10, prevBalance: 160, newBalance: 150, user: 'Logística Central', doc: 'TRF-2024-001' },
     { id: 'KDX-004', date: '2024-03-10 11:30', branch: 'Chiclayo', material: 'Mochila Institucional', type: 'Transferencia Entrada', qty: 5, prevBalance: 0, newBalance: 5, user: 'Logística Chiclayo', doc: 'TRF-2024-003' },
     { id: 'KDX-005', date: '2024-03-13 11:20', branch: 'Piura', material: 'Material Lógico Matemático', type: 'Ajuste Positivo', qty: 5, prevBalance: 45, newBalance: 50, user: 'Admin', doc: 'AJU-2024-001' },
+    { id: 'KDX-008', date: '2024-03-15 16:00', branch: 'Piura', material: 'Mochila Institucional', type: 'Transferencia Salida', qty: -20, prevBalance: 60, newBalance: 40, user: 'Logística Central', doc: 'ENV-2024-001', observation: 'Despacho de envío ENV-2024-001' },
+    { id: 'KDX-007', date: '2024-03-15 16:00', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Transferencia Salida', qty: -50, prevBalance: 150, newBalance: 100, user: 'Logística Central', doc: 'ENV-2024-001', observation: 'Despacho de envío ENV-2024-001' },
     { id: 'KDX-006', date: '2024-03-12 15:00', branch: 'Chiclayo', material: 'Libro Kids Nivel 1', type: 'Merma', qty: -2, prevBalance: 87, newBalance: 85, user: 'Logística Chiclayo', doc: 'MER-2024-001' },
   ]);
 
@@ -1068,16 +1247,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
 
       if (ri.quantity > 0) {
-        // Deduct from Origin (According to new rule, deduccion of stock happens AT reception)
-        updateStock(
-          doc?.originId || '',
-          ri.itemId,
-          -ri.quantity,
-          docType === 'Envío' ? 'Transferencia Salida' : 'Transferencia Salida',
-          `Despacho diferido por recepción de ${docType} ${docId}.`,
-          docId
-        );
-
+        // Regla de stock: el origen se descuenta UNA sola vez, al despachar. Aquí solo se suma lo recibido al destino.
+        // Faltantes: ya salieron del origen; quedan registrados como incidencia.
         // Add to Destination
         updateStock(
           doc?.destinationId || '',
@@ -1268,6 +1439,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: '2', code: 'PRG-PK', name: 'Pre-Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },
     { id: '3', code: 'PRG-PL', name: 'Pre-lectura', hasLevels: false, durationBase: 3, warranty: 3, allBranches: false, enabledBranches: ['FIL-PIU', 'FIL-CHI'], status: 'Activo' },
     { id: '4', code: 'PRG-ESP', name: 'Especialización', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
+    { id: '5', code: 'PRG-PROF', name: 'Profesional', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
   ]);
 
   const [levels, setLevels] = useState<Level[]>([
@@ -1278,112 +1450,132 @@ export function DataProvider({ children }: { children: ReactNode }) {
   ]);
 
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([
-    { id: '1', code: 'TP-CONT', name: 'Contado', installments: 1, termDays: 0, allowPartial: false, applicablePrograms: ['1', '2', '3', '4'], status: 'Activo' },
-    { id: '2', code: 'TP-C2P', name: 'Contado en 2 partes', installments: 2, termDays: 30, allowPartial: true, maxPartials: 2, applicablePrograms: ['1', '2'], status: 'Activo' },
-    { id: '3', code: 'TP-P3', name: 'Plan 3', installments: 3, termDays: 30, allowPartial: true, maxPartials: 2, applicablePrograms: ['1', '2'], status: 'Activo' },
-    { id: '4', code: 'TP-P6', name: 'Plan 6', installments: 6, termDays: 30, allowPartial: true, maxPartials: 2, applicablePrograms: ['1', '2'], status: 'Activo' },
+    { id: '1', code: 'TP-CONT', name: 'Contado', installments: 1, termDays: 0, scheduleMode: 'inmediato', applicablePrograms: ['1', '2', '3', '4'], status: 'Activo' },
+    { id: '2', code: 'TP-C2P', name: 'Contado en 2 partes', installments: 2, termDays: 30, scheduleMode: 'fechas_manuales', applicablePrograms: ['1', '2'], status: 'Activo' },
+    { id: '3', code: 'TP-P3', name: 'Plan 3', installments: 3, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['1', '2'], status: 'Activo' },
+    { id: '4', code: 'TP-P6', name: 'Plan 6', installments: 6, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['1', '2'], status: 'Activo' },
+    { id: '5', code: 'TP-P9', name: 'Plan 9', installments: 9, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['5'], status: 'Activo' },
   ]);
 
   const [tariffs, setTariffs] = useState<Tariff[]>([
-    { 
-      id: '1', name: 'Kids - Contado 2024', programId: '1', paymentTypeId: '1', branchId: 'all', currency: 'PEN', basePrice: 1200, 
-      includesEnrollment: true, includesMaterials: true, 
+    {
+      id: '1', name: 'Kids - Contado 2026', programId: '1', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 500,
       installments: [
-        { number: 1, concept: 'Cuota Única', amount: 1200, dueDays: 0 }
-      ], 
-      startDate: '2024-01-01', endDate: '2024-12-31', status: 'Activo' 
+        { number: 1, concept: 'Pago único', amount: 500, dueDays: 0, kind: 'unica' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
     },
-    { 
-      id: '2', name: 'Kids - Plan 6 2024', programId: '1', paymentTypeId: '4', branchId: 'all', currency: 'PEN', basePrice: 1500, 
-      includesEnrollment: true, includesMaterials: true, 
+    {
+      // Contado en 2 partes: en matrícula solo se acuerdan las fechas; el monto de la parte 1 se registra al cobrar en Planes y la parte 2 es el saldo.
+      id: '2', name: 'Kids - Contado en 2 partes 2026', programId: '1', paymentTypeId: '2', branchId: 'all', currency: 'USD', basePrice: 500,
       installments: [
-        { number: 1, concept: 'Cuota 1', amount: 250, dueDays: 0 },
-        { number: 2, concept: 'Cuota 2', amount: 250, dueDays: 30 },
-        { number: 3, concept: 'Cuota 3', amount: 250, dueDays: 60 },
-        { number: 4, concept: 'Cuota 4', amount: 250, dueDays: 90 },
-        { number: 5, concept: 'Cuota 5', amount: 250, dueDays: 120 },
-        { number: 6, concept: 'Cuota 6', amount: 250, dueDays: 150 },
-      ], 
-      startDate: '2024-01-01', endDate: '2024-12-31', status: 'Activo' 
+        { number: 1, concept: 'Parte 1', amount: 0, dueDays: 0, kind: 'parte', variable: true },
+        { number: 2, concept: 'Parte 2 (saldo)', amount: 0, dueDays: 30, kind: 'parte', variable: true }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
     },
-    { 
-      id: '3', name: 'Pre-Kids - Contado', programId: '2', paymentTypeId: '1', branchId: 'FIL-001', currency: 'PEN', basePrice: 800, 
-      includesEnrollment: true, includesMaterials: true, 
+    {
+      id: '3', name: 'Pre-Kids - Contado 2026', programId: '2', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 500,
       installments: [
-        { number: 1, concept: 'Cuota Única', amount: 800, dueDays: 0 }
-      ], 
-      startDate: '2024-01-01', status: 'Activo' 
+        { number: 1, concept: 'Pago único', amount: 500, dueDays: 0, kind: 'unica' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
     },
-    { 
-      id: '4', name: 'Pre-lectura - Plan 3', programId: '3', paymentTypeId: '3', branchId: 'FIL-001', currency: 'PEN', basePrice: 900, 
-      includesEnrollment: false, enrollmentValue: 100,
-      includesMaterials: false, materialsValue: 150,
+    {
+      id: '4', name: 'Pre-lectura - Plan 3 2026', programId: '3', paymentTypeId: '3', branchId: 'all', currency: 'USD', basePrice: 1000,
       installments: [
-        { number: 1, concept: 'Cuota 1', amount: 300, dueDays: 0 },
-        { number: 2, concept: 'Cuota 2', amount: 300, dueDays: 30 },
-        { number: 3, concept: 'Cuota 3', amount: 300, dueDays: 60 }
-      ], 
-      startDate: '2024-01-01', status: 'Activo' 
+        { number: 0, concept: 'Matrícula', amount: 100, dueDays: 0, kind: 'matricula' },
+        { number: 1, concept: 'Cuota 1', amount: 300, dueDays: 0, kind: 'cuota' },
+        { number: 2, concept: 'Cuota 2', amount: 300, dueDays: 30, kind: 'cuota' },
+        { number: 3, concept: 'Cuota 3', amount: 300, dueDays: 60, kind: 'cuota' }
+      ],
+      startDate: '2026-01-01', status: 'Activo'
+    },
+    {
+      id: '5', name: 'Profesional - Contado 2026', programId: '5', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 1000,
+      installments: [
+        { number: 1, concept: 'Pago único', amount: 1000, dueDays: 0, kind: 'unica' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
+    },
+    {
+      id: '6', name: 'Profesional - Plan 3 2026', programId: '5', paymentTypeId: '3', branchId: 'all', currency: 'USD', basePrice: 1200,
+      installments: [
+        { number: 0, concept: 'Matrícula', amount: 300, dueDays: 0, kind: 'matricula' },
+        { number: 1, concept: 'Cuota 1', amount: 300, dueDays: 0, kind: 'cuota' },
+        { number: 2, concept: 'Cuota 2', amount: 300, dueDays: 30, kind: 'cuota' },
+        { number: 3, concept: 'Cuota 3', amount: 300, dueDays: 60, kind: 'cuota' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
+    },
+    {
+      id: '7', name: 'Profesional - Plan 6 2026', programId: '5', paymentTypeId: '4', branchId: 'all', currency: 'USD', basePrice: 1400,
+      installments: [
+        { number: 0, concept: 'Matrícula', amount: 200, dueDays: 0, kind: 'matricula' },
+        { number: 1, concept: 'Cuota 1', amount: 200, dueDays: 0, kind: 'cuota' },
+        { number: 2, concept: 'Cuota 2', amount: 200, dueDays: 30, kind: 'cuota' },
+        { number: 3, concept: 'Cuota 3', amount: 200, dueDays: 60, kind: 'cuota' },
+        { number: 4, concept: 'Cuota 4', amount: 200, dueDays: 90, kind: 'cuota' },
+        { number: 5, concept: 'Cuota 5', amount: 200, dueDays: 120, kind: 'cuota' },
+        { number: 6, concept: 'Cuota 6', amount: 200, dueDays: 150, kind: 'cuota' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
+    },
+    {
+      id: '8', name: 'Profesional - Plan 9 2026', programId: '5', paymentTypeId: '5', branchId: 'all', currency: 'USD', basePrice: 1500,
+      installments: [
+        { number: 0, concept: 'Matrícula', amount: 150, dueDays: 0, kind: 'matricula' },
+        { number: 1, concept: 'Cuota 1', amount: 150, dueDays: 0, kind: 'cuota' },
+        { number: 2, concept: 'Cuota 2', amount: 150, dueDays: 30, kind: 'cuota' },
+        { number: 3, concept: 'Cuota 3', amount: 150, dueDays: 60, kind: 'cuota' },
+        { number: 4, concept: 'Cuota 4', amount: 150, dueDays: 90, kind: 'cuota' },
+        { number: 5, concept: 'Cuota 5', amount: 150, dueDays: 120, kind: 'cuota' },
+        { number: 6, concept: 'Cuota 6', amount: 150, dueDays: 150, kind: 'cuota' },
+        { number: 7, concept: 'Cuota 7', amount: 150, dueDays: 180, kind: 'cuota' },
+        { number: 8, concept: 'Cuota 8', amount: 150, dueDays: 210, kind: 'cuota' },
+        { number: 9, concept: 'Cuota 9', amount: 150, dueDays: 240, kind: 'cuota' }
+      ],
+      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
     },
   ]);
 
   const [promotions, setPromotions] = useState<Promotion[]>([
     {
       id: '1',
-      code: 'PROMO-2KIDS',
-      name: '2 Kids por 700',
+      code: 'PROMO-2X700',
+      name: '2 matrículas Pre-Kids / Kids por USD 700',
       type: 'Grupal',
       requiredStudents: 2,
-      composition: [
-        { programId: '1', quantity: 2 }
-      ],
+      eligibleProgramIds: ['2', '1'], // Pre-Kids y Kids (cualquier combinación y nivel)
+      requiredBasePrice: 500, // Contado base de cada alumno
+      allowMultipleGroups: true,
       paymentTypeIds: ['1'], // Contado
       totalPrice: 700,
-      currency: 'PEN',
+      currency: 'USD',
       internalDistributionRule: 'Igualitario',
       branchIds: [],
       applyToAllBranches: true,
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
       status: 'Activo'
     },
     {
       id: '2',
-      code: 'PROMO-2PK',
-      name: '2 Pre-Kids por 700',
+      code: 'PROMO-PROF-2X1700',
+      name: '2 matrículas Profesional por USD 1700',
       type: 'Grupal',
       requiredStudents: 2,
-      composition: [
-        { programId: '2', quantity: 2 }
-      ],
+      eligibleProgramIds: ['5'],
+      requiredBasePrice: 1000,
+      allowMultipleGroups: true,
       paymentTypeIds: ['1'], // Contado
-      totalPrice: 700,
-      currency: 'PEN',
+      totalPrice: 1700,
+      currency: 'USD',
       internalDistributionRule: 'Igualitario',
       branchIds: [],
       applyToAllBranches: true,
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
-      status: 'Activo'
-    },
-    {
-      id: '3',
-      code: 'PROMO-MIX',
-      name: '1 Kids + 1 Pre-Kids por 700',
-      type: 'Grupal',
-      requiredStudents: 2,
-      composition: [
-        { programId: '1', quantity: 1 },
-        { programId: '2', quantity: 1 }
-      ],
-      paymentTypeIds: ['1'], // Contado
-      totalPrice: 700,
-      currency: 'PEN',
-      internalDistributionRule: 'Igualitario',
-      branchIds: [],
-      applyToAllBranches: true,
-      startDate: '2024-01-01',
-      endDate: '2024-12-31',
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
       status: 'Activo'
     }
   ]);
@@ -1401,8 +1593,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         { itemId: 'ITM-LIB-K1', quantity: 1 },
         { itemId: 'ITM-KIT-BIENV', quantity: 1 }
       ],
-      startDate: '2024-01-01',
-      endDate: '2024-12-31'
+      startDate: '2026-01-01',
+      endDate: '2026-12-31'
     },
     {
       id: 'REC-002',
@@ -1416,8 +1608,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         { itemId: 'ITM-LIB-K1', quantity: 1 },
         { itemId: 'ITM-MAT-01', quantity: 1 }
       ],
-      startDate: '2024-01-01',
-      endDate: '2024-12-31'
+      startDate: '2026-01-01',
+      endDate: '2026-12-31'
     }
   ]);
 
@@ -1460,70 +1652,91 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const updateStock = (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string) => {
-    setStockItems(prevStock => {
-      const existingStockIndex = prevStock.findIndex(s => s.branchId === branchId && s.itemId === itemId);
-      let newStockList = [...prevStock];
-      
-      const item = items.find(i => i.id === itemId);
-      const branch = branches.find(b => b.id === branchId);
-      const user = currentUser.name;
+  // Último estado del inventario: permite encadenar movimientos en un mismo evento y evita efectos secundarios
+  // dentro de actualizadores de estado (con StrictMode duplicaban las líneas de kardex).
+  const stockRef = useRef<StockItem[]>(stockItems);
+  stockRef.current = stockItems;
 
-      if (existingStockIndex >= 0) {
-        const currentStock = { ...newStockList[existingStockIndex] };
-        const newQty = currentStock.stock + qty;
-        
-        const newKardexEntry: KardexEntry = {
-          id: `KDX-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          date: new Date().toISOString().replace('T', ' ').slice(0, 16),
-          branch: branch?.name || branchId,
-          material: item?.name || itemId,
-          type,
-          qty,
-          prevBalance: currentStock.stock,
-          newBalance: newQty,
-          user,
-          doc: doc || 'S/N',
-          observation
-        };
-        setKardex(prevK => [newKardexEntry, ...prevK]);
-
-        currentStock.stock = newQty;
-        newStockList[existingStockIndex] = currentStock;
-      } else {
-        const newStockId = `STK-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-        const newStock: StockItem = {
-          id: newStockId,
-          itemId,
-          branchId,
-          stock: qty,
-          minStock: 0
-        };
-        
-        const newKardexEntry: KardexEntry = {
-          id: `KDX-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          date: new Date().toISOString().replace('T', ' ').slice(0, 16),
-          branch: branch?.name || branchId,
-          material: item?.name || itemId,
-          type,
-          qty,
-          prevBalance: 0,
-          newBalance: qty,
-          user,
-          doc: doc || 'S/N',
-          observation
-        };
-        setKardex(prevK => [newKardexEntry, ...prevK]);
-        
-        newStockList.push(newStock);
+  /** Primer artículo sin saldo suficiente en la sede, o `null` si hay para todos. */
+  const findInsufficientStock = (branchId: string, lines: { itemId: string; quantity: number }[]): string | null => {
+    const needed = new Map<string, number>();
+    lines.forEach(l => needed.set(l.itemId, (needed.get(l.itemId) ?? 0) + l.quantity));
+    for (const [itemId, qty] of needed) {
+      const have = stockRef.current.find(x => x.branchId === branchId && x.itemId === itemId)?.stock ?? 0;
+      if (have < qty) {
+        const name = items.find(i => i.id === itemId)?.name || itemId;
+        return `Stock insuficiente de "${name}" en ${branches.find(b => b.id === branchId)?.name || branchId}: disponible ${have}, requerido ${qty}.`;
       }
-      return newStockList;
-    });
+    }
+    return null;
   };
 
-  const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => {
-    const stock = stockItems.find(s => s.id === stockId);
-    if (!stock) return;
+  const updateStock = (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string): StockResult => {
+    const list = stockRef.current;
+    const idx = list.findIndex(x => x.branchId === branchId && x.itemId === itemId);
+    const prevBalance = idx >= 0 ? list[idx].stock : 0;
+    const newBalance = prevBalance + qty;
+
+    if (qty < 0 && newBalance < 0) {
+      const name = items.find(i => i.id === itemId)?.name || itemId;
+      return { ok: false, error: `Stock insuficiente de "${name}": disponible ${prevBalance}, se intentó descontar ${-qty}.` };
+    }
+
+    const nextList = idx >= 0
+      ? list.map((x, i) => i === idx ? { ...x, stock: newBalance } : x)
+      : [...list, { id: `STK-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, itemId, branchId, stock: newBalance, minStock: 0 }];
+
+    const entry: KardexEntry = {
+      id: `KDX-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      branch: branches.find(b => b.id === branchId)?.name || branchId,
+      material: items.find(i => i.id === itemId)?.name || itemId,
+      type,
+      qty,
+      prevBalance,
+      newBalance,
+      user: currentUser.name,
+      doc: doc || 'S/N',
+      observation
+    };
+
+    stockRef.current = nextList;
+    setStockItems(nextList);
+    setKardex(prevK => [entry, ...prevK]);
+    return { ok: true };
+  };
+
+  const addItemPrice = (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => {
+    if (!(price.amount > 0)) return { ok: false, error: 'El precio debe ser mayor a 0.' };
+    if (!price.validFrom) return { ok: false, error: 'Indique desde cuándo rige el precio.' };
+    const sameScope = itemPrices.filter(p => p.itemId === price.itemId && p.branchId === price.branchId);
+    if (sameScope.some(p => p.validFrom === price.validFrom)) {
+      return { ok: false, error: 'Ya existe un precio con esa fecha de inicio. Use una fecha posterior.' };
+    }
+    if (sameScope.some(p => p.validFrom > price.validFrom)) {
+      return { ok: false, error: 'Existe un precio con vigencia posterior. Registre el nuevo precio después de esa fecha.' };
+    }
+    const dayBefore = new Date(Date.parse(price.validFrom + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+    const newPrice: ItemPrice = {
+      id: `PRC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      ...price,
+      amount: Math.round(price.amount * 100) / 100,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+    };
+    setItemPrices(prev => [
+      // Cierra la vigencia abierta del mismo alcance en lugar de sobrescribirla
+      ...prev.map(p =>
+        p.itemId === price.itemId && p.branchId === price.branchId && !p.validTo ? { ...p, validTo: dayBefore } : p
+      ),
+      newPrice,
+    ]);
+    return { ok: true };
+  };
+
+  const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string): StockResult => {
+    const stock = stockRef.current.find(s => s.id === stockId);
+    if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
 
     const newAdjustment: Adjustment = {
       ...adjData,
@@ -1532,8 +1745,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       user: currentUser.name
     };
 
+    const result = updateStock(stock.branchId, stock.itemId, adjData.qty, adjData.type, adjData.reason, newAdjustment.id);
+    if (!result.ok) return result;
     setAdjustments(prev => [newAdjustment, ...prev]);
-    updateStock(stock.branchId, stock.itemId, adjData.qty, adjData.type, adjData.reason, newAdjustment.id);
+    return { ok: true };
   };
 
   const updateMinStock = (stockId: string, minStock: number) => {
@@ -1553,73 +1768,80 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setTransfers(prev => [newTransfer, ...prev]);
   };
 
-  const updateTransferStatus = (transferId: string, newStatus: Transfer['status']) => {
-    const transfer = transfers.find(t => t.id === transferId);
-    if (!transfer) return;
+  // Referencias al último estado: varias operaciones encadenadas en un mismo evento (p. ej. updateTransfer + updateTransferStatus)
+  // deben ver los cambios anteriores y no descontar stock dos veces ni con ítems desactualizados.
+  const transfersRef = useRef<Transfer[]>(transfers);
+  transfersRef.current = transfers;
+  const commitTransfers = (next: Transfer[]) => {
+    transfersRef.current = next;
+    setTransfers(next);
+  };
 
-    // Logic for stock deduction when dispatching
+  const updateTransferStatus = (transferId: string, newStatus: Transfer['status']): StockResult => {
+    const transfer = transfersRef.current.find(t => t.id === transferId);
+    if (!transfer) return { ok: false, error: 'Transferencia no encontrada.' };
+
+    // Regla de stock: sale del origen al DESPACHAR (una sola vez); el destino suma al RECIBIR.
     if (newStatus === 'En tránsito' && (transfer.status === 'Aprobada' || transfer.status === 'Solicitada')) {
-      // Deduct stock from origin
+      const shortage = findInsufficientStock(transfer.originId, transfer.items);
+      if (shortage) return { ok: false, error: shortage };
       transfer.items.forEach(item => {
         updateStock(transfer.originId, item.itemId, -item.quantity, 'Transferencia Salida', `Despacho TRF: ${transfer.id}`, transfer.id);
       });
-      
-      // Send notification to destination
+
       addNotification({
         title: 'Transferencia en tránsito',
-        message: `La transferencia ${transfer.id} desde ${branches.find(b => b.id === transfer.originId)?.name} está en tránsito.`,
+        message: `La transferencia ${transfer.id} desde ${branches.find(b => b.id === transfer.originId)?.name} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
         branchId: transfer.destinationId
       });
     }
 
-    // Logic for stock reversal when canceling
+    // Cancelación con mercadería ya despachada: vuelve al origen.
     if (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción')) {
       transfer.items.forEach(item => {
         updateStock(transfer.originId, item.itemId, item.quantity, 'Ingreso', `Cancelación TRF: ${transfer.id}`, transfer.id);
       });
     }
 
-    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, status: newStatus } : t));
+    commitTransfers(transfersRef.current.map(t => t.id === transferId ? { ...t, status: newStatus } : t));
+    return { ok: true };
   };
 
   const updateTransfer = (transferId: string, updatedData: Partial<Transfer>) => {
-    setTransfers(prev => prev.map(t => t.id === transferId ? { ...t, ...updatedData } : t));
+    commitTransfers(transfersRef.current.map(t => t.id === transferId ? { ...t, ...updatedData } : t));
   };
 
-  const unpackPackage = (stockId: string) => {
-    const stock = stockItems.find(s => s.id === stockId);
-    if (!stock) return;
+  const unpackPackage = (stockId: string): StockResult => {
+    const stock = stockRef.current.find(s => s.id === stockId);
+    if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
 
     const item = items.find(i => i.id === stock.itemId);
-    if (!item || !item.isPackage || !item.composition) return;
+    if (!item || !item.isPackage || !item.composition) return { ok: false, error: 'El artículo no es un paquete con composición.' };
+    if (!item.allowUnpacking) return { ok: false, error: 'Este paquete no permite desempaquetado.' };
 
     // 1. Restar 1 del paquete
-    updateStock(stock.branchId, stock.itemId, -1, 'Desempaquetado', `Desempaquetado de ${item.name}`, 'DESEMP-001');
+    const removed = updateStock(stock.branchId, stock.itemId, -1, 'Desempaquetado', `Desempaquetado de ${item.name}`, 'DESEMP-001');
+    if (!removed.ok) return removed;
 
     // 2. Sumar componentes
     item.composition.forEach(comp => {
       updateStock(stock.branchId, comp.itemId, comp.quantity, 'Desempaquetado', `Componente de ${item.name}`, 'DESEMP-001');
     });
+    return { ok: true };
   };
 
-  const packPackage = (stockId: string) => {
-    const stock = stockItems.find(s => s.id === stockId);
-    if (!stock) return;
+  const packPackage = (stockId: string): StockResult => {
+    const stock = stockRef.current.find(s => s.id === stockId);
+    if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
 
     const item = items.find(i => i.id === stock.itemId);
-    if (!item || !item.isPackage || !item.composition) return;
+    if (!item || !item.isPackage || !item.composition) return { ok: false, error: 'El artículo no es un paquete con composición.' };
+    if (item.composition.length === 0) return { ok: false, error: 'El paquete no tiene composición definida.' };
 
-    // 1. Verificar si hay stock de todos los componentes
-    const canPack = item.composition.every(comp => {
-      const compStock = stockItems.find(s => s.itemId === comp.itemId && s.branchId === stock.branchId);
-      return compStock && compStock.stock >= comp.quantity;
-    });
-
-    if (!canPack) {
-      alert('No hay stock suficiente de todos los componentes para empaquetar.');
-      return;
-    }
+    // 1. Verificar que haya stock de todos los componentes
+    const shortage = findInsufficientStock(stock.branchId, item.composition.map(c => ({ itemId: c.itemId, quantity: c.quantity })));
+    if (shortage) return { ok: false, error: `No hay stock suficiente de todos los componentes para empaquetar. ${shortage}` };
 
     // 2. Restar componentes
     item.composition.forEach(comp => {
@@ -1628,56 +1850,114 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     // 3. Sumar 1 al paquete
     updateStock(stock.branchId, stock.itemId, 1, 'Empaquetado', `Empaquetado de ${item.name}`, 'EMP-001');
+    return { ok: true };
   };
 
-  const registerPayment = (planId: string, installmentId: string, paymentData: any) => {
+  const registerPayment = (planId: string, installmentId: string, rawPayment: any) => {
+    // El cobro no puede ser NaN, ≤ 0 ni exceder lo adeudado (cuota; en cronogramas variables, el saldo del plan).
+    const planNow = plans.find(pl => pl.id === planId);
+    const instNow = planNow?.installments.find((i: any) => i.id === installmentId);
+    if (!planNow || !instNow) return;
+    const owed = instNow.variable ? planNow.balance : instNow.balance;
+    const amountToApply = Math.min(Number(rawPayment.amount) || 0, owed);
+    if (!(amountToApply > 0)) return;
+    const paymentData = { ...rawPayment, amount: Math.round(amountToApply * 100) / 100 };
+
     setPlans(prevPlans => prevPlans.map(plan => {
-      if (plan.id === planId) {
-        let planBalanceReduction = 0;
-        const updatedInstallments = plan.installments.map(inst => {
-          if (inst.id === installmentId) {
-            const newPayment = {
-              id: `P-${Date.now()}`,
-              date: paymentData.date,
-              amount: paymentData.amount,
-              receipt: paymentData.receipt
-            };
-            const newBalance = Math.max(0, inst.balance - paymentData.amount);
-            planBalanceReduction = inst.balance - newBalance;
-            
+      if (plan.id !== planId) return plan;
+
+      const targetIdx = plan.installments.findIndex(inst => inst.id === installmentId);
+      if (targetIdx < 0) return plan;
+      const target = plan.installments[targetIdx];
+      const newPayment = {
+        id: `P-${Date.now()}`,
+        date: paymentData.date,
+        amount: paymentData.amount,
+        receipt: paymentData.receipt
+      };
+
+      // Contado en 2 partes: el monto de la parte 1 se define al cobrar y la parte 2 es el saldo del total.
+      const nextIdx = plan.installments.findIndex((inst, i) => i > targetIdx && inst.variable);
+      if (target.variable && nextIdx >= 0) {
+        const paid = Math.min(paymentData.amount, plan.balance);
+        const remaining = Math.max(0, plan.balance - paid);
+        const updated = plan.installments.map((inst, i) => {
+          if (i === targetIdx) {
             return {
               ...inst,
-              balance: newBalance,
-              status: newBalance === 0 ? 'Pagada' : 'Parcial',
-              payments: [...inst.payments, newPayment]
+              amount: (inst.amount || 0) + paid,
+              balance: 0,
+              status: 'Pagada',
+              payments: [...inst.payments, { ...newPayment, amount: paid }]
             };
+          }
+          if (i === nextIdx) {
+            return { ...inst, amount: remaining, balance: remaining, status: remaining === 0 ? 'Pagada' : 'Pendiente' };
           }
           return inst;
         });
-
-        const newPlanBalance = Math.max(0, plan.balance - planBalanceReduction);
         return {
           ...plan,
-          balance: newPlanBalance,
-          status: newPlanBalance === 0 ? 'Completado' : plan.status,
-          installments: updatedInstallments
+          balance: remaining,
+          status: remaining === 0 ? 'Completado' : plan.status,
+          installments: updated
         };
       }
-      return plan;
+
+      let planBalanceReduction = 0;
+      const updatedInstallments = plan.installments.map(inst => {
+        if (inst.id === installmentId) {
+          const newBalance = Math.max(0, inst.balance - paymentData.amount);
+          planBalanceReduction = inst.balance - newBalance;
+          return {
+            ...inst,
+            balance: newBalance,
+            status: newBalance === 0 ? 'Pagada' : 'Parcial',
+            payments: [...inst.payments, newPayment]
+          };
+        }
+        return inst;
+      });
+
+      const newPlanBalance = Math.max(0, plan.balance - planBalanceReduction);
+      return {
+        ...plan,
+        balance: newPlanBalance,
+        status: newPlanBalance === 0 ? 'Completado' : plan.status,
+        installments: updatedInstallments
+      };
     }));
 
     // Add to global payments
+    const planRef = plans.find(pl => pl.id === planId);
+    const enrollmentRef = enrollments.find(e => e.id === planRef?.mat);
+    const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
     const newPayment: Payment = {
-      id: `PAG-${Date.now().toString().slice(-4)}`,
+      id: paymentId,
       date: paymentData.date,
-      student: 'Alumno', // Ideally find student name from plan
+      student: enrollmentRef?.student || planRef?.titular || 'Alumno',
       concept: `Pago de Cuota`,
       amount: paymentData.amount,
       method: paymentData.method,
       receipt: paymentData.receipt,
-      status: 'Aprobado'
+      status: 'Aprobado',
+      currency: 'USD',
+      enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
     };
     setPayments(prev => [newPayment, ...prev]);
+    // El cobro de una cuota ingresa a la caja en USD (moneda de la configuración comercial).
+    addCashMovement({
+      kind: 'Ingreso',
+      concept: 'Ingreso cuota',
+      reference: `${planId} / ${enrollmentRef?.student || planRef?.titular || ''}`,
+      currency: 'USD',
+      amount: Number(paymentData.amount) || 0,
+      amountUSD: Number(paymentData.amount) || 0,
+      method: paymentData.method || 'Efectivo',
+      branchId: enrollmentRef?.branchId,
+      paymentId,
+      enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
+    });
   };
 
   const refinanceInstallment = (planId: string, installmentId: string, refinanceData: any) => {
@@ -1765,109 +2045,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setGuardians(prev => prev.filter(g => g.id !== id));
   };
 
-  const addEnrollmentFlow = (data: any) => {
-    const { context, titulares, students: studentsList, programDetails, payment } = data;
-    
-    // Handle old structure if necessary (though we should migrate)
-    const finalTitulares = titulares || [data.titular];
-    const finalStudents = studentsList || [data.student];
-    const finalContext = context || data.contexto;
-    const finalProgram = programDetails || { program: data.student?.programa, level: data.student?.nivel };
-    const finalPayment = payment || data.payment;
-    const finalPlan = data.plan || { tipo: payment?.plan, total: payment?.total, cuotas: payment?.cuotas };
+  const registerEnrollments = (draft: EnrollmentDraft) => {
+    const result = buildEnrollmentBatch(
+      draft,
+      { branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students },
+      { guardians, students, enrollments, plans, payments, promotionGroups },
+      { now: new Date().toISOString(), userName: currentUser.name }
+    );
+    if (!result.ok || !result.batch) return { ok: false, error: result.error };
+    const b = result.batch;
 
-    // 1. Register Guardians (Titulares)
-    finalTitulares.forEach((t: any) => {
-      if (!guardians.find(g => g.doc === t.doc || g.doc === t.documento)) {
-        addGuardian({
-          name: t.names ? `${t.names} ${t.lastNameP} ${t.lastNameM}` : t.nombres,
-          doc: t.doc || t.documento,
-          phone: t.phone || t.telefono,
-          email: t.email,
-          parentesco: t.parentesco,
-          direccion: t.address || t.direccion,
-          students: finalStudents.length,
-          enrollments: finalStudents.length,
-          balance: '$0'
-        });
-      }
-    });
+    // Una sola aplicación de cambios: si el armado falló arriba, no se creó nada.
+    setGuardians(prev => [
+      ...prev.map(g => {
+        const u = b.guardianUpdates.find(x => x.id === g.id);
+        return u ? { ...g, ...u.patch } : g;
+      }),
+      ...b.newGuardians,
+    ]);
+    setStudents(prev => [
+      ...prev.map(st => {
+        const u = b.studentUpdates.find(x => x.id === st.id);
+        return u ? { ...st, ...u.patch } : st;
+      }),
+      ...b.newStudents,
+    ]);
+    setEnrollments(prev => [...prev, ...b.enrollments]);
+    setPlans(prev => [...prev, ...b.plans]);
+    setPayments(prev => [...b.payments, ...prev]);
+    setPromotionGroups(prev => [...prev, ...b.promotionGroups]);
+    setCashMovements(prev => [
+      ...b.cashMovements.map((m, i) => ({
+        ...m, id: `CJ-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`, user: currentUser.name,
+      })),
+      ...prev,
+    ]);
 
-    // 2. Register Students and Enrollments
-    finalStudents.forEach((s: any) => {
-      const studentId = `ALU-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-      const enrollmentId = `MAT-2024-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-      const planId = `PLN-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-
-      const studentName = s.names ? `${s.names} ${s.lastNameP} ${s.lastNameM}` : s.nombres;
-      const titularName = finalTitulares[0].names ? `${finalTitulares[0].names} ${finalTitulares[0].lastNameP}` : finalTitulares[0].nombres;
-
-      const newStudent: Student = {
-        id: studentId,
-        doc: s.doc || s.documento || 'S/D',
-        name: studentName,
-        age: parseInt(s.age || s.edad) || 0,
-        grado: s.grado,
-        colegio: s.colegio,
-        program: finalProgram.program || `${s.programa} - ${s.nivel}`,
-        horario: s.horario || finalProgram.horario,
-        fechaInicio: s.fechaInicio || finalProgram.fechaInicio,
-        titular: titularName,
-        status: 'Activo'
-      };
-
-      const newEnrollment: Enrollment = {
-        id: enrollmentId,
-        date: new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }),
-        student: studentName,
-        program: finalProgram.program || s.programa,
-        level: finalProgram.level || s.nivel,
-        sede: finalContext.sede,
-        asesor: finalContext.asesor,
-        origen: finalContext.origen,
-        status: 'Activa',
-        plan: finalPlan.tipo === 'contado' ? 'Al día' : 'Al día'
-      };
-
-      const newPlan: Plan = {
-        id: planId,
-        mat: enrollmentId,
-        titular: titularName,
-        type: finalPlan.tipo === 'contado' ? 'Contado' : `Plan ${finalPlan.cuotas} Cuotas`,
-        total: finalPlan.total,
-        balance: finalPlan.tipo === 'contado' ? 0 : (finalPlan.total - (finalPayment ? finalPayment.monto : 0)),
-        next: finalPlan.tipo === 'contado' ? '-' : 'Próximo mes',
-        status: 'Al día',
-        installments: finalPlan.tipo === 'contado' ? [] : Array.from({ length: finalPlan.cuotas }).map((_, i) => ({
-          id: `C${i+1}`,
-          name: `Cuota ${i+1}`,
-          amount: (finalPlan.total - (finalPayment ? finalPayment.monto : 0)) / finalPlan.cuotas,
-          balance: (finalPlan.total - (finalPayment ? finalPayment.monto : 0)) / finalPlan.cuotas,
-          dueDate: `Mes ${i+1}`,
-          status: 'Pendiente',
-          payments: []
-        }))
-      };
-
-      setStudents(prev => [...prev, newStudent]);
-      setEnrollments(prev => [...prev, newEnrollment]);
-      setPlans(prev => [...prev, newPlan]);
-
-      // Add Initial Payment if exists
-      if (finalPayment && finalPayment.monto > 0) {
-        const newPayment: Payment = {
-          id: `PAG-${Date.now().toString().slice(-4)}`,
-          date: new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }),
-          student: studentName,
-          concept: finalPlan.tipo === 'contado' ? 'Pago Total' : 'Pago Inicial',
-          amount: finalPayment.monto,
-          method: finalPayment.metodo,
-          receipt: `B001-${Date.now().toString().slice(-6)}`,
-          status: 'Aprobado'
-        };
-        setPayments(prev => [newPayment, ...prev]);
-      }
-    });
+    return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
   };
 
   const addTracking = (trackingData: Omit<Tracking, 'id'>) => {
@@ -1958,34 +2172,78 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setBranches(prev => prev.filter(b => b.id !== id));
   };
 
-  const addShipment = (shipment: Omit<Shipment, 'id'>) => {
-    const newId = `ENV-${new Date().getFullYear()}-${String(shipments.length + 1).padStart(3, '0')}`;
-    setShipments([...shipments, { ...shipment, id: newId }]);
+  const shipmentsRef = useRef<Shipment[]>(shipments);
+  shipmentsRef.current = shipments;
+  const commitShipments = (next: Shipment[]) => {
+    shipmentsRef.current = next;
+    setShipments(next);
   };
 
-  const updateShipmentStatus = (id: string, status: Shipment['status'], observation?: string) => {
-    const shipment = shipments.find(s => s.id === id);
-    if (!shipment) return;
+  const IN_TRANSIT_STATUSES: Shipment['status'][] = ['En tránsito', 'Listo para recepción'];
 
-    if (status === 'En tránsito' && shipment.status === 'Borrador') {
-      // Send notification to destination
+  /** Efectos de cambio de estado de un envío (misma regla que Transferencias: sale del origen al despachar). */
+  const checkShipmentDispatch = (prev: Shipment | undefined, next: Shipment): string | null => {
+    const dispatching = IN_TRANSIT_STATUSES.includes(next.status) && (!prev || prev.status === 'Borrador');
+    return dispatching ? findInsufficientStock(next.originId, next.items) : null;
+  };
+
+  const applyShipmentTransition = (prev: Shipment | undefined, next: Shipment) => {
+    const wasDispatched = !!prev && IN_TRANSIT_STATUSES.includes(prev.status);
+    const isDispatched = IN_TRANSIT_STATUSES.includes(next.status);
+
+    if (!wasDispatched && isDispatched && (!prev || prev.status === 'Borrador')) {
+      next.items.forEach(i => {
+        updateStock(next.originId, i.itemId, -i.quantity, 'Transferencia Salida', `Despacho de envío ${next.id}`, next.id);
+      });
       addNotification({
         title: 'Envío en tránsito',
-        message: `El envío ${shipment.id} desde Sede Central ha sido despachado. El stock se deducirá al recepcionar.`,
+        message: `El envío ${next.id} desde ${branches.find(b => b.id === next.originId)?.name || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
-        branchId: shipment.destinationId
+        branchId: next.destinationId
       });
     }
 
-    setShipments(prev => prev.map(s => s.id === id ? { ...s, status, observation: observation || s.observation } : s));
+    if (wasDispatched && next.status === 'Cancelado') {
+      next.items.forEach(i => {
+        updateStock(next.originId, i.itemId, i.quantity, 'Ingreso', `Cancelación de envío ${next.id}`, next.id);
+      });
+    }
+  };
+
+  const addShipment = (shipment: Omit<Shipment, 'id'>): StockResult & { id?: string } => {
+    const newId = `ENV-${new Date().getFullYear()}-${String(shipmentsRef.current.length + 1).padStart(3, '0')}`;
+    const created: Shipment = { ...shipment, id: newId };
+    const shortage = checkShipmentDispatch(undefined, created);
+    if (shortage) return { ok: false, error: shortage };
+    commitShipments([...shipmentsRef.current, created]);
+    applyShipmentTransition(undefined, created);
+    return { ok: true, id: newId };
+  };
+
+  const updateShipmentStatus = (id: string, status: Shipment['status'], observation?: string): StockResult => {
+    const prev = shipmentsRef.current.find(s => s.id === id);
+    if (!prev) return { ok: false, error: 'Envío no encontrado.' };
+    const next: Shipment = { ...prev, status, observation: observation || prev.observation };
+    const shortage = checkShipmentDispatch(prev, next);
+    if (shortage) return { ok: false, error: shortage };
+    commitShipments(shipmentsRef.current.map(s => s.id === id ? next : s));
+    applyShipmentTransition(prev, next);
+    return { ok: true };
   };
   
   const deleteShipment = (id: string) => {
-    setShipments(prev => prev.filter(s => s.id !== id));
+    commitShipments(shipmentsRef.current.filter(s => s.id !== id));
   };
 
-  const updateShipment = (id: string, shipment: Partial<Shipment>) => {
-    setShipments(shipments.map(s => s.id === id ? { ...s, ...shipment } : s));
+  const updateShipment = (id: string, shipment: Partial<Shipment>): StockResult => {
+    const prev = shipmentsRef.current.find(s => s.id === id);
+    if (!prev) return { ok: false, error: 'Envío no encontrado.' };
+    const next: Shipment = { ...prev, ...shipment };
+    const shortage = checkShipmentDispatch(prev, next);
+    if (shortage) return { ok: false, error: shortage };
+    commitShipments(shipmentsRef.current.map(s => s.id === id ? next : s));
+    applyShipmentTransition(prev, next);
+    return { ok: true };
   };
 
   const addCompany = (company: Company) => {
@@ -2044,6 +2302,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       items,
       setItems,
       stockItems, 
+      cashMovements,
+      addCashMovement,
+      promotionGroups,
+      itemPrices,
+      addItemPrice,
       kardex, 
       transfers, 
       setTransfers,
@@ -2102,7 +2365,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addGuardian,
       updateGuardian,
       deleteGuardian,
-      addEnrollmentFlow, 
+      registerEnrollments,
       addTracking, 
       registerPayment, 
       refinanceInstallment,

@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, ClipboardList, Calendar, Trash2, AlertCircle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Recipe, RecipeItem } from '../../context/DataContext';
+import { getRecipeSelectableItems } from '../../utils/inventory';
 
 export function Recipes() {
   const { recipes, setRecipes, programs, levels, branches, items } = useData();
@@ -143,6 +144,13 @@ export function Recipes() {
     if (!formData.name) errors.push('El nombre es obligatorio.');
     if (!formData.programId) errors.push('El programa es obligatorio.');
     if (formData.items?.length === 0) errors.push('Debe agregar al menos un artículo.');
+    const recipeItems = formData.items ?? [];
+    if (recipeItems.some(ri => !ri.itemId)) errors.push('Seleccione el artículo en todas las filas.');
+    if (new Set(recipeItems.map(ri => ri.itemId)).size !== recipeItems.length) errors.push('Hay artículos repetidos en la receta.');
+    if (recipeItems.some(ri => !(ri.quantity >= 1))) errors.push('Las cantidades deben ser mayores a 0.');
+    const previousIds = selectedRecipe?.items.map(ri => ri.itemId) ?? [];
+    const invalid = recipeItems.filter(ri => ri.itemId && !getRecipeSelectableItems(items, previousIds).some(i => i.id === ri.itemId));
+    if (invalid.length > 0) errors.push('Hay artículos inactivos o no habilitados para matrícula en la receta.');
     if (!formData.startDate) errors.push('La fecha de inicio es obligatoria.');
 
     const overlapErrors = validateOverlap(formData);
@@ -546,7 +554,7 @@ export function Recipes() {
                           onChange={(e) => updateItem(index, 'itemId', e.target.value)}
                         >
                           <option value="">Seleccionar artículo...</option>
-                          {items.map(i => (
+                          {getRecipeSelectableItems(items, [item.itemId, ...(selectedRecipe?.items.map(ri => ri.itemId) ?? [])]).map(i => (
                             <option key={i.id} value={i.id}>
                               {i.name} ({i.isPackage ? 'Paquete' : 'Individual'})
                             </option>

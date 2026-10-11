@@ -7,7 +7,8 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, Tag, Calendar, Users, DollarSign, X, AlertCircle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
-import { useData, Promotion, PromotionComposition } from '../../context/DataContext';
+import { useData, Promotion } from '../../context/DataContext';
+import { eligibleProgramIds } from '../../utils/promotions';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 
 const initialFormData: Omit<Promotion, 'id'> = {
@@ -15,10 +16,13 @@ const initialFormData: Omit<Promotion, 'id'> = {
   name: '',
   type: 'Grupal',
   requiredStudents: 2,
+  eligibleProgramIds: [],
+  requiredBasePrice: undefined,
+  allowMultipleGroups: true,
   composition: [],
   paymentTypeIds: [],
   totalPrice: 0,
-  currency: 'PEN',
+  currency: 'USD',
   internalDistributionRule: 'Igualitario',
   branchIds: [],
   applyToAllBranches: true,
@@ -36,6 +40,7 @@ export function Promotions() {
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [formData, setFormData] = useState<Omit<Promotion, 'id'>>(initialFormData);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isLegacyComposition, setIsLegacyComposition] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -88,9 +93,17 @@ export function Promotions() {
     if (id) {
       const promotion = promotions.find(p => p.id === id);
       if (promotion) {
-        setFormData(promotion);
+        // Promociones antiguas (composición rígida): se muestran sus programas como elegibles.
+        const legacy = !(promotion.eligibleProgramIds && promotion.eligibleProgramIds.length > 0) && (promotion.composition?.length ?? 0) > 0;
+        setIsLegacyComposition(legacy);
+        setFormData({
+          ...promotion,
+          eligibleProgramIds: eligibleProgramIds(promotion),
+          allowMultipleGroups: promotion.allowMultipleGroups ?? false,
+        });
       }
     } else {
+      setIsLegacyComposition(false);
       setFormData(initialFormData);
     }
     setSelectedPromotion(id || null);
@@ -111,9 +124,16 @@ export function Promotions() {
       setFormError("La cantidad de alumnos requerida debe ser mayor a 1.");
       return;
     }
-    const totalComposition = formData.composition.reduce((acc, curr) => acc + curr.quantity, 0);
-    if (totalComposition !== formData.requiredStudents) {
-      setFormError(`La suma de alumnos en la composición (${totalComposition}) debe ser igual a la cantidad requerida (${formData.requiredStudents}).`);
+    if (promotions.some(p => p.id !== selectedPromotion && p.code.toLowerCase() === formData.code.toLowerCase())) {
+      setFormError("Ya existe una promoción con ese código.");
+      return;
+    }
+    if ((formData.eligibleProgramIds ?? []).length === 0) {
+      setFormError("Seleccione al menos un programa elegible.");
+      return;
+    }
+    if (formData.requiredBasePrice !== undefined && !(formData.requiredBasePrice > 0)) {
+      setFormError("El precio contado base requerido debe ser mayor a 0 (o déjelo vacío).");
       return;
     }
     if (formData.paymentTypeIds.length === 0) {
@@ -133,10 +153,12 @@ export function Promotions() {
       return;
     }
 
+    // La elegibilidad dinámica reemplaza a la composición rígida.
+    const dataToSave: Omit<Promotion, 'id'> = { ...formData, composition: [], currency: 'USD' };
     if (selectedPromotion) {
-      updatePromotion(selectedPromotion, formData);
+      updatePromotion(selectedPromotion, dataToSave);
     } else {
-      addPromotion(formData);
+      addPromotion(dataToSave);
     }
     setIsFormOpen(false);
   };
@@ -161,26 +183,15 @@ export function Promotions() {
     }));
   };
 
-  const addCompositionRow = () => {
+  const toggleProgram = (id: string) => {
     if (isReadOnly) return;
-    setFormData(prev => ({
-      ...prev,
-      composition: [...prev.composition, { programId: '', quantity: 1 }]
-    }));
-  };
-
-  const updateCompositionRow = (index: number, field: keyof PromotionComposition, value: any) => {
-    if (isReadOnly) return;
-    const newComposition = [...formData.composition];
-    newComposition[index] = { ...newComposition[index], [field]: value };
-    setFormData(prev => ({ ...prev, composition: newComposition }));
-  };
-
-  const removeCompositionRow = (index: number) => {
-    if (isReadOnly) return;
-    const newComposition = [...formData.composition];
-    newComposition.splice(index, 1);
-    setFormData(prev => ({ ...prev, composition: newComposition }));
+    setFormData(prev => {
+      const current = prev.eligibleProgramIds ?? [];
+      return {
+        ...prev,
+        eligibleProgramIds: current.includes(id) ? current.filter(pid => pid !== id) : [...current, id]
+      };
+    });
   };
 
   return (
@@ -442,70 +453,38 @@ export function Promotions() {
                     </div>
                   </div>
 
-                  {/* Composición del Grupo */}
+                  {/* Programas elegibles */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-text-primary">Composición del Grupo <span className="text-error">*</span></label>
-                      {!isReadOnly && (
-                        <Button type="button" variant="outline" size="sm" onClick={addCompositionRow} className="h-8 text-xs">
-                          <Plus size={14} className="mr-1" /> Agregar
-                        </Button>
-                      )}
+                    <label className="text-sm font-medium text-text-primary">Programas elegibles <span className="text-error">*</span></label>
+                    {isLegacyComposition && (
+                      <p className="text-xs text-warning-text bg-warning-tint border border-border-soft rounded-lg p-2">
+                        Esta promoción usaba una composición fija. Al guardar se convierte a elegibilidad por programas:
+                        cualquier combinación de los programas marcados será válida.
+                      </p>
+                    )}
+                    <div className="p-4 border border-border-soft rounded-xl bg-surface-muted/20 flex flex-wrap gap-2">
+                      {programs.map(p => {
+                        const selected = (formData.eligibleProgramIds ?? []).includes(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={isReadOnly}
+                            onClick={() => toggleProgram(p.id)}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                              selected
+                                ? 'bg-primary-accent text-white border-primary-accent'
+                                : 'bg-surface text-text-secondary border-border-soft hover:border-primary-accent hover:text-primary-accent'
+                            }`}
+                          >
+                            {p.name}
+                          </button>
+                        );
+                      })}
                     </div>
-                    <div className="border border-border-soft rounded-xl overflow-hidden bg-surface">
-                      <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
-                          <tr>
-                            <th className="px-4 py-2 font-medium">Programa</th>
-                            <th className="px-4 py-2 font-medium w-24">Cantidad</th>
-                            {!isReadOnly && <th className="px-4 py-2 font-medium w-12"></th>}
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border-soft">
-                          {formData.composition.map((comp, idx) => (
-                            <tr key={idx}>
-                              <td className="px-4 py-2">
-                                <select 
-                                  required
-                                  value={comp.programId}
-                                  onChange={(e) => updateCompositionRow(idx, 'programId', e.target.value)}
-                                  className="w-full h-8 bg-surface border border-border-soft rounded px-2 text-sm focus:outline-none focus:border-primary-accent"
-                                >
-                                  <option value="">Seleccionar...</option>
-                                  {programs.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-4 py-2">
-                                <input 
-                                  type="number" 
-                                  min="1"
-                                  required
-                                  value={comp.quantity}
-                                  onChange={(e) => updateCompositionRow(idx, 'quantity', parseInt(e.target.value) || 1)}
-                                  className="w-full h-8 bg-surface border border-border-soft rounded px-2 text-sm focus:outline-none focus:border-primary-accent"
-                                />
-                              </td>
-                              {!isReadOnly && (
-                                <td className="px-4 py-2 text-center">
-                                  <button type="button" onClick={() => removeCompositionRow(idx)} className="text-error hover:text-error/80 p-1">
-                                    <X size={16} />
-                                  </button>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                          {formData.composition.length === 0 && (
-                            <tr>
-                              <td colSpan={3} className="px-4 py-4 text-center text-text-muted text-xs">
-                                Agregue los programas requeridos para esta promoción.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                    <p className="text-xs text-text-muted">
+                      Cualquier combinación de estos programas (y niveles) forma el grupo, siempre que cada alumno cumpla el tipo de pago y el precio base.
+                    </p>
                   </div>
 
                   {/* Tipos de Pago Permitidos */}
@@ -605,14 +584,28 @@ export function Promotions() {
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Moneda <span className="text-error">*</span></label>
                     <select 
-                      required
-                      value={formData.currency}
-                      onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value as 'PEN' | 'USD' }))}
-                      className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                      disabled
+                      value="USD"
+                      className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-secondary focus:outline-none"
                     >
-                      <option value="PEN">Soles (PEN)</option>
                       <option value="USD">Dólares (USD)</option>
                     </select>
+                  </div>
+                  <div className="space-y-1.5 col-span-2">
+                    <label className="text-sm font-medium text-text-primary">Precio contado base requerido (por alumno)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">{formData.currency === 'PEN' ? 'S/' : '$'}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={formData.requiredBasePrice ?? ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, requiredBasePrice: e.target.value === '' ? undefined : parseFloat(e.target.value) }))}
+                        className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                        placeholder="Sin condición de precio"
+                      />
+                    </div>
+                    <p className="text-xs text-text-muted">Se compara con el precio del tarifario vigente de cada alumno. Vacío = no se exige un precio.</p>
                   </div>
                   <div className="space-y-1.5 col-span-2">
                     <label className="text-sm font-medium text-text-primary">Regla de Reparto Interno</label>
@@ -751,6 +744,23 @@ export function Promotions() {
                     </div>
                   </div>
 
+                  <div className="flex items-center justify-between p-4 bg-surface-muted/30 border border-border-soft rounded-xl">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium text-text-primary">Permitir múltiples grupos</p>
+                      <p className="text-xs text-text-secondary">Con 4 alumnos y una promoción de 2, se podrían formar 2 grupos.</p>
+                    </div>
+                    {!isReadOnly && (
+                      <label className="switch">
+                        <input 
+                          type="checkbox" 
+                          checked={!!formData.allowMultipleGroups}
+                          onChange={(e) => setFormData(prev => ({ ...prev, allowMultipleGroups: e.target.checked }))}
+                        />
+                        <span className="slider"></span>
+                      </label>
+                    )}
+                  </div>
+
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Estado <span className="text-error">*</span></label>
                     <select 
@@ -785,7 +795,7 @@ export function Promotions() {
                     <div>
                       <h5 className="text-sm font-medium text-primary-accent mb-1">Regla de Exclusividad</h5>
                       <p className="text-xs text-text-secondary leading-relaxed">
-                        Una matrícula solo puede pertenecer a una promoción a la vez. Si los alumnos ya fueron agrupados en otra promoción, no estarán disponibles para una segunda.
+                        Un alumno solo puede pertenecer a un grupo promocional dentro del mismo registro. Cada grupo realiza un único pago, que puede componerse de varias partes.
                       </p>
                     </div>
                   </div>

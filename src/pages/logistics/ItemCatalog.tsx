@@ -8,9 +8,15 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, Package, Book, Wrench, Layers, Eye, Trash2, Upload, Download, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Item, ItemType } from '../../context/DataContext';
+import { ItemPricesModal } from './ItemPricesModal';
+import { getCurrentPrice, todayISO, validateItem } from '../../utils/inventory';
 
 export function ItemCatalog() {
-  const { items, setItems } = useData();
+  const { items, setItems, itemPrices, addItemPrice } = useData();
+  const [priceItem, setPriceItem] = useState<Item | null>(null);
+  const [initialPrice, setInitialPrice] = useState('');
+  const [compItemId, setCompItemId] = useState('');
+  const [compQty, setCompQty] = useState(1);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
@@ -102,6 +108,10 @@ export function ItemCatalog() {
       setIsBulkUpload(false);
     }
     setSelectedItem(item || null);
+    setInitialPrice('');
+    setCompItemId('');
+    setCompQty(1);
+    setFormError(null);
     setIsFormOpen(true);
   };
 
@@ -124,30 +134,27 @@ export function ItemCatalog() {
       return;
     }
 
-    if (!formData.id) {
-      setFormError('El código SKU es obligatorio.');
-      return;
-    }
-    if (!formData.name) {
-      setFormError('El nombre del artículo es obligatorio.');
-      return;
-    }
-    if (formData.type === 'Paquete / kit logístico' && (!formData.composition || formData.composition.length === 0)) {
-      setFormError('Un paquete logístico debe tener al menos un artículo en su composición.');
-      return;
-    }
-    
-    // Check SKU uniqueness
-    const isDuplicate = items.some(i => i.id === formData.id && i.id !== selectedItem?.id);
-    if (isDuplicate) {
-      setFormError('El código SKU ya existe en el sistema.');
+    const validationError = validateItem({ item: formData, allItems: items, editingId: selectedItem?.id });
+    if (validationError) {
+      setFormError(validationError);
       return;
     }
 
+    const priceValue = parseFloat(initialPrice);
+    if (!selectedItem && formData.isSold && !(priceValue > 0)) {
+      setFormError('Indique el precio general de venta (USD) para un artículo que se vende.');
+      return;
+    }
+
+    // El precio vive en `itemPrices` (con vigencia e historial), no dentro del artículo.
+    const { salePrice: _legacyPrice, ...itemData } = formData as Item;
     if (selectedItem) {
-      setItems(items.map(i => i.id === selectedItem.id ? { ...formData as Item } : i));
+      setItems(items.map(i => i.id === selectedItem.id ? { ...itemData } as Item : i));
     } else {
-      setItems([...items, { ...formData as Item }]);
+      setItems([...items, { ...itemData } as Item]);
+      if (formData.isSold) {
+        addItemPrice({ itemId: formData.id!, branchId: 'all', amount: priceValue, validFrom: todayISO() });
+      }
     }
     setIsFormOpen(false);
     setFormError(null);
@@ -283,9 +290,11 @@ export function ItemCatalog() {
                     </div>
                   </td>
                   <td className="px-6 py-3 text-text-secondary">{row.type === 'Paquete / kit logístico' ? 'Paquete logístico' : row.type}</td>
-                  <td className="px-6 py-3 text-text-secondary">S/ {row.cost.toFixed(2)}</td>
+                  <td className="px-6 py-3 text-text-secondary">$ {row.cost.toFixed(2)}</td>
                   <td className="px-6 py-3 text-text-secondary">
-                    {row.isSold ? `Sí (S/ ${row.salePrice?.toFixed(2)})` : 'No'}
+                    {row.isSold
+                      ? `Sí (${getCurrentPrice(itemPrices, row.id, 'all')?.amount !== undefined ? '$ ' + getCurrentPrice(itemPrices, row.id, 'all')!.amount.toFixed(2) : 'sin precio'})`
+                      : 'No'}
                   </td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
@@ -295,6 +304,7 @@ export function ItemCatalog() {
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(row) },
                         { label: 'Editar artículo', onClick: () => handleOpenForm(row) },
+                        ...(row.isSold ? [{ label: 'Configurar precios de venta', onClick: () => setPriceItem(row) }] : []),
                         { 
                           label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
                           onClick: () => openConfirm({
@@ -558,9 +568,9 @@ export function ItemCatalog() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-text-primary">Costo Referencial</label>
+                    <label className="text-sm font-medium text-text-primary">Costo Referencial (USD)</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">S/</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
                       <input 
                         type="number" min="0" step="0.01" 
                         className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
@@ -587,32 +597,66 @@ export function ItemCatalog() {
                   <h3 className="text-lg font-medium text-text-primary border-b border-border-soft pb-2">Configuración Logística y Comercial</h3>
                   
                   <div className="space-y-4">
+                    {/* Tipo de libro - solo para Libro */}
+                    {formData.type === 'Libro' && (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-text-primary">Tipo de libro <span className="text-error">*</span></label>
+                        <select
+                          className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                          value={formData.bindingType || ''}
+                          onChange={(e) => setFormData({...formData, bindingType: (e.target.value || undefined) as Item['bindingType']})}
+                        >
+                          <option value="">Seleccionar...</option>
+                          <option value="Anillado">Anillado</option>
+                          <option value="Encolado">Encolado</option>
+                        </select>
+                        <p className="text-xs text-text-muted">Anillado: normalmente material de programa. Encolado: puede venderse.</p>
+                      </div>
+                    )}
+
                     {/* Venta - Oculto para Material Educativo y Paquete */}
                     {formData.type !== 'Material educativo' && formData.type !== 'Paquete / kit logístico' && (
                       <>
                         <label className="flex items-center gap-3 cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent" 
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                             checked={formData.isSold}
                             onChange={(e) => setFormData({...formData, isSold: e.target.checked})}
                           />
                           <span className="text-sm font-medium text-text-primary">¿Se vende?</span>
                         </label>
-                        
+
                         {formData.isSold && (
                           <div className="pl-7 space-y-1.5">
-                            <label className="text-sm font-medium text-text-primary">Precio de Venta</label>
-                            <div className="relative w-1/2">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">S/</span>
-                              <input 
-                                type="number" min="0" step="0.01" 
-                                className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
-                                placeholder="0.00" 
-                                value={formData.salePrice || ''}
-                                onChange={(e) => setFormData({...formData, salePrice: parseFloat(e.target.value) || 0})}
-                              />
-                            </div>
+                            {selectedItem ? (
+                              <>
+                                <p className="text-sm text-text-primary">
+                                  Precio vigente: <span className="font-semibold">{(() => {
+                                    const cur = getCurrentPrice(itemPrices, selectedItem.id, 'all');
+                                    return cur ? `$ ${cur.amount.toFixed(2)}` : 'sin precio';
+                                  })()}</span>
+                                </p>
+                                <Button type="button" variant="secondary" className="text-xs h-8" onClick={() => setPriceItem(selectedItem)}>
+                                  Configurar precios de venta
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <label className="text-sm font-medium text-text-primary">Precio general de venta (USD) <span className="text-error">*</span></label>
+                                <div className="relative w-1/2">
+                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
+                                  <input
+                                    type="number" min="0" step="0.01"
+                                    className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                                    placeholder="0.00"
+                                    value={initialPrice}
+                                    onChange={(e) => setInitialPrice(e.target.value)}
+                                  />
+                                </div>
+                                <p className="text-xs text-text-muted">Excepciones por sede y nuevas vigencias se configuran después, desde «Configurar precios de venta».</p>
+                              </>
+                            )}
                           </div>
                         )}
                       </>
@@ -627,6 +671,9 @@ export function ItemCatalog() {
                       />
                       <span className="text-sm font-medium text-text-primary">¿Se entrega por matrícula?</span>
                     </label>
+                    <p className="text-xs text-text-muted pl-7 -mt-2">
+                      Habilita el artículo para elegirlo en una Receta. No se entrega automáticamente a todos los alumnos.
+                    </p>
 
                     {/* Desempaquetado - Solo para Paquete */}
                     {formData.type === 'Paquete / kit logístico' && (
@@ -700,24 +747,74 @@ export function ItemCatalog() {
                   )}
 
                   {formData.type === 'Paquete / kit logístico' && (
-                    <div className="mt-6 space-y-6">
-                      <div className="flex justify-between items-center border-b border-border-soft pb-2">
+                    <div className="mt-6 space-y-4">
+                      <div className="border-b border-border-soft pb-2">
                         <h3 className="text-lg font-medium text-text-primary">Composición del Paquete</h3>
-                        <Button variant="ghost" className="text-xs h-auto py-1 flex items-center gap-1">
-                          <Plus size={14} /> Agregar Artículo
+                        <p className="text-xs text-text-muted mt-1">
+                          {formData.allowUnpacking
+                            ? 'Obligatoria: define qué artículos se obtienen al desempaquetar.'
+                            : 'Opcional / informativa: el paquete se controla como UNA unidad de stock.'}
+                        </p>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1 space-y-1.5">
+                          <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Artículo</label>
+                          <select
+                            className="w-full h-9 bg-surface border border-border-soft rounded-lg px-2 text-sm focus:outline-none focus:border-primary-accent"
+                            value={compItemId}
+                            onChange={(e) => setCompItemId(e.target.value)}
+                          >
+                            <option value="">Seleccionar artículo...</option>
+                            {items
+                              .filter(i => i.id !== formData.id && i.status === 'Activo' && !(formData.composition ?? []).some(c => c.itemId === i.id))
+                              .map(i => <option key={i.id} value={i.id}>{i.name} ({i.id})</option>)}
+                          </select>
+                        </div>
+                        <div className="w-24 space-y-1.5">
+                          <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Cant.</label>
+                          <input
+                            type="number" min="1"
+                            className="w-full h-9 bg-surface border border-border-soft rounded-lg px-2 text-sm focus:outline-none focus:border-primary-accent"
+                            value={compQty}
+                            onChange={(e) => setCompQty(parseInt(e.target.value) || 1)}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="h-9 flex items-center gap-1"
+                          onClick={() => {
+                            const comp = items.find(i => i.id === compItemId);
+                            if (!comp) return;
+                            setFormData({
+                              ...formData,
+                              composition: [...(formData.composition ?? []), { itemId: comp.id, name: comp.name, quantity: compQty }]
+                            });
+                            setCompItemId('');
+                            setCompQty(1);
+                          }}
+                        >
+                          <Plus size={14} /> Agregar
                         </Button>
                       </div>
                       {formData.composition && formData.composition.length > 0 ? (
                         <div className="space-y-2">
                           {formData.composition.map((comp, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-surface-muted p-2 rounded-lg border border-border-soft">
+                            <div key={comp.itemId} className="flex items-center justify-between bg-surface-muted p-2 rounded-lg border border-border-soft">
                               <div>
                                 <p className="text-sm font-medium text-text-primary">{comp.name}</p>
                                 <p className="text-xs text-text-secondary">{comp.itemId}</p>
                               </div>
                               <div className="flex items-center gap-3">
                                 <span className="text-sm font-medium">Cant: {comp.quantity}</span>
-                                <button className="text-text-muted hover:text-danger-text transition-colors">
+                                <button
+                                  type="button"
+                                  className="text-text-muted hover:text-danger-text transition-colors"
+                                  onClick={() => setFormData({
+                                    ...formData,
+                                    composition: (formData.composition ?? []).filter((_, i) => i !== idx)
+                                  })}
+                                >
                                   <Trash2 size={16} />
                                 </button>
                               </div>
@@ -772,11 +869,11 @@ export function ItemCatalog() {
               </div>
               <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
                 <p className="text-xs text-text-secondary mb-1">Costo Ref.</p>
-                <p className="text-sm font-medium text-text-primary">S/ {selectedItem.cost.toFixed(2)}</p>
+                <p className="text-sm font-medium text-text-primary">$ {selectedItem.cost.toFixed(2)}</p>
               </div>
               <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
                 <p className="text-xs text-text-secondary mb-1">¿Se vende?</p>
-                <p className="text-sm font-medium text-text-primary">{selectedItem.isSold ? `Sí (S/ ${selectedItem.salePrice?.toFixed(2)})` : 'No'}</p>
+                <p className="text-sm font-medium text-text-primary">{selectedItem.isSold ? `Sí (${getCurrentPrice(itemPrices, selectedItem.id, 'all') ? '$ ' + getCurrentPrice(itemPrices, selectedItem.id, 'all')!.amount.toFixed(2) : 'sin precio'})` : 'No'}</p>
               </div>
               <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
                 <p className="text-xs text-text-secondary mb-1">Entrega Matrícula</p>
@@ -852,6 +949,8 @@ export function ItemCatalog() {
           </div>
         )}
       </Modal>
+
+      <ItemPricesModal item={priceItem} onClose={() => setPriceItem(null)} />
 
       <ConfirmDialog
         isOpen={confirmConfig.isOpen}

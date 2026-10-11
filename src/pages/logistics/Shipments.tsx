@@ -260,16 +260,15 @@ export function Shipments() {
     const newShipmentId = selectedShipment ? selectedShipment.id : `ENV-${Math.floor(Math.random() * 100000).toString().padStart(5, '0')}`;
     const shipmentToSave = { ...newShipment, id: newShipmentId, status: status };
     
-    if (selectedShipment) {
-      updateShipment(newShipmentId, shipmentToSave);
-      if (status !== 'Borrador') {
-        updateShipmentStatus(newShipmentId, status);
-      }
-    } else {
-      addShipment(shipmentToSave);
-      if (status !== 'Borrador') {
-        updateShipmentStatus(newShipmentId, status);
-      }
+    // Regla de stock: al despachar el stock sale del origen (una sola vez); el destino suma al recepcionar.
+    const result = selectedShipment
+      ? updateShipment(newShipmentId, shipmentToSave)
+      : addShipment(shipmentToSave);
+    if (!result.ok) {
+      setIsSummaryOpen(false);
+      setIsNewShipmentOpen(true);
+      setFormError(result.error || 'No se pudo guardar el envío.');
+      return;
     }
     
     setIsSummaryOpen(false);
@@ -955,7 +954,7 @@ export function Shipments() {
             <AlertTriangle size={20} className="shrink-0 mt-0.5" />
             <div className="text-sm">
               <p className="font-medium mb-1">Confirmación de Despacho</p>
-              <p>Al confirmar este envío, este pasará a estado "En tránsito" y se notificará a la filial destino. El stock de la Sede Central permanecerá intacto hasta que el envío sea recepcionado y validado por la filial, momento en el que se realizará el movimiento de ambas existencias (descuento en central y aumento en destino).</p>
+              <p>Al confirmar este envío, este pasará a estado "En tránsito" y se notificará a la filial destino. El stock se descontará de la sede de origen al despachar y se sumará en la filial destino cuando recepcione y valide el envío.</p>
             </div>
           </div>
         </div>
@@ -1081,7 +1080,7 @@ export function Shipments() {
               ) : (
                 <>
                   Se ha generado el registro <span className="font-mono font-bold text-primary-accent">{successShipmentId}</span>. 
-                  El stock se descontará y notificará en destino únicamente cuando se confirme la recepción en la filial destino.
+                  El stock ya salió de la sede de origen al despachar; se sumará en destino cuando la filial confirme la recepción.
                 </>
               )}
             </p>

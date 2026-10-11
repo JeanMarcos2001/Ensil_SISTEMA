@@ -38,14 +38,26 @@ export function Adjustments() {
     const item = items.find(i => i.id === stock.itemId);
     const branch = branches.find(b => b.id === stock.branchId);
 
-    addAdjustment({
+    // El signo lo define el tipo de operación; en Regularización administrativa se respeta el signo ingresado.
+    const signedQty = type === 'Ajuste Positivo' || type === 'Devolución'
+      ? Math.abs(qty)
+      : type === 'Ajuste Negativo' || type === 'Merma'
+        ? -Math.abs(qty)
+        : qty;
+
+    const result = addAdjustment({
       branch: branch?.name || 'Desconocida',
       material: item?.name || 'Artículo desconocido',
       type: type as Adjustment['type'],
-      qty,
+      qty: signedQty,
       reason,
       observation
     }, selectedStockId);
+
+    if (!result.ok) {
+      setFormError(result.error || 'No se pudo registrar el ajuste.');
+      return;
+    }
 
     setIsNewAdjustmentOpen(false);
     setFormError(null);
@@ -310,7 +322,7 @@ export function Adjustments() {
                     <input 
                       type="number" 
                       className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10" 
-                      placeholder="Ej: -5"
+                      placeholder="Cantidad (el signo lo define el tipo)"
                       value={qty}
                       onChange={(e) => setQty(parseInt(e.target.value))}
                     />

@@ -7,10 +7,11 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Tariff, TariffInstallment } from '../../context/DataContext';
+import { generateBreakdown, countObligations, resolveScheduleMode, sumBreakdown, roundMoney } from '../../utils/tariffs';
 import { Search, Plus, DollarSign, Calendar, AlertCircle } from 'lucide-react';
 
 export function Tariffs() {
-  const { tariffs, programs, paymentTypes, branches, addTariff, updateTariff, deleteTariff } = useData();
+  const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedTariff, setSelectedTariff] = useState<Tariff | null>(null);
@@ -45,33 +46,33 @@ export function Tariffs() {
   const [formData, setFormData] = useState({
     name: '',
     programId: '',
+    levelId: '',
     paymentTypeId: '',
     branchId: 'all',
-    currency: 'PEN' as 'PEN' | 'USD',
+    currency: 'USD' as 'PEN' | 'USD',
     basePrice: 0,
-    includesEnrollment: true,
-    enrollmentValue: 0,
-    includesMaterials: true,
-    materialsValue: 0,
     installments: [] as TariffInstallment[],
     startDate: '',
     endDate: '',
     status: 'Activo' as 'Activo' | 'Inactivo'
   });
 
+  // Parámetros del generador de desglose (no se persisten; el desglose es la fuente del total)
+  const [genEnrollment, setGenEnrollment] = useState(0);
+  const [genAmount, setGenAmount] = useState(0);
+
   useEffect(() => {
+    setGenEnrollment(0);
+    setGenAmount(0);
     if (selectedTariff) {
       setFormData({
         name: selectedTariff.name,
         programId: selectedTariff.programId,
+        levelId: selectedTariff.levelId || '',
         paymentTypeId: selectedTariff.paymentTypeId,
         branchId: selectedTariff.branchId,
         currency: selectedTariff.currency,
         basePrice: selectedTariff.basePrice,
-        includesEnrollment: selectedTariff.includesEnrollment,
-        enrollmentValue: selectedTariff.enrollmentValue || 0,
-        includesMaterials: selectedTariff.includesMaterials,
-        materialsValue: selectedTariff.materialsValue || 0,
         installments: selectedTariff.installments,
         startDate: selectedTariff.startDate,
         endDate: selectedTariff.endDate || '',
@@ -81,14 +82,11 @@ export function Tariffs() {
       setFormData({
         name: '',
         programId: '',
+        levelId: '',
         paymentTypeId: '',
         branchId: 'all',
-        currency: 'PEN',
+        currency: 'USD',
         basePrice: 0,
-        includesEnrollment: true,
-        enrollmentValue: 0,
-        includesMaterials: true,
-        materialsValue: 0,
         installments: [],
         startDate: new Date().toISOString().split('T')[0],
         endDate: '',
@@ -125,20 +123,44 @@ export function Tariffs() {
       setFormError("Debe seleccionar un programa.");
       return;
     }
+    const selectedProgram = programs.find(p => p.id === formData.programId);
+    if (formData.levelId) {
+      const level = levels.find(l => l.id === formData.levelId);
+      if (!selectedProgram?.hasLevels || !level || level.programId !== formData.programId) {
+        setFormError("El nivel seleccionado no pertenece al programa.");
+        return;
+      }
+    }
     if (!formData.paymentTypeId) {
       setFormError("Debe seleccionar un tipo de pago.");
       return;
     }
-    if (formData.basePrice <= 0) {
-      setFormError("El precio base debe ser mayor a 0.");
+    const paymentType = paymentTypes.find(pt => pt.id === formData.paymentTypeId);
+    if (formData.installments.length === 0) {
+      setFormError("Genere el desglose antes de guardar.");
+      return;
+    }
+    if (paymentType && countObligations(formData.installments) !== paymentType.installments) {
+      setFormError(`El tipo de pago "${paymentType.name}" requiere ${paymentType.installments} obligación(es) además de la matrícula. Regenere el desglose.`);
+      return;
+    }
+    const hasVariable = formData.installments.some(l => l.variable);
+    if (!hasVariable && formData.installments.some(l => !(l.amount > 0))) {
+      setFormError("Todas las líneas del desglose deben tener un monto mayor a 0.");
+      return;
+    }
+    const total = hasVariable ? roundMoney(formData.basePrice) : sumBreakdown(formData.installments);
+    if (!(total > 0)) {
+      setFormError(hasVariable ? "Indique el total objetivo (mayor a 0)." : "El total del desglose debe ser mayor a 0.");
       return;
     }
 
     const dataToSave = {
       ...formData,
+      currency: 'USD' as const, // La configuración comercial es siempre en dólares
+      basePrice: total, // Con montos fijos el total siempre es la suma del desglose
+      levelId: selectedProgram?.hasLevels && formData.levelId ? formData.levelId : undefined,
       endDate: formData.endDate || undefined,
-      enrollmentValue: formData.includesEnrollment ? undefined : formData.enrollmentValue,
-      materialsValue: formData.includesMaterials ? undefined : formData.materialsValue,
     };
 
     if (selectedTariff) {
@@ -151,37 +173,34 @@ export function Tariffs() {
 
   const generateInstallments = () => {
     const paymentType = paymentTypes.find(pt => pt.id === formData.paymentTypeId);
-    if (!paymentType) return;
-
-    const numInstallments = paymentType.installments;
-    
-    // El monto a distribuir en cuotas es el precio base
-    // (Matrícula y Artículos se manejan como conceptos adicionales si no están incluidos)
-    const totalToDistribute = formData.basePrice;
-    
-    if (numInstallments === 0) {
-      setFormData(prev => ({ ...prev, installments: [] }));
+    if (!paymentType) {
+      setFormError("Seleccione un tipo de pago para generar el desglose.");
       return;
     }
-
-    const amountPerInstallment = parseFloat((totalToDistribute / numInstallments).toFixed(2));
-    
-    const newInstallments: TariffInstallment[] = Array.from({ length: numInstallments }).map((_, i) => ({
-      number: i + 1,
-      concept: numInstallments === 1 ? 'Cuota Única' : `Cuota ${i + 1}`,
-      amount: i === numInstallments - 1 
-        ? parseFloat((totalToDistribute - (amountPerInstallment * (numInstallments - 1))).toFixed(2))
-        : amountPerInstallment,
-      dueDays: i * paymentType.termDays
+    setFormError(null);
+    const mode = resolveScheduleMode(paymentType);
+    const lines = generateBreakdown({
+      mode,
+      count: paymentType.installments,
+      intervalDays: paymentType.termDays || 30,
+      amount: genAmount,
+      enrollmentAmount: genEnrollment,
+    });
+    setFormData(prev => ({
+      ...prev,
+      installments: lines,
+      basePrice: lines.some(l => l.variable) ? prev.basePrice : sumBreakdown(lines),
     }));
-
-    setFormData(prev => ({ ...prev, installments: newInstallments }));
   };
 
   const updateInstallment = (index: number, field: keyof TariffInstallment, value: any) => {
     const newInstallments = [...formData.installments];
     newInstallments[index] = { ...newInstallments[index], [field]: value };
-    setFormData(prev => ({ ...prev, installments: newInstallments }));
+    setFormData(prev => ({
+      ...prev,
+      installments: newInstallments,
+      basePrice: newInstallments.some(l => l.variable) ? prev.basePrice : sumBreakdown(newInstallments),
+    }));
   };
 
   const filteredTariffs = tariffs.filter(t => {
@@ -296,7 +315,7 @@ export function Tariffs() {
                       <span className="font-medium text-text-primary">{row.name}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-text-secondary">{getProgramName(row.programId)}</td>
+                  <td className="px-6 py-3 text-text-secondary">{getProgramName(row.programId)}{row.levelId ? ` · ${levels.find(l => l.id === row.levelId)?.name ?? ''}` : ''}</td>
                   <td className="px-6 py-3 text-text-secondary">{getPaymentTypeName(row.paymentTypeId)}</td>
                   <td className="px-6 py-3 text-text-secondary">{getBranchName(row.branchId)}</td>
                   <td className="px-6 py-3 font-medium text-text-primary">
@@ -451,13 +470,29 @@ export function Tariffs() {
                     <select 
                       required
                       value={formData.programId}
-                      onChange={(e) => setFormData(prev => ({ ...prev, programId: e.target.value }))}
+                      onChange={(e) => setFormData(prev => ({ ...prev, programId: e.target.value, levelId: '' }))}
                       className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
                     >
                       <option value="">Seleccionar...</option>
                       {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
+                  {programs.find(p => p.id === formData.programId)?.hasLevels && (
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-primary">Nivel</label>
+                      <select
+                        value={formData.levelId}
+                        onChange={(e) => setFormData(prev => ({ ...prev, levelId: e.target.value }))}
+                        className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                      >
+                        <option value="">Todos los niveles</option>
+                        {levels
+                          .filter(l => l.programId === formData.programId && (l.status === 'Activo' || l.id === formData.levelId))
+                          .sort((a, b) => a.order - b.order)
+                          .map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Tipo de Pago <span className="text-error">*</span></label>
                     <select 
@@ -529,110 +564,96 @@ export function Tariffs() {
             <div className="space-y-10">
               {/* Pricing */}
               <section>
-                <h3 className="text-base font-semibold text-text-primary mb-4">Precios y Conceptos</h3>
+                <h3 className="text-base font-semibold text-text-primary mb-4">Moneda y total</h3>
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Moneda <span className="text-error">*</span></label>
                     <select 
-                      value={formData.currency}
-                      onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value as 'PEN' | 'USD' }))}
-                      className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                      disabled
+                      value="USD"
+                      className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-secondary focus:outline-none"
                     >
-                      <option value="PEN">Soles (PEN)</option>
                       <option value="USD">Dólares (USD)</option>
                     </select>
+                    <p className="text-xs text-text-muted">Toda la configuración comercial se expresa en dólares. El tipo de cambio se aplica solo al cobrar.</p>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-text-primary">Precio Base (Total) <span className="text-error">*</span></label>
+                    <label className="text-sm font-medium text-text-primary">
+                      {formData.installments.some(l => l.variable) ? 'Total objetivo' : 'Precio total (suma del desglose)'}
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">{formData.currency === 'PEN' ? 'S/' : '$'}</span>
-                      <input 
-                        type="number" 
-                        min="0" 
-                        step="0.01" 
-                        required
-                        value={formData.basePrice}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        readOnly={!formData.installments.some(l => l.variable)}
+                        value={formData.installments.some(l => l.variable) ? formData.basePrice : sumBreakdown(formData.installments)}
                         onChange={(e) => setFormData(prev => ({ ...prev, basePrice: parseFloat(e.target.value) || 0 }))}
-                        className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
-                        placeholder="0.00" 
+                        className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent read-only:text-text-secondary"
+                        placeholder="0.00"
                       />
                     </div>
+                    <p className="text-xs text-text-muted">
+                      {formData.installments.some(l => l.variable)
+                        ? 'En este cronograma el monto de cada parte se define al cobrar.'
+                        : 'Se calcula automáticamente a partir del desglose.'}
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6">
-                  {/* Enrollment */}
-                  <div className="space-y-4 p-4 border border-border-soft rounded-xl bg-surface-muted/30">
-                    <div className="flex items-center justify-between cursor-pointer group">
-                      <span className="text-sm font-medium text-text-primary group-hover:text-primary-accent transition-colors">Matrícula incluida en el precio base</span>
-                      <label className="switch">
-                        <input 
-                          type="checkbox" 
-                          checked={formData.includesEnrollment}
-                          onChange={(e) => setFormData(prev => ({ ...prev, includesEnrollment: e.target.checked }))}
-                        />
-                        <span className="slider"></span>
-                      </label>
+                <div className="grid grid-cols-2 gap-4 p-4 border border-border-soft rounded-xl bg-surface-muted/30">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-text-primary">Matrícula (opcional)</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">{formData.currency === 'PEN' ? 'S/' : '$'}</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={genEnrollment}
+                        onChange={(e) => setGenEnrollment(parseFloat(e.target.value) || 0)}
+                        className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                        placeholder="0.00"
+                      />
                     </div>
-                    {!formData.includesEnrollment && (
-                      <div className="space-y-1.5 pt-2">
-                        <label className="text-sm font-medium text-text-primary">Valor Matrícula Adicional <span className="text-error">*</span></label>
+                    <p className="text-xs text-text-muted">Línea propia con vencimiento día 0.</p>
+                  </div>
+                  {(() => {
+                    const pt = paymentTypes.find(x => x.id === formData.paymentTypeId);
+                    const mode = pt ? resolveScheduleMode(pt) : null;
+                    if (mode === 'fechas_manuales') {
+                      return (
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium text-text-primary">Montos</label>
+                          <p className="text-xs text-text-muted pt-2">Se definen al cobrar en Planes; la última parte es el saldo.</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-text-primary">{mode === 'inmediato' ? 'Monto del pago único' : 'Monto por cuota'}</label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">{formData.currency === 'PEN' ? 'S/' : '$'}</span>
-                          <input 
-                            type="number" 
-                            min="0" 
-                            step="0.01" 
-                            required
-                            value={formData.enrollmentValue}
-                            onChange={(e) => setFormData(prev => ({ ...prev, enrollmentValue: parseFloat(e.target.value) || 0 }))}
-                            className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
-                            placeholder="0.00" 
+                          <input
+                            type="number" min="0" step="0.01"
+                            value={genAmount}
+                            onChange={(e) => setGenAmount(parseFloat(e.target.value) || 0)}
+                            className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                            placeholder="0.00"
                           />
                         </div>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Items */}
-                  <div className="space-y-4 p-4 border border-border-soft rounded-xl bg-surface-muted/30">
-                    <div className="flex items-center justify-between cursor-pointer group">
-                      <span className="text-sm font-medium text-text-primary group-hover:text-primary-accent transition-colors">Artículos incluidos en el precio base</span>
-                      <label className="switch">
-                        <input 
-                          type="checkbox" 
-                          checked={formData.includesMaterials}
-                          onChange={(e) => setFormData(prev => ({ ...prev, includesMaterials: e.target.checked }))}
-                        />
-                        <span className="slider"></span>
-                      </label>
-                    </div>
-                    {!formData.includesMaterials && (
-                      <div className="space-y-1.5 pt-2">
-                        <label className="text-sm font-medium text-text-primary">Valor Artículos Adicional <span className="text-error">*</span></label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">{formData.currency === 'PEN' ? 'S/' : '$'}</span>
-                          <input 
-                            type="number" 
-                            min="0" 
-                            step="0.01" 
-                            required
-                            value={formData.materialsValue}
-                            onChange={(e) => setFormData(prev => ({ ...prev, materialsValue: parseFloat(e.target.value) || 0 }))}
-                            className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
-                            placeholder="0.00" 
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </div>
+                <p className="text-xs text-text-muted mt-2">
+                  Los materiales no forman parte del tarifario: se resuelven por Programa/Nivel → Receta → Catálogo de artículos.
+                </p>
               </section>
 
               {/* Installments Breakdown (Dynamic) */}
               <section>
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-semibold text-text-primary">Desglose de Cuotas</h3>
+                  <h3 className="text-base font-semibold text-text-primary">Desglose de obligaciones</h3>
                   {!isReadOnly && (
                     <Button type="button" variant="outline" size="sm" onClick={generateInstallments}>Generar desglose</Button>
                   )}
@@ -641,33 +662,13 @@ export function Tariffs() {
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
                       <tr>
-                        <th className="px-4 py-3 font-medium">N° Cuota</th>
+                        <th className="px-4 py-3 font-medium">N°</th>
                         <th className="px-4 py-3 font-medium">Concepto</th>
                         <th className="px-4 py-3 font-medium">Monto ({formData.currency === 'PEN' ? 'S/' : '$'})</th>
                         <th className="px-4 py-3 font-medium">Días Vencimiento</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border-soft">
-                      {!formData.includesEnrollment && (
-                        <tr className="bg-surface">
-                          <td className="px-4 py-3 text-text-secondary">0</td>
-                          <td className="px-4 py-3 text-text-primary font-medium">Matrícula</td>
-                          <td className="px-4 py-3 font-medium text-text-primary">
-                            {formData.currency === 'PEN' ? 'S/' : '$'} {formData.enrollmentValue.toFixed(2)}
-                          </td>
-                          <td className="px-4 py-3 text-text-secondary">0 (Inmediato)</td>
-                        </tr>
-                      )}
-                      {!formData.includesMaterials && (
-                        <tr className="bg-surface">
-                          <td className="px-4 py-3 text-text-secondary">0</td>
-                          <td className="px-4 py-3 text-text-primary font-medium">Artículos</td>
-                          <td className="px-4 py-3 font-medium text-text-primary">
-                            {formData.currency === 'PEN' ? 'S/' : '$'} {formData.materialsValue.toFixed(2)}
-                          </td>
-                          <td className="px-4 py-3 text-text-secondary">0 (Inmediato)</td>
-                        </tr>
-                      )}
                       {formData.installments.map((inst, idx) => (
                         <tr key={idx} className="bg-surface">
                           <td className="px-4 py-3 text-text-secondary">{inst.number}</td>
@@ -684,7 +685,9 @@ export function Tariffs() {
                               type="number" 
                               step="0.01"
                               className="w-full h-8 bg-surface border border-border-soft rounded px-2 text-sm focus:outline-none focus:border-primary-accent" 
-                              value={inst.amount}
+                              value={inst.variable ? '' : inst.amount}
+                              disabled={inst.variable}
+                              placeholder={inst.variable ? 'Al cobrar' : undefined}
                               onChange={(e) => updateInstallment(idx, 'amount', parseFloat(e.target.value) || 0)}
                             />
                           </td>
@@ -701,12 +704,12 @@ export function Tariffs() {
                     </tbody>
                     <tfoot className="bg-surface-muted/30">
                       <tr>
-                        <td colSpan={2} className="px-4 py-3 text-right font-medium text-text-primary">Total Desglose:</td>
+                        <td colSpan={2} className="px-4 py-3 text-right font-medium text-text-primary">
+                          {formData.installments.some(l => l.variable) ? 'Total objetivo:' : 'Total del desglose:'}
+                        </td>
                         <td className="px-4 py-3 font-bold text-primary-accent">
                           {formData.currency === 'PEN' ? 'S/' : '$'} {(
-                            formData.installments.reduce((acc, curr) => acc + curr.amount, 0) + 
-                            (formData.includesEnrollment ? 0 : formData.enrollmentValue) +
-                            (formData.includesMaterials ? 0 : formData.materialsValue)
+                            formData.installments.some(l => l.variable) ? formData.basePrice : sumBreakdown(formData.installments)
                           ).toLocaleString('es-PE', { minimumFractionDigits: 2 })}
                         </td>
                         <td></td>
@@ -714,7 +717,9 @@ export function Tariffs() {
                     </tfoot>
                   </table>
                 </div>
-                <p className="text-xs text-text-muted mt-2">El total del desglose debe coincidir con el Precio Base + Adicionales.</p>
+                <p className="text-xs text-text-muted mt-2">
+                  El desglose es la fuente del total. En planes fijos cada cuota posterior vence exactamente el intervalo de días del tipo de pago.
+                </p>
               </section>
             </div>
           </fieldset>

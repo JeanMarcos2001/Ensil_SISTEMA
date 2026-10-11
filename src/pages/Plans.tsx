@@ -180,8 +180,8 @@ export function Plans() {
                     <div className="text-xs text-text-muted">{row.mat}</div>
                   </td>
                   <td className="px-6 py-3 text-sm text-text-primary">{row.titular}</td>
-                  <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">S/ {row.total.toFixed(2)}</td>
-                  <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">S/ {row.balance.toFixed(2)}</td>
+                  <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">$ {row.total.toFixed(2)}</td>
+                  <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">$ {row.balance.toFixed(2)}</td>
                   <td className={`px-6 py-3 text-sm ${row.status === 'Atrasado' ? 'text-danger-text font-medium' : 'text-text-secondary'}`}>
                     {row.next} {row.status === 'Atrasado' && '(Vencida)'}
                   </td>
@@ -262,11 +262,11 @@ export function Plans() {
               </div>
               <div>
                 <span className="block text-xs text-text-muted mb-1">Total del Plan</span>
-                <span className="text-sm font-medium text-text-primary">S/ {selectedPlan.total.toFixed(2)}</span>
+                <span className="text-sm font-medium text-text-primary">$ {selectedPlan.total.toFixed(2)}</span>
               </div>
               <div>
                 <span className="block text-xs text-text-muted mb-1">Saldo Pendiente</span>
-                <span className="text-sm font-bold text-danger-text">S/ {selectedPlan.balance.toFixed(2)}</span>
+                <span className="text-sm font-bold text-danger-text">$ {selectedPlan.balance.toFixed(2)}</span>
               </div>
             </div>
 
@@ -291,10 +291,10 @@ export function Plans() {
                   <tbody className="divide-y divide-border-soft">
                     {selectedPlan.installments.map((inst: any) => (
                       <tr key={inst.id} className="hover:bg-surface-muted/50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-text-primary">{inst.name}</td>
+                        <td className="px-4 py-3 font-medium text-text-primary">{inst.name}{inst.variable && <span className="block text-[11px] font-normal text-text-muted">Monto variable: se define al cobrar</span>}</td>
                         <td className={`px-4 py-3 ${inst.status === 'Vencida' ? 'text-danger-text font-medium' : 'text-text-secondary'}`}>{inst.dueDate}</td>
-                        <td className="px-4 py-3 text-right text-text-primary">S/ {inst.amount.toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right font-medium text-text-primary">S/ {inst.balance.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right text-text-primary">$ {inst.amount.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-medium text-text-primary">$ {inst.balance.toFixed(2)}</td>
                         <td className="px-4 py-3">
                           <Badge variant={getInstallmentBadge(inst.status)}>{inst.status}</Badge>
                         </td>
@@ -350,12 +350,12 @@ export function Plans() {
             <div className="grid grid-cols-2 gap-4 bg-surface-muted p-4 rounded-xl border border-border-soft">
               <div>
                 <span className="block text-xs text-text-muted mb-1">Monto Original</span>
-                <span className="text-sm font-medium text-text-primary">S/ {selectedInstallment.amount.toFixed(2)}</span>
+                <span className="text-sm font-medium text-text-primary">$ {selectedInstallment.amount.toFixed(2)}</span>
               </div>
               <div>
                 <span className="block text-xs text-text-muted mb-1">Saldo Pendiente</span>
                 <span className={`text-sm font-bold ${selectedInstallment.balance > 0 ? 'text-danger-text' : 'text-success-text'}`}>
-                  S/ {selectedInstallment.balance.toFixed(2)}
+                  $ {selectedInstallment.balance.toFixed(2)}
                 </span>
               </div>
             </div>
@@ -387,7 +387,7 @@ export function Plans() {
                         <tr key={payment.id}>
                           <td className="px-3 py-2 text-text-secondary">{payment.date}</td>
                           <td className="px-3 py-2 text-text-primary">{payment.receipt}</td>
-                          <td className="px-3 py-2 text-right font-medium text-success-text">+ S/ {payment.amount.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right font-medium text-success-text">+ $ {payment.amount.toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -425,7 +425,7 @@ export function Plans() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-text-secondary">Saldo pendiente</span>
-                <span className="text-lg font-bold text-danger-text">S/ {selectedInstallment.balance.toFixed(2)}</span>
+                <span className="text-lg font-bold text-danger-text">$ {selectedInstallment.balance.toFixed(2)}</span>
               </div>
             </div>
 
@@ -501,7 +501,7 @@ export function Plans() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Cuota origen (Solo lectura)</label>
-              <input type="text" className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm text-text-muted outline-none cursor-not-allowed" value={`${selectedInstallment.name} - Saldo: S/ ${selectedInstallment.balance.toFixed(2)}`} disabled />
+              <input type="text" className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm text-text-muted outline-none cursor-not-allowed" value={`${selectedInstallment.name} - Saldo: $ ${selectedInstallment.balance.toFixed(2)}`} disabled />
             </div>
 
             <div className="space-y-1.5">
