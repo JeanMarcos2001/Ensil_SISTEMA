@@ -1,6 +1,6 @@
 import React from 'react';
 import type { DocType, DraftPerson } from '../../utils/enrollment';
-import { ageOn } from '../../utils/enrollment';
+import { ageOn, emptyPerson } from '../../utils/enrollment';
 
 export const inputCls =
   'w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none disabled:bg-surface-muted disabled:text-text-muted';
@@ -34,18 +34,53 @@ export interface ExistingOption {
   doc: string;
 }
 
+/** Interruptor deslizante «Existente | Nuevo». */
+export function SourceToggle({
+  value, onChange,
+}: { value: 'nuevo' | 'existente'; onChange: (v: 'nuevo' | 'existente') => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="Origen de la persona"
+      className="relative inline-grid grid-cols-2 w-56 p-1 rounded-xl bg-surface-muted border border-border-soft text-sm select-none"
+    >
+      <span
+        aria-hidden
+        className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-lg bg-primary-accent shadow-sm transition-transform duration-200 ease-out"
+        style={{ transform: value === 'existente' ? 'translateX(0)' : 'translateX(100%)' }}
+      />
+      {([
+        { id: 'existente', label: 'Existente' },
+        { id: 'nuevo', label: 'Nuevo' },
+      ] as const).map(opt => (
+        <button
+          key={opt.id}
+          type="button"
+          aria-pressed={value === opt.id}
+          onClick={() => value !== opt.id && onChange(opt.id)}
+          className={`relative z-10 h-8 rounded-lg font-medium transition-colors ${
+            value === opt.id ? 'text-white' : 'text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 interface PersonFormProps {
   person: DraftPerson;
   onChange: (next: DraftPerson) => void;
   today: string;
   /** Campos adicionales del titular principal. */
   extended?: boolean;
-  /** Desactiva la edición (persona ya registrada o campos autocompletados). */
+  /** Desactiva la edición (campos autocompletados desde otro paso). */
   locked?: boolean;
-  /** Búsqueda de personas ya registradas para no duplicarlas. */
+  /** Personas ya registradas. Si se pasa, aparece el interruptor Existente | Nuevo. */
   existing?: ExistingOption[];
+  /** Devuelve la persona completa al elegir una registrada (debe traer `existingId`). */
   onPickExisting?: (id: string) => void;
-  onClearExisting?: () => void;
   searchPlaceholder?: string;
   /** Fecha de referencia para calcular la edad (fecha de matrícula). */
   ageOnDate: string;
@@ -54,56 +89,91 @@ interface PersonFormProps {
 const DOC_TYPES: DocType[] = ['DNI', 'CE', 'Pasaporte'];
 
 export function PersonForm({
-  person, onChange, extended, locked, existing, onPickExisting, onClearExisting, searchPlaceholder, ageOnDate, today,
+  person, onChange, extended, locked, existing, onPickExisting, searchPlaceholder, ageOnDate, today,
 }: PersonFormProps) {
   const [query, setQuery] = React.useState('');
   const set = (patch: Partial<DraftPerson>) => onChange({ ...person, ...patch });
-  const disabled = !!locked || !!person.existingId;
+  const canChooseSource = !!existing && !!onPickExisting && !locked;
+  const source: 'nuevo' | 'existente' = canChooseSource ? (person.source ?? (person.existingId ? 'existente' : 'nuevo')) : 'nuevo';
   const age = person.birthDate ? ageOn(person.birthDate, ageOnDate) : null;
 
   const matches = query.trim().length >= 2 && existing
-    ? existing.filter(e => `${e.label} ${e.doc}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 5)
+    ? existing.filter(e => `${e.label} ${e.doc}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 6)
     : [];
 
+  const changeSource = (next: 'nuevo' | 'existente') => {
+    setQuery('');
+    // Cambiar de modo parte de una ficha limpia para no mezclar datos de una persona registrada con una nueva.
+    onChange({ ...emptyPerson(), source: next });
+  };
+
+  // ------------------------------------------------------------- Persona ya registrada
+  if (canChooseSource && source === 'existente') {
+    return (
+      <div className="space-y-4">
+        <SourceToggle value={source} onChange={changeSource} />
+
+        {person.existingId ? (
+          <div className="flex items-start justify-between gap-4 bg-success-tint border border-border-soft rounded-xl p-4">
+            <div className="space-y-0.5 text-sm">
+              <p className="font-semibold text-text-primary">
+                {[person.names, person.lastNameP, person.lastNameM].filter(Boolean).join(' ')}
+              </p>
+              <p className="text-text-secondary">{person.docType} {person.docNumber}</p>
+              {(person.phone || person.email) && (
+                <p className="text-text-secondary">{[person.phone, person.email].filter(Boolean).join(' · ')}</p>
+              )}
+              <p className="text-xs text-success-text font-medium pt-1">Persona ya registrada: se reutilizará su ficha.</p>
+            </div>
+            <button
+              type="button"
+              className="text-xs text-primary-accent hover:underline shrink-0"
+              onClick={() => onChange({ ...emptyPerson(), source: 'existente' })}
+            >
+              Cambiar
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <input
+              type="text"
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={searchPlaceholder || 'Buscar por nombre o documento (mínimo 2 caracteres)...'}
+              className={inputCls}
+            />
+            {matches.length > 0 && (
+              <div className="border border-border-soft rounded-xl overflow-hidden bg-surface">
+                {matches.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0"
+                    onClick={() => { onPickExisting!(m.id); setQuery(''); }}
+                  >
+                    <span className="font-medium text-text-primary">{m.label}</span>
+                    <span className="text-text-muted"> · {m.doc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {query.trim().length >= 2 && matches.length === 0 && (
+              <p className="text-xs text-text-muted">
+                Sin resultados. Si la persona no está registrada, cambie a «Nuevo».
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------- Persona nueva (o campos bloqueados)
+  const disabled = !!locked;
   return (
     <div className="space-y-4">
-      {existing && onPickExisting && !locked && (
-        <div className="space-y-1.5">
-          {person.existingId ? (
-            <div className="flex items-center justify-between bg-success-tint border border-border-soft rounded-xl px-3 py-2 text-sm">
-              <span className="text-success-text font-medium">Persona ya registrada: se reutilizará su ficha.</span>
-              <button type="button" className="text-xs text-primary-accent hover:underline" onClick={onClearExisting}>
-                Registrar como nueva
-              </button>
-            </div>
-          ) : (
-            <>
-              <input
-                type="text"
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder={searchPlaceholder || 'Buscar persona ya registrada por nombre o documento...'}
-                className={inputCls}
-              />
-              {matches.length > 0 && (
-                <div className="border border-border-soft rounded-xl overflow-hidden bg-surface">
-                  {matches.map(m => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0"
-                      onClick={() => { onPickExisting(m.id); setQuery(''); }}
-                    >
-                      <span className="font-medium text-text-primary">{m.label}</span>
-                      <span className="text-text-muted"> · {m.doc}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      {canChooseSource && <SourceToggle value={source} onChange={changeSource} />}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Nombres" required>

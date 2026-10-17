@@ -18,6 +18,7 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
     if (!g) return;
     setHolder(idx, {
       ...emptyPerson(),
+      source: 'existente',
       existingId: g.id,
       docType: (g.docType as DraftPerson['docType']) || 'DNI',
       docNumber: g.doc,
@@ -77,14 +78,13 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
               const s = catalogs.students.find(x => x.id === id);
               if (!s) return;
               setHolder(0, {
-                ...emptyPerson(), existingId: s.id,
+                ...emptyPerson(), source: 'existente', existingId: s.id,
                 docType: (s.docType as DraftPerson['docType']) || 'DNI', docNumber: s.doc,
                 names: s.names ?? s.name, lastNameP: s.lastNameP ?? '', lastNameM: s.lastNameM ?? '',
                 birthDate: s.birthDate ?? '', phone: s.phone ?? '', email: s.email ?? '', address: s.address ?? '',
               });
             }}
-            onClearExisting={() => setHolder(0, emptyPerson())}
-            searchPlaceholder="Buscar alumno ya registrado por nombre o documento..."
+            searchPlaceholder="Buscar alumno por nombre o documento (mínimo 2 caracteres)..."
           />
           <p className="text-xs text-text-muted">Esta misma persona será el Alumno 1: sus datos no se duplican.</p>
         </div>
@@ -110,8 +110,7 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
                 extended={idx === 0}
                 existing={guardianOptions}
                 onPickExisting={id => pickExisting(idx, id)}
-                onClearExisting={() => setHolder(idx, emptyPerson())}
-                searchPlaceholder="Buscar titular ya registrado por nombre o documento..."
+                searchPlaceholder="Buscar titular por nombre o documento (mínimo 2 caracteres)..."
               />
             </div>
           ))}

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
+import { formatDisplayDate } from '../utils/tariffs';
 import { nextSequentialId } from '../utils/ids';
 
 // Types
@@ -46,6 +47,20 @@ export interface Student {
   address?: string;
   guardianIds?: string[];
   relationship?: string; // parentesco con el titular; vacío si es independiente
+  // Situación del alumno: estudia, trabaja, ambos o ninguna
+  occupationStatus?: 'estudiando' | 'trabajando' | 'ambos' | 'ninguna';
+  institutionType?: string;
+  occupation?: string;
+  workplace?: string;
+}
+
+/** Horario de clases configurable (Configuración → CRUDS Básicos → Horarios de clases). */
+export interface ClassSchedule {
+  id: string;
+  name: string; // p. ej. «L-M-V 4:00 PM»
+  allBranches: boolean;
+  branchIds: string[];
+  status: 'Activo' | 'Inactivo';
 }
 
 export interface Enrollment {
@@ -138,6 +153,8 @@ export interface Payment {
   currency?: 'PEN' | 'USD'; // Moneda de la obligación que cubre el pago
   promotionGroupId?: string; // Pago grupal: un único pago para todas las matrículas del grupo
   enrollmentIds?: string[]; // Matrículas cubiertas por este pago
+  user?: string; // Quién registró el pago
+  comment?: string;
 }
 
 /**
@@ -685,6 +702,10 @@ interface DataContextType {
   items: Item[];
   setItems: React.Dispatch<React.SetStateAction<Item[]>>;
   stockItems: StockItem[];
+  classSchedules: ClassSchedule[];
+  addClassSchedule: (data: Omit<ClassSchedule, 'id'>) => StockResult;
+  updateClassSchedule: (id: string, data: Partial<Omit<ClassSchedule, 'id'>>) => StockResult;
+  deleteClassSchedule: (id: string) => StockResult;
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
   promotionGroups: PromotionGroup[];
@@ -751,7 +772,7 @@ interface DataContextType {
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
   addTracking: (tracking: Omit<Tracking, 'id'>) => void;
-  registerPayment: (planId: string, installmentId: string, paymentData: any) => void;
+  registerPayment: (planId: string, installmentId: string, paymentData: any) => StockResult;
   refinanceInstallment: (planId: string, installmentId: string, refinanceData: any) => void;
   addLeadSource: (name: string) => void;
   updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => void;
@@ -965,6 +986,48 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'CJ-003', date: '2026-10-08T17:45:00.000Z', kind: 'Egreso', concept: 'Egreso', reference: 'Pago Proveedor Limpieza', currency: 'PEN', amount: 350, amountUSD: 0, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
   ]);
   const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
+
+  // Horarios de clases (antes una lista fija dentro del asistente)
+  const [classSchedules, setClassSchedules] = useState<ClassSchedule[]>([
+    { id: 'HOR-001', name: 'L-M-V 4:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
+    { id: 'HOR-002', name: 'L-M-V 5:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
+    { id: 'HOR-003', name: 'Sábados 9:00 AM', allBranches: true, branchIds: [], status: 'Activo' },
+  ]);
+
+  const normalizeName = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+  const addClassSchedule = (data: Omit<ClassSchedule, 'id'>): StockResult => {
+    if (!data.name.trim()) return { ok: false, error: 'El nombre del horario es obligatorio.' };
+    if (classSchedules.some(h => normalizeName(h.name) === normalizeName(data.name))) {
+      return { ok: false, error: 'Ya existe un horario con ese nombre.' };
+    }
+    if (!data.allBranches && data.branchIds.length === 0) return { ok: false, error: 'Seleccione al menos una sede o marque todas.' };
+    const id = nextSequentialId('HOR', classSchedules.map(h => h.id));
+    setClassSchedules(prev => [...prev, { ...data, name: data.name.trim(), id }]);
+    return { ok: true };
+  };
+
+  const updateClassSchedule = (id: string, data: Partial<Omit<ClassSchedule, 'id'>>): StockResult => {
+    const current = classSchedules.find(h => h.id === id);
+    if (!current) return { ok: false, error: 'Horario no encontrado.' };
+    const next = { ...current, ...data };
+    if (!next.name.trim()) return { ok: false, error: 'El nombre del horario es obligatorio.' };
+    if (classSchedules.some(h => h.id !== id && normalizeName(h.name) === normalizeName(next.name))) {
+      return { ok: false, error: 'Ya existe un horario con ese nombre.' };
+    }
+    if (!next.allBranches && next.branchIds.length === 0) return { ok: false, error: 'Seleccione al menos una sede o marque todas.' };
+    setClassSchedules(prev => prev.map(h => (h.id === id ? { ...next, name: next.name.trim() } : h)));
+    return { ok: true };
+  };
+
+  const deleteClassSchedule = (id: string): StockResult => {
+    const current = classSchedules.find(h => h.id === id);
+    if (!current) return { ok: false, error: 'Horario no encontrado.' };
+    const used = students.filter(s => s.horario === current.name).length;
+    if (used > 0) return { ok: false, error: `El horario lo usan ${used} alumno(s). Inactívelo en lugar de eliminarlo.` };
+    setClassSchedules(prev => prev.filter(h => h.id !== id));
+    return { ok: true };
+  };
 
   const addCashMovement = (m: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }): CashMovement => {
     const created: CashMovement = {
@@ -1853,15 +1916,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const registerPayment = (planId: string, installmentId: string, rawPayment: any) => {
+  /**
+   * Cobra una cuota. `amount` es el monto aplicado en USD (la deuda siempre es en USD). Si se cobró en soles,
+   * `currency: 'PEN'` + `exchangeRate` + `originalAmount` registran el dinero real en la caja de soles.
+   */
+  const registerPayment = (planId: string, installmentId: string, rawPayment: any): StockResult => {
     // El cobro no puede ser NaN, ≤ 0 ni exceder lo adeudado (cuota; en cronogramas variables, el saldo del plan).
     const planNow = plans.find(pl => pl.id === planId);
     const instNow = planNow?.installments.find((i: any) => i.id === installmentId);
-    if (!planNow || !instNow) return;
+    if (!planNow || !instNow) return { ok: false, error: 'No se encontró la cuota.' };
     const owed = instNow.variable ? planNow.balance : instNow.balance;
     const amountToApply = Math.min(Number(rawPayment.amount) || 0, owed);
-    if (!(amountToApply > 0)) return;
+    if (!(amountToApply > 0)) return { ok: false, error: 'La cuota no tiene saldo pendiente o el monto no es válido.' };
     const paymentData = { ...rawPayment, amount: Math.round(amountToApply * 100) / 100 };
+    const payCurrency: 'PEN' | 'USD' = rawPayment.currency === 'PEN' ? 'PEN' : 'USD';
+    const tc = Number(rawPayment.exchangeRate) || undefined;
+    if (payCurrency === 'PEN' && !tc) return { ok: false, error: 'Indique el tipo de cambio para cobrar en soles.' };
+    // Dinero real recibido en su moneda (si el monto se limitó al saldo, se recalcula con el mismo TC)
+    const requested = Number(rawPayment.amount) || 0;
+    const exactPen = Number(rawPayment.originalAmount);
+    const realAmount = payCurrency === 'PEN'
+      ? (exactPen > 0 && Math.abs(requested - paymentData.amount) < 0.005 ? exactPen : Math.round(paymentData.amount * tc! * 100) / 100)
+      : paymentData.amount;
 
     setPlans(prevPlans => prevPlans.map(plan => {
       if (plan.id !== planId) return plan;
@@ -1885,7 +1961,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
           if (i === targetIdx) {
             return {
               ...inst,
-              amount: (inst.amount || 0) + paid,
+              // El monto de la parte queda fijado en lo realmente cobrado (antes tenía como tope el total del plan)
+              amount: inst.payments.reduce((acc: number, pay: any) => acc + pay.amount, 0) + paid,
               balance: 0,
               status: 'Pagada',
               payments: [...inst.payments, { ...newPayment, amount: paid }]
@@ -1934,30 +2011,45 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
     const newPayment: Payment = {
       id: paymentId,
-      date: paymentData.date,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(paymentData.date || '') ? formatDisplayDate(paymentData.date) : paymentData.date,
       student: enrollmentRef?.student || planRef?.titular || 'Alumno',
-      concept: `Pago de Cuota`,
+      concept: `Pago de ${instNow.name}`,
       amount: paymentData.amount,
       method: paymentData.method,
       receipt: paymentData.receipt,
       status: 'Aprobado',
       currency: 'USD',
       enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
+      user: currentUser.name,
+      comment: rawPayment.note || undefined,
+      parts: [{
+        id: `PT-${Date.now()}`,
+        currency: payCurrency,
+        amount: realAmount,
+        exchangeRate: payCurrency === 'PEN' ? tc : undefined,
+        method: paymentData.method || 'Efectivo',
+        operationNumber: rawPayment.operationNumber || undefined,
+        evidence: rawPayment.evidence || undefined,
+        note: rawPayment.note || undefined,
+      }],
     };
     setPayments(prev => [newPayment, ...prev]);
-    // El cobro de una cuota ingresa a la caja en USD (moneda de la configuración comercial).
+    // El cobro de una cuota ingresa a la caja de la moneda en que se recibió (USD o PEN con su TC).
     addCashMovement({
       kind: 'Ingreso',
       concept: 'Ingreso cuota',
       reference: `${planId} / ${enrollmentRef?.student || planRef?.titular || ''}`,
-      currency: 'USD',
-      amount: Number(paymentData.amount) || 0,
-      amountUSD: Number(paymentData.amount) || 0,
+      currency: payCurrency,
+      amount: realAmount,
+      exchangeRate: payCurrency === 'PEN' ? tc : undefined,
+      amountUSD: paymentData.amount,
       method: paymentData.method || 'Efectivo',
+      operationNumber: rawPayment.operationNumber || undefined,
       branchId: enrollmentRef?.branchId,
       paymentId,
       enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
     });
+    return { ok: true };
   };
 
   const refinanceInstallment = (planId: string, installmentId: string, refinanceData: any) => {
@@ -2048,8 +2140,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const registerEnrollments = (draft: EnrollmentDraft) => {
     const result = buildEnrollmentBatch(
       draft,
-      { branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students },
-      { guardians, students, enrollments, plans, payments, promotionGroups },
+      { branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students, classSchedules },
+      { guardians, students, enrollments, plans, payments, promotionGroups, counselings },
       { now: new Date().toISOString(), userName: currentUser.name }
     );
     if (!result.ok || !result.batch) return { ok: false, error: result.error };
@@ -2074,6 +2166,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setPlans(prev => [...prev, ...b.plans]);
     setPayments(prev => [...b.payments, ...prev]);
     setPromotionGroups(prev => [...prev, ...b.promotionGroups]);
+    setCounselings(prev => [...prev, ...b.counselings]);
     setCashMovements(prev => [
       ...b.cashMovements.map((m, i) => ({
         ...m, id: `CJ-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`, user: currentUser.name,
@@ -2302,6 +2395,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       items,
       setItems,
       stockItems, 
+      classSchedules,
+      addClassSchedule,
+      updateClassSchedule,
+      deleteClassSchedule,
       cashMovements,
       addCashMovement,
       promotionGroups,

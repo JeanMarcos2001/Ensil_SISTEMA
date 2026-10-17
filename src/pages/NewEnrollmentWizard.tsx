@@ -6,6 +6,7 @@ import { useData } from '../context/DataContext';
 import {
   availablePaymentTypesFor,
   emptyDraft,
+  emptyStudent,
   quoteEnrollment,
   validateContext,
   validateHolders,
@@ -36,7 +37,10 @@ function loadDraft(): { step: number; draft: EnrollmentDraft } | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed?.draft?.context || !Array.isArray(parsed.draft.students) || !Array.isArray(parsed.draft.holders)) return null;
-    return { step: Math.min(Math.max(Number(parsed.step) || 1, 1), STEPS.length), draft: parsed.draft };
+    const d = parsed.draft as EnrollmentDraft;
+    // Borradores anteriores no traen los campos de situación del alumno: se completan con valores vacíos.
+    d.students = d.students.map(s => ({ ...emptyStudent(), ...s }));
+    return { step: Math.min(Math.max(Number(parsed.step) || 1, 1), STEPS.length), draft: d };
   } catch {
     return null;
   }
@@ -54,7 +58,7 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
   const catalogs: EnrollmentCatalogs = {
     branches: data.branches, leadSources: data.leadSources, staff: data.staff, assignments: data.assignments,
     programs: data.programs, levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes,
-    promotions: data.promotions, guardians: data.guardians, students: data.students,
+    promotions: data.promotions, guardians: data.guardians, students: data.students, classSchedules: data.classSchedules,
   };
 
   // Sede de la sesión: una sesión de filial no puede cambiarla; el Superadmin en vista global sí.

@@ -4,107 +4,104 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, CheckCircle, Package, AlertCircle, ArrowRight } from 'lucide-react';
+import { Search, Filter, CheckCircle, Package, AlertCircle, ArrowRight, Layers, ShieldAlert } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData, Enrollment, Recipe } from '../context/DataContext';
-import { availableStock, canDeliver } from '../utils/inventory';
+import { availableStock } from '../utils/inventory';
+import {
+  availableComponents,
+  canSplitKit,
+  checkPaymentGate,
+  computeVerification,
+  findShortage,
+  initialModes,
+  pendingDeductions,
+  type DeliveryMode,
+} from '../utils/verification';
 
 export function Verification() {
-  const { enrollments, recipes, items, programs, levels, branches, stockItems, updateStock, updateEnrollmentVerification } = useData();
+  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, updateStock, updateEnrollmentVerification } = useData();
   const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<Enrollment | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<Recipe | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
-  const [verificationStatus, setVerificationStatus] = useState<'Verificado Completo' | 'Verificado Incompleto'>('Verificado Completo');
+  const [modes, setModes] = useState<Record<string, DeliveryMode>>({});
+  const [alreadyDelivered, setAlreadyDelivered] = useState<string[]>([]);
+  const [verifierId, setVerifierId] = useState('');
   const [observation, setObservation] = useState('');
   const [verificationDate, setVerificationDate] = useState(new Date().toISOString().slice(0, 16));
   const [formError, setFormError] = useState<string | null>(null);
+  const [paymentWarning, setPaymentWarning] = useState<string | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
 
+  // Personal de la sede de la matrícula (el verificador se elige de esta lista)
+  const branchName = selectedEnrollment
+    ? (branches.find(b => b.id === selectedEnrollment.branchId)?.name ?? selectedEnrollment.sede ?? '')
+    : '';
+  const branchStaff = staff.filter(s =>
+    s.status === 'Activo' && assignments.some(a => a.staffId === s.id && a.status === 'Activa' && a.branch === branchName)
+  );
+  const verifierStaff = branchStaff.find(s => s.id === verifierId);
+
+  // El estado Completo / Incompleto se calcula con lo que se marca
+  const verification = activeRecipe ? computeVerification(activeRecipe, items, checkedItems, modes) : null;
+
+  const setChecked = (id: string, value: boolean) => setCheckedItems(prev => ({ ...prev, [id]: value }));
+
+  const switchMode = (itemId: string, next: DeliveryMode) => {
+    const item = items.find(i => i.id === itemId);
+    setModes(prev => ({ ...prev, [itemId]: next }));
+    setCheckedItems(prev => {
+      const n = { ...prev };
+      if (next === 'componentes') delete n[itemId];
+      else item?.composition?.forEach(c => { if (!alreadyDelivered.includes(c.itemId)) delete n[c.itemId]; });
+      return n;
+    });
+  };
+
   const handleSaveVerification = () => {
-    if (!selectedEnrollment || !activeRecipe) return;
+    if (!selectedEnrollment || !activeRecipe || !verification) return;
     setFormError(null);
 
-    const branchId = selectedEnrollment.branchId || '';
-    const deliveredItemIds: string[] = [];
-    const missing: string[] = [];
-
-    // Cada artículo requerido solo se entrega si hay stock suficiente en la sede.
-    // Un paquete sellado (sin desempaquetado) se entrega y descuenta como UNA unidad.
-    activeRecipe.items.forEach(recipeItem => {
-      const item = items.find(i => i.id === recipeItem.itemId);
-      const wasAlreadyDelivered = selectedEnrollment.verifiedItems?.includes(recipeItem.itemId);
-
-      if (wasAlreadyDelivered) {
-        deliveredItemIds.push(recipeItem.itemId);
-        return;
-      }
-
-      if (checkedItems[recipeItem.itemId]) {
-        if (!canDeliver(stockItems, branchId, recipeItem.itemId, recipeItem.quantity)) {
-          missing.push(item?.name || recipeItem.itemId);
-          return;
-        }
-        deliveredItemIds.push(recipeItem.itemId);
-        updateStock(
-          branchId,
-          recipeItem.itemId,
-          -recipeItem.quantity,
-          'Entrega por Verificación',
-          `Entrega a alumno ${selectedEnrollment.student} (Matrícula: ${selectedEnrollment.id})`,
-          selectedEnrollment.id
-        );
-      } else if (item?.isPackage && item.allowUnpacking && item.composition) {
-        // Paquete que SÍ permite desempaquetado: se pueden entregar sus componentes por separado.
-        item.composition.forEach(comp => {
-          const needed = recipeItem.quantity * comp.quantity;
-          if (selectedEnrollment.verifiedItems?.includes(comp.itemId)) {
-            deliveredItemIds.push(comp.itemId);
-          } else if (checkedItems[comp.itemId]) {
-            if (!canDeliver(stockItems, branchId, comp.itemId, needed)) {
-              missing.push(comp.name);
-              return;
-            }
-            deliveredItemIds.push(comp.itemId);
-            updateStock(
-              branchId,
-              comp.itemId,
-              -needed,
-              'Entrega por Verificación',
-              `Entrega a alumno ${selectedEnrollment.student} (Matrícula: ${selectedEnrollment.id})`,
-              selectedEnrollment.id
-            );
-          }
-        });
-      }
-    });
-
-    if (missing.length > 0) {
-      setFormError(`Sin stock suficiente en la sede para: ${missing.join(', ')}. Desmárquelos o registre un ingreso de stock.`);
+    // Condición de pago: no se verifica sin el primer pago registrado
+    const gate = checkPaymentGate(selectedEnrollment, plans);
+    if (!gate.ok) {
+      setIsVerifyOpen(false);
+      setPaymentWarning(gate.reason ?? 'Realice el primer pago antes de realizar la verificación.');
+      return;
+    }
+    if (!verifierStaff) {
+      setFormError('Seleccione al verificador entre el personal de la sede.');
       return;
     }
 
-    if (verificationStatus === 'Verificado Completo') {
-      const allDelivered = activeRecipe.items.every(ri => {
-        const it = items.find(i => i.id === ri.itemId);
-        if (deliveredItemIds.includes(ri.itemId)) return true;
-        return !!(it?.isPackage && it.allowUnpacking && it.composition?.length &&
-          it.composition.every(c => deliveredItemIds.includes(c.itemId)));
-      });
-      if (!allDelivered) {
-        setFormError('No puede marcar la verificación como completa: faltan artículos por entregar.');
-        return;
-      }
+    const branchId = selectedEnrollment.branchId || '';
+    const deductions = pendingDeductions(activeRecipe, items, verification.deliveredIds, alreadyDelivered, modes);
+    const missing = findShortage(stockItems, branchId, deductions, items);
+    if (missing) {
+      setFormError(`Sin stock suficiente en la sede para: ${missing}. Desmárquelo o registre un ingreso de stock.`);
+      return;
     }
 
+    deductions.forEach(d => {
+      updateStock(
+        branchId,
+        d.itemId,
+        -d.quantity,
+        'Entrega por Verificación',
+        `Entrega a alumno ${selectedEnrollment.student} (Matrícula: ${selectedEnrollment.id})`,
+        selectedEnrollment.id
+      );
+    });
+
     updateEnrollmentVerification(selectedEnrollment.id, {
-      status: verificationStatus,
-      items: deliveredItemIds,
+      status: verification.status,
+      items: verification.deliveredIds,
       observation,
       date: verificationDate,
-      verifier: 'Admin (Usuario actual)'
+      verifier: `${verifierStaff.names} ${verifierStaff.lastNameP} ${verifierStaff.lastNameM}`.trim(),
     });
 
     setIsVerifyOpen(false);
@@ -120,6 +117,12 @@ export function Verification() {
   }, [searchTerm, statusFilter, programFilter]);
 
   const handleOpenVerify = (enrollment: Enrollment) => {
+    // Sin el primer pago registrado no se puede verificar: solo se muestra la advertencia
+    const gate = checkPaymentGate(enrollment, plans);
+    if (!gate.ok) {
+      setPaymentWarning(gate.reason ?? 'Realice el primer pago antes de realizar la verificación.');
+      return;
+    }
     setSelectedEnrollment(enrollment);
     
     // Buscar receta coincidente
@@ -145,17 +148,23 @@ export function Verification() {
     
     setActiveRecipe(recipe || null);
     
-    // Initialize checked items from enrollment if already verified
+    // Lo ya entregado en verificaciones anteriores queda marcado y bloqueado (su stock ya salió)
+    const delivered = enrollment.verifiedItems ?? [];
     const initialChecked: Record<string, boolean> = {};
-    if (enrollment.verifiedItems) {
-      enrollment.verifiedItems.forEach(id => {
-        initialChecked[id] = true;
-      });
-    }
+    delivered.forEach(id => { initialChecked[id] = true; });
     setCheckedItems(initialChecked);
-    setVerificationStatus(enrollment.verificationStatus === 'Verificado Completo' ? 'Verificado Completo' : 'Verificado Incompleto');
+    setAlreadyDelivered(delivered);
+    setModes(recipe ? initialModes(recipe, items, delivered) : {});
     setObservation(enrollment.verificationObservation || '');
     setVerificationDate(enrollment.verificationDate || new Date().toISOString().slice(0, 16));
+    setFormError(null);
+    // Verificador previo, si aún pertenece al personal de la sede
+    const branchNameOf = branches.find(b => b.id === enrollment.branchId)?.name ?? enrollment.sede ?? '';
+    const previous = staff.find(st =>
+      `${st.names} ${st.lastNameP} ${st.lastNameM}`.trim() === enrollment.verifier &&
+      assignments.some(a => a.staffId === st.id && a.status === 'Activa' && a.branch === branchNameOf)
+    );
+    setVerifierId(previous?.id ?? '');
     setIsVerifyOpen(true);
   };
 
@@ -165,7 +174,7 @@ export function Verification() {
     const matchesProgram = !programFilter || e.programId === programFilter;
     
     const matchesStatus = !statusFilter || 
-                         (statusFilter === 'pendiente' && !e.verificationStatus) ||
+                         (statusFilter === 'pendiente' && (!e.verificationStatus || e.verificationStatus === 'Pendiente')) ||
                          (statusFilter === 'incompleta' && e.verificationStatus === 'Verificado Incompleto') ||
                          (statusFilter === 'completa' && e.verificationStatus === 'Verificado Completo');
 
@@ -344,7 +353,7 @@ export function Verification() {
             }}>Cancelar</Button>
             <Button 
               variant="primary" 
-              disabled={!activeRecipe}
+              disabled={!activeRecipe || !verifierId}
               onClick={handleSaveVerification}
             >
               Guardar verificación
@@ -398,16 +407,26 @@ export function Verification() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-secondary">Fecha de verificación *</label>
-                    <input 
-                      type="datetime-local" 
-                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" 
+                    <input
+                      type="datetime-local"
+                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
                       value={verificationDate}
                       onChange={(e) => setVerificationDate(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-secondary">Verificador *</label>
-                    <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" value="Admin (Usuario actual)" disabled />
+                    <select
+                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                      value={verifierId}
+                      onChange={(e) => setVerifierId(e.target.value)}
+                    >
+                      <option value="">{branchStaff.length ? 'Seleccionar verificador...' : 'No hay personal asignado a la sede'}</option>
+                      {branchStaff.map(st => (
+                        <option key={st.id} value={st.id}>{st.names} {st.lastNameP} {st.lastNameM}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-text-muted">Personal activo de la sede {branchName}.</p>
                   </div>
                 </div>
 
@@ -419,7 +438,7 @@ export function Verification() {
                     </h3>
                     <span className="text-xs text-text-muted">Descuenta stock al guardar</span>
                   </div>
-                  
+
                   <div className="border border-border-soft rounded-xl overflow-hidden">
                     <table className="w-full text-sm text-left">
                       <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
@@ -430,73 +449,124 @@ export function Verification() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border-soft">
-                        {activeRecipe.items.map((recipeItem, idx) => {
-                          const item = items.find(i => i.id === recipeItem.itemId);
-                          const isPackage = item?.isPackage;
+                        {activeRecipe.items.map((line, idx) => {
+                          const item = items.find(i => i.id === line.itemId);
                           const branchId = selectedEnrollment.branchId || '';
-                          const alreadyDelivered = !!selectedEnrollment.verifiedItems?.includes(recipeItem.itemId);
-                          const hasStock = canDeliver(stockItems, branchId, recipeItem.itemId, recipeItem.quantity);
-                          const blocked = !alreadyDelivered && !hasStock;
-                          const showComponents = !!(isPackage && item?.allowUnpacking);
-                          
+                          const splittable = canSplitKit(item);
+                          const mode: DeliveryMode = modes[line.itemId] ?? 'kit';
+                          const kitLocked = alreadyDelivered.includes(line.itemId);
+                          const componentsLocked = !!item?.composition?.some(c => alreadyDelivered.includes(c.itemId));
+                          const canSwitch = splittable && !kitLocked && !componentsLocked;
+                          const kitStock = availableStock(stockItems, branchId, line.itemId);
+                          const kitBlocked = !kitLocked && kitStock < line.quantity;
+                          const suggestSplit = splittable && kitBlocked && availableComponents(stockItems, branchId, line, item!).length > 0;
+
+                          // --- Kit entregado por componentes: cada componente con su propio stock
+                          if (splittable && mode === 'componentes') {
+                            return (
+                              <React.Fragment key={idx}>
+                                <tr className="bg-surface-muted/20">
+                                  <td className="px-4 py-3"></td>
+                                  <td className="px-4 py-3">
+                                    <div className="font-bold text-primary-accent">
+                                      {item?.name}
+                                      <span className="ml-2 text-[10px] uppercase bg-primary-accent/10 px-1.5 py-0.5 rounded">Por componentes</span>
+                                    </div>
+                                    {canSwitch && (
+                                      <button type="button" className="text-xs text-primary-accent hover:underline mt-1" onClick={() => switchMode(line.itemId, 'kit')}>
+                                        Volver a entregar el kit completo
+                                      </button>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3 text-center font-medium">{line.quantity}</td>
+                                </tr>
+                                {item!.composition!.map((c, cIdx) => {
+                                  const needed = line.quantity * c.quantity;
+                                  const done = alreadyDelivered.includes(c.itemId);
+                                  const blocked = !done && availableStock(stockItems, branchId, c.itemId) < needed;
+                                  return (
+                                    <tr key={`${idx}-${cIdx}`} className={`hover:bg-surface-muted/30 ${blocked ? 'opacity-60 bg-surface-muted' : ''}`}>
+                                      <td className="px-4 py-2 text-center pl-8">
+                                        <input
+                                          type="checkbox"
+                                          className="rounded border-border-soft text-primary-accent focus:ring-primary-accent"
+                                          checked={!blocked && !!checkedItems[c.itemId]}
+                                          disabled={blocked || done}
+                                          title={blocked ? 'Sin stock suficiente en la sede' : undefined}
+                                          onChange={(e) => setChecked(c.itemId, e.target.checked)}
+                                        />
+                                      </td>
+                                      <td className="px-4 py-2">
+                                        <div className="text-sm text-text-primary">{c.name}</div>
+                                        <div className={`text-xs ${blocked ? 'text-danger-text font-medium' : 'text-text-muted'}`}>
+                                          Stock disponible: {availableStock(stockItems, branchId, c.itemId)}
+                                          {blocked && ' — sin stock suficiente'}
+                                          {done && ' — ya entregado'}
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-2 text-center text-xs text-text-muted">{needed}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </React.Fragment>
+                            );
+                          }
+
+                          // --- Artículo normal o kit completo (una unidad de stock)
                           return (
                             <React.Fragment key={idx}>
-                              <tr className={`hover:bg-surface-muted/50 ${isPackage ? 'bg-surface-muted/20' : ''} ${blocked ? 'opacity-60 bg-surface-muted' : ''}`}>
+                              <tr className={`hover:bg-surface-muted/50 ${item?.isPackage ? 'bg-surface-muted/20' : ''} ${kitBlocked ? 'opacity-60 bg-surface-muted' : ''}`}>
                                 <td className="px-4 py-3 text-center">
-                                  <input 
-                                    type="checkbox" 
+                                  <input
+                                    type="checkbox"
                                     className="rounded border-border-soft text-primary-accent focus:ring-primary-accent"
-                                    checked={!blocked && (checkedItems[recipeItem.itemId] || false)}
-                                    disabled={blocked}
-                                    title={blocked ? 'Sin stock suficiente en la sede' : undefined}
-                                    onChange={(e) => {
-                                      const newChecked = { ...checkedItems, [recipeItem.itemId]: e.target.checked };
-                                      // If it's a package, we might want to auto-check components, 
-                                      // but the user says "no puede asumir que siempre hay kit completo cerrado"
-                                      // so we let them check individually.
-                                      setCheckedItems(newChecked);
-                                    }}
+                                    checked={!kitBlocked && !!checkedItems[line.itemId]}
+                                    disabled={kitBlocked || kitLocked}
+                                    title={kitBlocked ? 'Sin stock suficiente en la sede' : undefined}
+                                    onChange={(e) => setChecked(line.itemId, e.target.checked)}
                                   />
                                 </td>
                                 <td className="px-4 py-3">
-                                  <div className={`font-medium ${isPackage ? 'text-primary-accent font-bold' : 'text-text-primary'}`}>
+                                  <div className={`font-medium ${item?.isPackage ? 'text-primary-accent font-bold' : 'text-text-primary'}`}>
                                     {item?.name || 'Artículo no encontrado'}
-                                    {isPackage && <span className="ml-2 text-[10px] uppercase bg-primary-accent/10 px-1.5 py-0.5 rounded">Kit</span>}
+                                    {item?.isPackage && <span className="ml-2 text-[10px] uppercase bg-primary-accent/10 px-1.5 py-0.5 rounded">Kit</span>}
                                   </div>
-                                  <div className={`text-xs ${blocked ? 'text-danger-text font-medium' : 'text-text-muted'}`}>
-                                    Stock disponible: {availableStock(stockItems, branchId, recipeItem.itemId)}
-                                    {blocked && ' — sin stock suficiente, no puede entregarse'}
-                                    {alreadyDelivered && ' — ya entregado'}
+                                  <div className={`text-xs ${kitBlocked ? 'text-danger-text font-medium' : 'text-text-muted'}`}>
+                                    Stock disponible: {kitStock}
+                                    {kitBlocked && ' — sin stock suficiente, no puede entregarse'}
+                                    {kitLocked && ' — ya entregado'}
                                   </div>
-                                  {isPackage && !item?.allowUnpacking && item?.composition && item.composition.length > 0 && (
-                                    <div className="text-[11px] text-text-muted mt-0.5">
-                                      Paquete sellado (una unidad): {item.composition.map(c => `${c.quantity}× ${c.name}`).join(', ')}
+                                  {canSwitch && (
+                                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                                      <button
+                                        type="button"
+                                        onClick={() => switchMode(line.itemId, 'componentes')}
+                                        className={`inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border transition-colors ${
+                                          suggestSplit
+                                            ? 'border-primary-accent bg-primary-accent/10 text-primary-accent font-medium'
+                                            : 'border-border-soft text-text-secondary hover:border-primary-accent hover:text-primary-accent'
+                                        }`}
+                                      >
+                                        <Layers size={12} /> Entregar por componentes
+                                      </button>
+                                      {suggestSplit && (
+                                        <span className="text-xs text-primary-accent">Hay stock de algunos componentes por separado.</span>
+                                      )}
                                     </div>
                                   )}
+                                  {item?.isPackage && item.composition && item.composition.length > 0 && (
+                                    <ul className="mt-1.5 space-y-0.5">
+                                      {item.composition.map((c, cIdx) => (
+                                        <li key={cIdx} className="flex items-center gap-1.5 text-xs text-text-muted">
+                                          <CheckCircle size={12} className={checkedItems[line.itemId] ? 'text-success-text' : 'text-border-soft'} />
+                                          {line.quantity * c.quantity}× {c.name}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
                                 </td>
-                                <td className="px-4 py-3 text-center font-medium">{recipeItem.quantity}</td>
+                                <td className="px-4 py-3 text-center font-medium">{line.quantity}</td>
                               </tr>
-                              {showComponents && item?.composition?.map((comp, cIdx) => (
-                                <tr key={`${idx}-${cIdx}`} className="bg-surface/50 hover:bg-surface-muted/30">
-                                  <td className="px-4 py-2 text-center pl-8">
-                                    <input 
-                                      type="checkbox" 
-                                      className="rounded border-border-soft text-primary-accent focus:ring-primary-accent scale-90"
-                                      checked={checkedItems[comp.itemId] || false}
-                                      onChange={(e) => setCheckedItems({
-                                        ...checkedItems,
-                                        [comp.itemId]: e.target.checked
-                                      })}
-                                    />
-                                  </td>
-                                  <td className="px-4 py-2 text-xs text-text-secondary italic flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-border-soft" />
-                                    {comp.name}
-                                    <span className="text-[10px] text-text-muted">(Componente)</span>
-                                  </td>
-                                  <td className="px-4 py-2 text-center text-xs text-text-muted">{comp.quantity}</td>
-                                </tr>
-                              ))}
                             </React.Fragment>
                           );
                         })}
@@ -505,16 +575,17 @@ export function Verification() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-secondary">Estado de verificación *</label>
-                  <select 
-                    className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
-                    value={verificationStatus}
-                    onChange={(e) => setVerificationStatus(e.target.value as any)}
-                  >
-                    <option value="Verificado Completo">Completa (Todo entregado)</option>
-                    <option value="Verificado Incompleto">Incompleta (Faltan artículos)</option>
-                  </select>
+                <div className="flex items-center justify-between bg-surface-muted border border-border-soft rounded-xl px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-text-secondary">Estado de verificación</p>
+                    <p className="text-xs text-text-muted">Se calcula automáticamente según los artículos marcados como entregados.</p>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant={verification?.complete ? 'success' : 'warning'}>
+                      {verification?.complete ? 'Completa' : 'Incompleta'}
+                    </Badge>
+                    <p className="text-xs text-text-muted mt-1">{verification?.delivered ?? 0} de {verification?.total ?? 0} artículos</p>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -531,6 +602,26 @@ export function Verification() {
           </div>
         )}
       </Modal>
+
+      {/* Advertencia: no se puede verificar sin el primer pago registrado */}
+      {paymentWarning && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-md animate-in fade-in"
+          onClick={() => setPaymentWarning(null)}
+        >
+          <div
+            className="bg-surface rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 text-center space-y-4 animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto w-12 h-12 rounded-full bg-warning-tint text-warning-text flex items-center justify-center">
+              <ShieldAlert size={24} />
+            </div>
+            <h3 className="text-lg font-semibold text-text-primary">No se puede verificar todavía</h3>
+            <p className="text-sm text-text-secondary">{paymentWarning}</p>
+            <Button variant="primary" className="w-full justify-center" onClick={() => setPaymentWarning(null)}>Entendido</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

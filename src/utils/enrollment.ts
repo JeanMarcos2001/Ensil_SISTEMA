@@ -10,6 +10,8 @@ import type {
   Assignment,
   Branch,
   CashMovement,
+  ClassSchedule,
+  Counseling,
   Enrollment,
   Guardian,
   LeadSource,
@@ -42,11 +44,42 @@ import {
 // ---------------------------------------------------------------- Borrador
 
 export type EnrollmentMode = 'independiente' | 'apoderado';
+export type Situation = 'estudiando' | 'trabajando' | 'ambos' | 'ninguna';
+
+export const SITUATIONS: { id: Situation; label: string }[] = [
+  { id: 'estudiando', label: 'Estudiando' },
+  { id: 'trabajando', label: 'Trabajando' },
+  { id: 'ambos', label: 'Estudiando y trabajando' },
+  { id: 'ninguna', label: 'Ninguna por el momento' },
+];
+export const INSTITUTION_TYPES = ['Colegio', 'Instituto', 'Universidad', 'Otro'] as const;
+export const SCHOOL_GRADES = [
+  'Inicial 3 años', 'Inicial 4 años', 'Inicial 5 años',
+  '1° Primaria', '2° Primaria', '3° Primaria', '4° Primaria', '5° Primaria', '6° Primaria',
+  '1° Secundaria', '2° Secundaria', '3° Secundaria', '4° Secundaria', '5° Secundaria',
+];
+
+export const studies = (s: { situation: Situation | '' }) => s.situation === 'estudiando' || s.situation === 'ambos';
+export const works = (s: { situation: Situation | '' }) => s.situation === 'trabajando' || s.situation === 'ambos';
+
+/** Datos de situación listos para guardar: solo se conserva lo que corresponde a la situación elegida. */
+export function situationData(ds: { situation: Situation | ''; institutionType: string; school: string; grade: string; occupation: string; workplace: string }) {
+  return {
+    occupationStatus: (ds.situation || undefined) as Situation | undefined,
+    institutionType: studies(ds) ? ds.institutionType || undefined : undefined,
+    colegio: studies(ds) ? ds.school.trim() || undefined : undefined,
+    grado: studies(ds) ? ds.grade.trim() || undefined : undefined,
+    occupation: works(ds) ? ds.occupation.trim() || undefined : undefined,
+    workplace: works(ds) ? ds.workplace.trim() || undefined : undefined,
+  };
+}
 export type DocType = 'DNI' | 'CE' | 'Pasaporte';
 
 export interface DraftPerson {
   /** Si la persona ya existe en el sistema, su id (no se duplica). */
   existingId?: string;
+  /** Cómo se identifica a la persona en la tarjeta: ya registrada o nueva (por defecto, nueva). */
+  source?: 'nuevo' | 'existente';
   docType: DocType;
   docNumber: string;
   names: string;
@@ -65,13 +98,23 @@ export interface DraftStudent {
   person: DraftPerson;
   /** Parentesco con el titular; vacío si la matrícula es independiente. */
   relationship: string;
-  grade: string;
+  /** ¿Estudia, trabaja, ambos o ninguna? Define qué datos se piden. */
+  situation: Situation | '';
+  institutionType: string;
+  /** Institución educativa (colegio, instituto, universidad…). */
   school: string;
+  /** Grado (colegio) o ciclo (instituto/universidad). */
+  grade: string;
+  occupation: string;
+  workplace: string;
   programId: string;
   levelId: string;
   paymentTypeId: string;
   schedule: string;
   startDate: string;
+  /** Fecha y hora específicas de la primera asesoría. */
+  counselingDate: string;
+  counselingTime: string;
   /** Fechas acordadas (ISO) para cronogramas de fechas manuales (Contado en 2 partes). */
   dueDates: string[];
 }
@@ -103,8 +146,9 @@ let keyCounter = 0;
 export const newStudentKey = () => `S${Date.now().toString(36)}${(keyCounter++).toString(36)}`;
 
 export const emptyStudent = (): DraftStudent => ({
-  key: newStudentKey(), person: emptyPerson(), relationship: '', grade: '', school: '',
-  programId: '', levelId: '', paymentTypeId: '', schedule: '', startDate: '', dueDates: [],
+  key: newStudentKey(), person: emptyPerson(), relationship: '',
+  situation: '', institutionType: '', school: '', grade: '', occupation: '', workplace: '',
+  programId: '', levelId: '', paymentTypeId: '', schedule: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
 });
 
 export const emptyDraft = (today: string, branchId = ''): EnrollmentDraft => ({
@@ -154,6 +198,10 @@ export interface PersonRules {
 
 export function validatePerson(p: DraftPerson, label: string, today: string, rules: PersonRules = {}): string[] {
   const errors: string[] = [];
+  if (p.source === 'existente' && !p.existingId) {
+    errors.push(`${label}: seleccione a la persona ya registrada o cambie a «Nuevo».`);
+    return errors;
+  }
   if (p.existingId) return errors; // persona ya registrada
   const doc = validateDocument(p.docType, p.docNumber);
   if (doc) errors.push(`${label}: ${doc}`);
@@ -183,6 +231,7 @@ export interface EnrollmentCatalogs {
   promotions: Promotion[];
   guardians: Guardian[];
   students: Student[];
+  classSchedules: ClassSchedule[];
 }
 
 /** Área cuyo personal puede ser responsable de la entrevista. */
@@ -228,6 +277,11 @@ export function getInterviewerOptions(
 
 export function getInterviewers(c: Pick<EnrollmentCatalogs, 'staff' | 'assignments' | 'branches'>, branchId: string): Staff[] {
   return getInterviewerOptions(c, branchId).map(o => o.staff);
+}
+
+/** Horarios de clases activos y disponibles en la sede (configurados en Configuración → Horarios de clases). */
+export function getAvailableSchedules(schedules: ClassSchedule[], branchId: string): ClassSchedule[] {
+  return schedules.filter(h => h.status === 'Activo' && (h.allBranches || h.branchIds.includes(branchId)));
 }
 
 /** Programas activos y habilitados para la sede. */
@@ -433,6 +487,17 @@ export function validateStudents(draft: EnrollmentDraft, c: EnrollmentCatalogs, 
     if (draft.mode === 'apoderado' && !draft.students[i].relationship) {
       e.push(`${label}: indique el parentesco con el titular.`);
     }
+    const ds = draft.students[i];
+    if (!ds.situation) {
+      e.push(`${label}: indique si está estudiando, trabajando o ninguna.`);
+    } else {
+      if (studies(ds)) {
+        if (!ds.institutionType) e.push(`${label}: seleccione el tipo de institución.`);
+        if (!ds.school.trim()) e.push(`${label}: indique la institución donde estudia.`);
+        if (!ds.grade.trim()) e.push(`${label}: indique el ${ds.institutionType === 'Colegio' ? 'grado' : 'ciclo'}.`);
+      }
+      if (works(ds) && !ds.occupation.trim()) e.push(`${label}: indique la ocupación.`);
+    }
     if (!p.existingId && p.docNumber.trim() && c.students.some(s => s.doc === p.docNumber.trim())) {
       e.push(`${label}: el documento ${p.docNumber} ya está registrado. Selecciónelo como alumno existente.`);
     }
@@ -456,9 +521,15 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
       if (!s.levelId) e.push(`${label}: seleccione el nivel.`);
       else if (!getProgramLevels(c.levels, program).some(l => l.id === s.levelId)) e.push(`${label}: el nivel no es válido para el programa.`);
     }
+    if (!s.counselingDate) e.push(`${label}: indique la fecha de la primera asesoría.`);
+    else if (s.counselingDate < draft.context.date) e.push(`${label}: la primera asesoría no puede ser anterior a la fecha de matrícula.`);
+    if (!s.counselingTime) e.push(`${label}: indique la hora de la primera asesoría.`);
     if (!s.paymentTypeId) { e.push(`${label}: seleccione el tipo de pago.`); return; }
     if (!q.tariff) e.push(`${label}: no hay un tarifario vigente para el tipo de pago elegido.`);
-    if (s.startDate && s.startDate < draft.context.date) e.push(`${label}: la fecha de inicio no puede ser anterior a la matrícula.`);
+    if (s.startDate && s.startDate < draft.context.date) e.push(`${label}: la fecha de inicio de clases no puede ser anterior a la matrícula.`);
+    if (s.schedule && !getAvailableSchedules(c.classSchedules, draft.context.branchId).some(h => h.name === s.schedule)) {
+      e.push(`${label}: el horario elegido no está disponible en la sede.`);
+    }
     if (q.mode === 'fechas_manuales' && q.tariff) {
       const needed = q.tariff.installments.filter(l => l.variable).length;
       const dates = s.dueDates.slice(0, needed);
@@ -524,6 +595,7 @@ export interface ExistingState {
   plans: Plan[];
   payments: Payment[];
   promotionGroups: PromotionGroup[];
+  counselings: Counseling[];
 }
 
 export interface EnrollmentBatch {
@@ -536,6 +608,7 @@ export interface EnrollmentBatch {
   payments: Payment[];
   cashMovements: Omit<CashMovement, 'id' | 'user'>[];
   promotionGroups: PromotionGroup[];
+  counselings: Counseling[];
 }
 
 export interface BatchResult {
@@ -624,6 +697,7 @@ export function buildEnrollmentBatch(
         patch: {
           program: programLabel, horario: ds.schedule || undefined, fechaInicio: ds.startDate || undefined,
           titular: titularName, status: 'Activo',
+          ...situationData(ds),
         },
       });
     } else {
@@ -631,7 +705,7 @@ export function buildEnrollmentBatch(
       newStudents.push({
         id: studentId, doc: person.docNumber.trim(), name, age: birth ? (ageOn(birth, draft.context.date) ?? 0) : 0,
         program: programLabel, horario: ds.schedule || undefined, fechaInicio: ds.startDate || undefined,
-        grado: ds.grade.trim() || undefined, colegio: ds.school.trim() || undefined,
+        ...situationData(ds),
         titular: titularName, status: 'Activo',
         docType: person.docType, names: person.names.trim(), lastNameP: person.lastNameP.trim(), lastNameM: person.lastNameM.trim(),
         birthDate: birth, phone: person.phone.trim(), email: person.email.trim(), address: person.address.trim(),
@@ -689,6 +763,23 @@ export function buildEnrollmentBatch(
       assignedPrice: q.assignedPrice,
       verificationStatus: 'Pendiente',
       createdAt: opts.now, createdBy: opts.userName,
+    });
+  });
+
+  // ---- Primera asesoría de cada alumno (fecha y hora definidas en el paso Programa)
+  const counselings: Counseling[] = [];
+  const counselingIdPool = state.counselings.map(c => c.id);
+  draft.students.forEach((ds, i) => {
+    const q = quote.students[i];
+    counselings.push({
+      id: nextNumericId([...counselingIdPool, ...counselings.map(c => c.id)]),
+      student: fullName(studentPerson(draft, i)),
+      program: q.program!.name,
+      level: q.level?.name ?? 'Sin nivel',
+      date: ds.counselingDate,
+      time: ds.counselingTime,
+      responsible: 'Por asignar',
+      status: 'Pendiente',
     });
   });
 
@@ -778,6 +869,6 @@ export function buildEnrollmentBatch(
 
   return {
     ok: true,
-    batch: { newGuardians, guardianUpdates, newStudents, studentUpdates, enrollments, plans, payments, cashMovements, promotionGroups },
+    batch: { newGuardians, guardianUpdates, newStudents, studentUpdates, enrollments, plans, payments, cashMovements, promotionGroups, counselings },
   };
 }

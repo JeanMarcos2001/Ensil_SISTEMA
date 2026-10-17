@@ -415,3 +415,48 @@ Crea en una sola operación y solo si todo valida: una matrícula por alumno con
 - **Un grupo promocional exige el mismo tipo de pago** y solo aplica a pagos inmediatos (Contado).
 - Dashboard, Pagos, Caja chica, Contratos, Asignaciones, Psicopedagogía (guardado), Reportes y Sistema siguen pendientes (fuera de estas 5 etapas).
 - Autenticación/permisos y persistencia (Supabase) siguen pendientes: el sistema sigue en memoria.
+
+---
+
+# Pulido del asistente — Datos de alumnos y Programa (2026-10-16)
+
+| Tema | Cambio |
+|---|---|
+| Alumno **existente o nuevo** | Cada tarjeta de alumno (y de titular) tiene un interruptor deslizante **Existente \| Nuevo**. *Existente*: solo el buscador (nombre o documento); al elegir, queda una tarjeta resumen con «Cambiar». *Nuevo*: solo los campos de datos, sin buscador. Al alternar se parte de una ficha limpia para no mezclar datos. Si queda en «Existente» sin elegir a nadie, no se avanza. |
+| **Situación del alumno** (reemplaza grado + colegio sueltos) | Estudiando → tipo de institución (Colegio / Instituto / Universidad / Otro), institución y **grado** (lista de Inicial a 5.° Secundaria si es colegio) o **ciclo**. Trabajando → ocupación y centro de trabajo (opcional). Estudiando y trabajando → ambos bloques. Ninguna por el momento → nada más. Solo se guarda lo que corresponde a la situación elegida. El parentesco y la situación aparecen cuando ya hay una persona definida. |
+| **Horario de clases** | Antes era una lista fija dentro del código. Ahora sale de **Configuración → CRUDS Básicos → Horarios de clases** (nombre, todas las sedes o sedes específicas, estado). El asistente ofrece los activos de la sede; es opcional («Por definir»). Un horario en uso no se puede eliminar (se inactiva); no se permiten nombres duplicados. |
+| **Fecha de inicio de clases** | Se renombró y se explicó: es el primer día de clases del alumno (opcional, no anterior a la matrícula). **No afecta** los vencimientos de las cuotas, que se cuentan desde la fecha de matrícula. |
+
+Verificación: `tsc` 0 errores · `check-enrollment.ts` 66/66 (se agregaron casos de existente sin elegir, cada situación, datos sobrantes descartados y horarios por sede/estado) · en navegador: interruptor Existente/Nuevo, búsqueda y selección, bloques condicionales de situación, selector de horarios y CRUD de horarios (alta por sede, duplicado rechazado).
+No cambiado: la pantalla **Personas → Alumnos** (edición manual) sigue con «grado» y «colegio» sueltos.
+
+---
+
+# Primera asesoría en el paso Programa y registro de pagos desde «Pagos» (2026-10-16)
+
+| Tema | Cambio |
+|---|---|
+| Sección «Clases (opcional)» del paso 4 | Pasó a **«Primera asesoría»**: fecha y hora específicas (obligatorias; la fecha no puede ser anterior a la matrícula). Se muestra en el Resumen y, al guardar, **crea la primera asesoría del alumno** (estado *Pendiente*, responsable *Por asignar*) en Psicopedagogía → Primera asesoría. Ya no se piden horario ni fecha de inicio de clases en el asistente. |
+| Contado en 2 partes | Ya se registra como plan y figura en **Planes y cartera**; sus cuotas (Parte 1 y Parte 2 = saldo) se cobran desde Pagos. |
+| **Pagos → Registrar pago** | El buscador ahora detecta **todas las matrículas que figuran en Planes y cartera** (por alumno, titular, matrícula o plan); las que no tienen saldo se muestran deshabilitadas. Tras elegir la matrícula se listan sus cuotas con saldo, se puede cobrar en USD o PEN (con TC y equivalente), con medio, comprobante (serie coherente con boleta/factura) y foto obligatoria. Valida que el monto no supere el saldo. Al guardar aplica el pago a la cuota (`registerPayment`), crea el pago y el ingreso en la caja de la moneda recibida. |
+| Listado de Pagos | Muestra los **pagos reales del sistema** (matrículas y cobros de cuotas) en lugar de filas de ejemplo fijas. |
+| Corrección | En «Contado en 2 partes», la Parte 1 quedaba con un monto inflado (tope del total + lo cobrado); ahora queda fijada en lo realmente cobrado y la Parte 2 es el saldo. |
+
+Verificación: `tsc` 0 errores · `check-enrollment.ts` 74/74 (casos nuevos de primera asesoría) · en navegador: matrícula Contado en 2 partes con asesoría → aparece en Primera asesoría; Pagos → búsqueda por alumno, matrícula y titular; errores de monto, TC y serie; Parte 1 en PEN (S/ 950 a TC 3.8 = $ 250, ingreso en Caja PEN) y Parte 2 en USD → plan *Completado*.
+Sin cambios (a pedido): «Reversar pago» sigue sin acción; **Configuración → Horarios de clases** se mantiene aunque el asistente ya no lo use.
+
+---
+
+# Verificación de entrega — estado automático, kits y condición de pago (2026-10-17)
+
+Reglas en `src/utils/verification.ts` (puras) y pantalla `Verification.tsx`.
+
+| Tema | Cambio |
+|---|---|
+| **Estado de verificación** | Ya no es un combo manual: se calcula solo (**Completa** si todos los artículos de la receta están entregados; si no, **Incompleta**) y se muestra con el conteo «N de M artículos». Solo las **observaciones** siguen siendo manuales. |
+| **Kits** | Se marca el kit como una unidad (los componentes se listan solo como detalle, con ✓ automático cuando el kit está entregado); **no hay check por componente** ni se desempaqueta desde aquí. Junto al kit hay la opción **«Entregar por componentes»**, que reemplaza el kit por sus componentes (cada uno con su check y su propio stock); si falta el kit y hay stock de algunos componentes, la opción se resalta y lo avisa. Se puede volver a «kit completo». Un paquete sellado (sin desempaquetado) no ofrece la opción. |
+| **Verificador** | Combo con el **personal activo asignado a la sede de la matrícula** (ya no «Admin (Usuario actual)»); obligatorio. |
+| **Condición de pago** | Solo se puede verificar si la matrícula tiene su **primer pago registrado**: Contado cobrado en el registro de matrícula, o Plan / Contado en 2 partes con la **primera cuota cancelada**. El botón «Verificar» siempre funciona, pero si no se cumple abre una ventana con desenfoque: «Realice el primer pago antes de realizar la verificación» (indica qué cuota falta). Se vuelve a validar al guardar. |
+| Corrección | El filtro «Pendiente» no encontraba las matrículas nuevas (nacen con estado «Pendiente»). |
+
+Verificación: `tsc` 0 errores · `scripts/check-verification.ts` 27/27 · en navegador: sin combo de estado; el estado cambia solo al marcar (0/2 → 1/2 → 2/2 Completa); kit sin checks por componente y con opción de componentes; en modo componentes solo se descuenta lo marcado; combo de verificador (personal de Piura); guardar deshabilitado sin verificador; Contado en 2 partes sin pago → advertencia con desenfoque, tras registrar la Parte 1 → se abre la verificación.

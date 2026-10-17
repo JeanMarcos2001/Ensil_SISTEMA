@@ -1,7 +1,8 @@
 import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { emptyPerson, emptyStudent, studentPerson, type DraftPerson, type DraftStudent } from '../../utils/enrollment';
+import { emptyPerson, emptyStudent, studentPerson, type DraftPerson, type DraftStudent, type Situation } from '../../utils/enrollment';
 import { Field, PersonForm, StepHeader, inputCls } from './fields';
+import { StudentSituation } from './StudentSituation';
 import { STEPS, type StepProps } from './types';
 
 const RELATIONSHIPS = ['Hijo(a)', 'Nieto(a)', 'Sobrino(a)', 'Hermano(a)', 'Otro familiar', 'Otro'];
@@ -18,12 +19,22 @@ export function StepStudents({ draft, update, catalogs, today }: StepProps) {
     const s = catalogs.students.find(x => x.id === id);
     if (!s) return;
     const person: DraftPerson = {
-      ...emptyPerson(), existingId: s.id,
+      ...emptyPerson(), source: 'existente', existingId: s.id,
       docType: (s.docType as DraftPerson['docType']) || 'DNI', docNumber: s.doc,
       names: s.names ?? s.name, lastNameP: s.lastNameP ?? '', lastNameM: s.lastNameM ?? '',
       birthDate: s.birthDate ?? '', phone: s.phone ?? '', email: s.email ?? '', address: s.address ?? '',
     };
-    setStudent(idx, { person, grade: s.grado ?? '', school: s.colegio ?? '' });
+    // La ficha guardada trae su situación; si es antigua, se infiere de si tenía colegio.
+    const situation: Situation | '' = s.occupationStatus ?? (s.colegio || s.grado ? 'estudiando' : '');
+    setStudent(idx, {
+      person,
+      situation,
+      institutionType: s.institutionType ?? (s.colegio ? 'Colegio' : ''),
+      school: s.colegio ?? '',
+      grade: s.grado ?? '',
+      occupation: s.occupation ?? '',
+      workplace: s.workplace ?? '',
+    });
   };
 
   return (
@@ -57,27 +68,26 @@ export function StepStudents({ draft, update, catalogs, today }: StepProps) {
                 ageOnDate={draft.context.date}
                 existing={catalogs.students.map(x => ({ id: x.id, label: x.name, doc: x.doc }))}
                 onPickExisting={id => pickExisting(idx, id)}
-                onClearExisting={() => setStudent(idx, { person: emptyPerson() })}
-                searchPlaceholder="Buscar alumno ya registrado por nombre o documento..."
+                searchPlaceholder="Buscar alumno por nombre o documento (mínimo 2 caracteres)..."
               />
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              {draft.mode === 'apoderado' && (
-                <Field label="Parentesco con el titular" required>
-                  <select className={inputCls} value={s.relationship} onChange={e => setStudent(idx, { relationship: e.target.value })}>
-                    <option value="">Seleccionar...</option>
-                    {RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </Field>
-              )}
-              <Field label="Grado">
-                <input className={inputCls} value={s.grade} onChange={e => setStudent(idx, { grade: e.target.value })} />
-              </Field>
-              <Field label="Colegio / institución">
-                <input className={inputCls} value={s.school} onChange={e => setStudent(idx, { school: e.target.value })} />
-              </Field>
-            </div>
+            {/* El parentesco y la situación se piden en cuanto hay una persona definida (registrada o nueva) */}
+            {(s.person.source !== 'existente' || s.person.existingId || sameAsHolder) && (
+              <>
+                {draft.mode === 'apoderado' && (
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border-soft">
+                    <Field label="Parentesco con el titular" required>
+                      <select className={inputCls} value={s.relationship} onChange={e => setStudent(idx, { relationship: e.target.value })}>
+                        <option value="">Seleccionar...</option>
+                        {RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </Field>
+                  </div>
+                )}
+                <StudentSituation student={s} onChange={patch => setStudent(idx, patch)} />
+              </>
+            )}
           </div>
         );
       })}

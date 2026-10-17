@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Shipping } from '../logistics/Shipping';
 import { LeadsConfig } from './LeadsConfig';
+import { ClassSchedulesConfig } from './ClassSchedulesConfig';
 
 export function SettingsPage() {
   const [isCrudsOpen, setIsCrudsOpen] = useState(true);
@@ -32,6 +33,13 @@ export function SettingsPage() {
                   Orígenes de Leads
                 </button>
                 
+                <button 
+                  onClick={() => setActiveTab('schedules')}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'schedules' ? 'bg-active-tint text-primary-accent font-medium' : 'text-text-secondary hover:bg-surface-muted hover:text-text-primary'}`}
+                >
+                  Horarios de clases
+                </button>
+                
                 <div className="h-px bg-border-soft my-1 mx-2"></div>
                 
                 <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider px-2 py-1">Logística</div>
@@ -50,6 +58,7 @@ export function SettingsPage() {
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-6 bg-surface">
         {activeTab === 'leads' && <LeadsConfig />}
+        {activeTab === 'schedules' && <ClassSchedulesConfig />}
         {activeTab === 'shipping' && <Shipping />}
       </div>
     </div>

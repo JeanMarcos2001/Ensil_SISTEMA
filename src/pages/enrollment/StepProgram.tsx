@@ -10,7 +10,6 @@ import {
   type DraftStudent,
 } from '../../utils/enrollment';
 import { buildPromotionGroups, suggestGroups } from '../../utils/promotions';
-import { ENROLLMENT_SCHEDULES } from '../../config/schedules';
 import { Field, StepHeader, inputCls } from './fields';
 import { STEPS, type StepProps } from './types';
 
@@ -195,22 +194,27 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Horario">
-                <select className={inputCls} value={s.schedule} onChange={e => setStudent(idx, { schedule: e.target.value })}>
-                  <option value="">Seleccionar horario...</option>
-                  {ENROLLMENT_SCHEDULES.map(h => <option key={h} value={h}>{h}</option>)}
-                </select>
-              </Field>
-              <Field label="Fecha de inicio">
-                <input
-                  type="date"
-                  min={draft.context.date}
-                  className={inputCls}
-                  value={s.startDate}
-                  onChange={e => setStudent(idx, { startDate: e.target.value })}
-                />
-              </Field>
+            <div className="space-y-2 pt-4 border-t border-border-soft">
+              <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Primera asesoría</p>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Fecha de la primera asesoría" required hint="No puede ser anterior a la fecha de matrícula.">
+                  <input
+                    type="date"
+                    min={draft.context.date}
+                    className={inputCls}
+                    value={s.counselingDate}
+                    onChange={e => setStudent(idx, { counselingDate: e.target.value })}
+                  />
+                </Field>
+                <Field label="Hora de la primera asesoría" required hint="Hora exacta acordada con el alumno o su titular.">
+                  <input
+                    type="time"
+                    className={inputCls}
+                    value={s.counselingTime}
+                    onChange={e => setStudent(idx, { counselingTime: e.target.value })}
+                  />
+                </Field>
+              </div>
             </div>
           </div>
         );

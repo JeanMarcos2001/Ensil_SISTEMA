@@ -3,7 +3,7 @@
  * Ejecutar: npx tsx scripts/check-enrollment.ts
  */
 import type {
-  Assignment, Branch, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff,
+  Assignment, Branch, ClassSchedule, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff,
 } from '../src/context/DataContext';
 import {
   buildEnrollmentBatch, emptyDraft, emptyPerson, emptyStudent, getInterviewerOptions, quoteEnrollment,
@@ -11,6 +11,7 @@ import {
   type DraftPerson, type EnrollmentCatalogs, type EnrollmentDraft, type ExistingState,
 } from '../src/utils/enrollment';
 import { generateBreakdown, resolveScheduleMode, sumBreakdown } from '../src/utils/tariffs';
+import { validateStudents } from '../src/utils/enrollment';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -70,11 +71,17 @@ const promo: Promotion = {
   startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo',
 };
 
+const classSchedules: ClassSchedule[] = [
+  { id: 'H1', name: 'L-M-V 4:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
+  { id: 'H2', name: 'Sábados 9:00 AM', allBranches: false, branchIds: ['FIL-PIU'], status: 'Activo' },
+  { id: 'H3', name: 'Antiguo', allBranches: true, branchIds: [], status: 'Inactivo' },
+];
+
 const catalogs = (over: Partial<EnrollmentCatalogs> = {}): EnrollmentCatalogs => ({
   branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes,
-  promotions: [promo], guardians: [], students: [], ...over,
+  promotions: [promo], guardians: [], students: [], classSchedules, ...over,
 });
-const empty: ExistingState = { guardians: [], students: [], enrollments: [], plans: [], payments: [], promotionGroups: [] };
+const empty: ExistingState = { guardians: [], students: [], enrollments: [], plans: [], payments: [], promotionGroups: [], counselings: [] };
 const NOW = '2026-10-10T15:00:00.000Z';
 const TODAY = '2026-10-10';
 
@@ -91,6 +98,8 @@ function draftWith(students: { program: string; level?: string; type: string; du
   d.holders = [holder()];
   d.students = students.map((s, i) => ({
     ...emptyStudent(), key: `k${i}`, person: person(i + 1), relationship: mode === 'apoderado' ? 'Hijo(a)' : '',
+    situation: 'estudiando' as const, institutionType: 'Colegio', school: 'I.E. San Martín', grade: '4° Primaria',
+    counselingDate: '2026-10-14', counselingTime: '16:30',
     programId: s.program, levelId: s.level ?? '', paymentTypeId: s.type, dueDates: s.dueDates ?? [],
   }));
   return d;
@@ -273,6 +282,97 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const dd = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
   dd.payments[quoteEnrollment(dd, catalogs()).units[0].key] = [usdPart(500)];
   check('Correlativo continúa desde el máximo existente (MAT-2026-008)', build(dd, catalogs(), existing).batch?.enrollments[0].id === 'MAT-2026-008');
+}
+
+// ---------- Tarjeta de alumno: existente / nuevo, situación, horario
+{
+  const base = () => draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  const cat = catalogs();
+
+  const d1 = base();
+  d1.students[0].person = { ...emptyPerson(), source: 'existente' };
+  check('Existente sin elegir a nadie → rechazado', validateStudents(d1, cat, TODAY).some(m => /ya registrada|Nuevo/.test(m)));
+
+  const d2 = base();
+  d2.students[0].situation = '';
+  check('Sin situación → rechazado', validateStudents(d2, cat, TODAY).some(m => /estudiando, trabajando/.test(m)));
+
+  const d3 = base();
+  d3.students[0].school = ''; d3.students[0].grade = '';
+  check('Estudiando sin institución ni grado → rechazado', validateStudents(d3, cat, TODAY).filter(m => /institución|grado/.test(m)).length === 2);
+
+  const d4 = base();
+  Object.assign(d4.students[0], { situation: 'trabajando', school: '', grade: '', institutionType: '', occupation: '' });
+  check('Trabajando sin ocupación → rechazado', validateStudents(d4, cat, TODAY).some(m => /ocupación/.test(m)));
+  d4.students[0].occupation = 'Contador';
+  check('Trabajando con ocupación → válido (sin pedir colegio)', validateStudents(d4, cat, TODAY).length === 0);
+
+  const d5 = base();
+  Object.assign(d5.students[0], { situation: 'ambos', occupation: 'Vendedor' });
+  check('Estudiando y trabajando exige ambos bloques', validateStudents(d5, cat, TODAY).length === 0);
+  d5.students[0].occupation = '';
+  check('Estudiando y trabajando sin ocupación → rechazado', validateStudents(d5, cat, TODAY).some(m => /ocupación/.test(m)));
+
+  const d6 = base();
+  Object.assign(d6.students[0], { situation: 'ninguna', school: '', grade: '', institutionType: '' });
+  check('Ninguna → no pide institución ni ocupación', validateStudents(d6, cat, TODAY).length === 0);
+
+  // Solo se guarda lo que corresponde a la situación elegida
+  const d7 = base();
+  Object.assign(d7.students[0], { situation: 'trabajando', occupation: 'Chofer', school: 'Colegio viejo', grade: '1° Secundaria', institutionType: 'Colegio' });
+  d7.payments[quoteEnrollment(d7, cat).units[0].key] = [usdPart(500)];
+  const saved = build(d7).batch!.newStudents[0];
+  check('Trabajando: guarda ocupación y descarta colegio/grado sobrantes', saved.occupation === 'Chofer' && saved.colegio === undefined && saved.grado === undefined && saved.occupationStatus === 'trabajando');
+
+  const d8 = base();
+  d8.payments[quoteEnrollment(d8, cat).units[0].key] = [usdPart(500)];
+  const st = build(d8).batch!.newStudents[0];
+  check('Estudiando: guarda colegio, grado y tipo de institución', st.colegio === 'I.E. San Martín' && st.grado === '4° Primaria' && st.institutionType === 'Colegio');
+
+  // Horarios configurados
+  const h1 = base();
+  h1.context.branchId = 'FIL-AYA';
+  h1.students[0].schedule = 'Sábados 9:00 AM'; // solo Piura
+  check('Horario de otra sede → rechazado', validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
+  h1.students[0].schedule = 'Antiguo'; // inactivo
+  check('Horario inactivo → rechazado', validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
+  h1.students[0].schedule = 'L-M-V 4:00 PM';
+  check('Horario disponible en todas las sedes → válido', !validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
+  h1.students[0].schedule = '';
+  check('El horario es opcional', !validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
+}
+
+// ---------- Primera asesoría: fecha y hora específicas
+{
+  const base = () => draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  const cat = catalogs();
+  const probe = (d: EnrollmentDraft) => validateProgram(d, cat, quoteEnrollment(d, cat));
+
+  const a1 = base(); a1.students[0].counselingDate = '';
+  check('Sin fecha de primera asesoría → rechazado', probe(a1).some(m => /fecha de la primera asesoría/.test(m)));
+  const a2 = base(); a2.students[0].counselingTime = '';
+  check('Sin hora de primera asesoría → rechazado', probe(a2).some(m => /hora de la primera asesoría/.test(m)));
+  const a3 = base(); a3.students[0].counselingDate = '2026-10-09';
+  check('Asesoría anterior a la matrícula → rechazada', probe(a3).some(m => /anterior a la fecha de matrícula/.test(m)));
+  const a4 = base(); a4.students[0].counselingDate = TODAY;
+  check('Asesoría el mismo día de la matrícula → válida', !probe(a4).some(m => /asesoría/.test(m)));
+  const a5 = base(); a5.students[0].paymentTypeId = '';
+  check('La asesoría se valida aunque falte el tipo de pago', probe({ ...a5, students: [{ ...a5.students[0], counselingDate: '' }] }).some(m => /asesoría/.test(m)));
+
+  // Se crea una asesoría Pendiente por alumno con la fecha y hora indicadas
+  const two = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }]);
+  two.students[0].counselingDate = '2026-10-12'; two.students[0].counselingTime = '09:00';
+  two.students[1].counselingDate = '2026-10-13'; two.students[1].counselingTime = '17:45';
+  two.promotion = { promotionId: 'PR1', groups: [['k0', 'k1']] };
+  two.payments[quoteEnrollment(two, cat).units[0].key] = [usdPart(700)];
+  const b = build(two, cat, { ...empty, counselings: [{ id: '5' } as any] });
+  check('Guarda una primera asesoría por alumno', b.ok && b.batch!.counselings.length === 2, b.error);
+  check('Asesoría con la fecha y hora de cada alumno',
+    b.batch!.counselings[0].date === '2026-10-12' && b.batch!.counselings[0].time === '09:00' &&
+    b.batch!.counselings[1].date === '2026-10-13' && b.batch!.counselings[1].time === '17:45');
+  check('Asesoría: estado Pendiente, programa/nivel y correlativo continuo',
+    b.batch!.counselings[0].status === 'Pendiente' && b.batch!.counselings[0].program === 'Pre-Kids' &&
+    b.batch!.counselings[1].level === 'Kids 2' && b.batch!.counselings.map(c => c.id).join() === '6,7');
 }
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

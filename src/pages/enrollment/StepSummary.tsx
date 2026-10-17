@@ -63,6 +63,7 @@ export function StepSummary({ draft, catalogs, quote }: StepProps) {
                 Alumno {q.index + 1}: {fullName(p)} <span className="text-text-muted font-normal">· {p.docType} {p.docNumber}</span>
               </p>
               <Row k="Programa / nivel" v={`${q.program?.name ?? '—'}${q.level ? ` · ${q.level.name}` : ''}`} />
+              <Row k="Primera asesoría" v={`${draft.students[q.index].counselingDate || '—'} · ${draft.students[q.index].counselingTime || '—'}`} />
               <Row k="Tipo de pago" v={q.paymentType?.name ?? '—'} />
               <Row k="Tarifario" v={q.tariff?.name ?? '—'} />
               <Row k="Costo asignado" v={q.mode === 'inmediato' ? usd(q.assignedPrice) : usd(q.listPrice || q.tariff?.basePrice || 0)} />
