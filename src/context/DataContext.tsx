@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
-import { nextSequentialId } from '../utils/ids';
+import { nextNumericId, nextSequentialId } from '../utils/ids';
 
 // Types
 export interface Guardian {
@@ -453,6 +453,8 @@ export interface Schedule {
   responsible: string;
   modality: string;
   status: string;
+  studentId?: string; // Alumno registrado al que pertenece la reserva
+  observations?: string;
 }
 
 export interface Counseling {
@@ -721,6 +723,8 @@ interface DataContextType {
   adjustments: Adjustment[];
   addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => StockResult;
   schedules: Schedule[];
+  addSchedule: (data: Omit<Schedule, 'id'>) => Schedule;
+  updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>) => void;
   counselings: Counseling[];
   trackings: Tracking[];
   monthlySchedules: MonthlySchedule[];
@@ -1173,13 +1177,29 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'DEV-2024-001', date: '2024-03-05', branch: 'Piura', material: 'Cartuchera', type: 'Devolución', qty: 1, reason: 'Devolución', user: 'Ventas Piura' },
   ]);
 
+  // Reservas de ejemplo con fechas relativas a hoy (así la agenda siempre muestra citas vigentes)
+  const seedDay = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
   const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: '1', student: 'Mateo Ruiz', program: 'Kids', level: 'Básico 1', type: 'Primera asesoría', date: '2026-04-01', time: '10:00', duration: 45, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Confirmado' },
-    { id: '2', student: 'Sofia Castro', program: 'Teens', level: 'Intermedio', type: 'Seguimiento', date: '2026-04-01', time: '11:00', duration: 30, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Reservado' },
-    { id: '3', student: 'Lucas Vega', program: 'Kids', level: 'Básico 2', type: 'Reprogramación', date: '2026-04-02', time: '15:30', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Cancelado' },
-    { id: '4', student: 'Valentina Silva', program: 'Pre-Kids', level: 'Inicial', type: 'Primera asesoría', date: '2026-04-03', time: '09:00', duration: 45, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Confirmado' },
-    { id: '5', student: 'Diego Torres', program: 'Teens', level: 'Avanzado', type: 'Seguimiento', date: '2026-04-04', time: '16:00', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Reservado' },
+    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', program: 'Kids', level: 'Nivel 1', type: 'Primera asesoría', date: seedDay(0), time: '10:00', duration: 45, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Confirmado' },
+    { id: '2', student: 'Sofia Castro', studentId: 'ALU-002', program: 'Kids', level: 'Nivel 2', type: 'Seguimiento', date: seedDay(0), time: '11:00', duration: 30, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Reservado' },
+    { id: '3', student: 'Lucas Vega', studentId: 'ALU-003', program: 'Kids', level: 'Nivel 3', type: 'Reprogramación', date: seedDay(1), time: '15:30', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Cancelado' },
+    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', program: 'Pre-Kids', level: 'Nivel 1', type: 'Primera asesoría', date: seedDay(2), time: '09:00', duration: 45, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Confirmado' },
+    { id: '5', student: 'Diego Torres', studentId: 'ALU-005', program: 'Kids', level: 'Nivel 1', type: 'Seguimiento', date: seedDay(3), time: '16:00', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Reservado' },
   ]);
+
+  const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
+    const created: Schedule = { ...data, id: nextNumericId(schedules.map(x => x.id)) };
+    setSchedules(prev => [...prev, created]);
+    return created;
+  };
+
+  const updateSchedule = (id: string, data: Partial<Omit<Schedule, 'id'>>) => {
+    setSchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
+  };
 
   const [counselings, setCounselings] = useState<Counseling[]>([
     { id: '1', student: 'Mateo Ruiz', program: 'Kids', level: 'Básico 1', date: '2026-04-01', time: '10:00', responsible: 'Lic. María Torres', status: 'Pendiente' },
@@ -2413,6 +2433,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setShippingMethods,
       adjustments, 
       schedules, 
+      addSchedule,
+      updateSchedule,
       counselings, 
       trackings, 
       monthlySchedules, 

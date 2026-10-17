@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Filter, CheckCircle, Clock, AlertCircle, User, Calendar as CalendarIcon } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { inputCls, labelCls, nativeFieldCls, selectCls, textareaCls } from './formStyles';
 import { Badge } from '../../components/ui/Badge';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Modal } from '../../components/ui/Modal';
@@ -154,19 +155,19 @@ export function FirstCounseling() {
               <div className="bg-surface-muted p-4 rounded-xl border border-border-soft">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-xs text-text-secondary mb-1">Alumno</p>
+                    <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Alumno</p>
                     <p className="text-sm font-medium text-text-primary">{selectedCounseling.student}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-text-secondary mb-1">Programa</p>
+                    <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Programa</p>
                     <p className="text-sm font-medium text-text-primary">{selectedCounseling.program} - {selectedCounseling.level}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-text-secondary mb-1">Fecha Programada</p>
+                    <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Fecha Programada</p>
                     <p className="text-sm font-medium text-text-primary">{selectedCounseling.date}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-text-secondary mb-1">Hora</p>
+                    <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Hora</p>
                     <p className="text-sm font-medium text-text-primary">{selectedCounseling.time}</p>
                   </div>
                 </div>
@@ -174,45 +175,44 @@ export function FirstCounseling() {
 
               <div className="space-y-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                  <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                  <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Checklist de Ejecución</h3>
+                  <h3 className="text-base font-semibold text-text-primary">Checklist de Ejecución</h3>
                 </div>
                 
                 <div className="space-y-3">
-                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-lg hover:bg-surface-50 cursor-pointer transition-colors">
+                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-xl hover:bg-surface-50 cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="w-4 h-4 text-primary border-border-soft rounded focus:ring-primary"
+                      className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                       checked={formState.asistioAlumno}
                       onChange={(e) => setFormState({...formState, asistioAlumno: e.target.checked})}
                     />
                     <span className="text-sm text-text-primary">Asistió el alumno</span>
                   </label>
                   
-                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-lg hover:bg-surface-50 cursor-pointer transition-colors">
+                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-xl hover:bg-surface-50 cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="w-4 h-4 text-primary border-border-soft rounded focus:ring-primary"
+                      className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                       checked={formState.asistioApoderado}
                       onChange={(e) => setFormState({...formState, asistioApoderado: e.target.checked})}
                     />
                     <span className="text-sm text-text-primary">Asistió apoderado (si corresponde)</span>
                   </label>
 
-                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-lg hover:bg-surface-50 cursor-pointer transition-colors">
+                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-xl hover:bg-surface-50 cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="w-4 h-4 text-primary border-border-soft rounded focus:ring-primary"
+                      className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                       checked={formState.metodologiaExplicada}
                       onChange={(e) => setFormState({...formState, metodologiaExplicada: e.target.checked})}
                     />
                     <span className="text-sm text-text-primary">Metodología explicada</span>
                   </label>
 
-                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-lg hover:bg-surface-50 cursor-pointer transition-colors">
+                  <label className="flex items-center gap-3 p-3 border border-border-soft rounded-xl hover:bg-surface-50 cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
-                      className="w-4 h-4 text-primary border-border-soft rounded focus:ring-primary"
+                      className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                       checked={formState.usoItemsExplicado}
                       onChange={(e) => setFormState({...formState, usoItemsExplicado: e.target.checked})}
                     />
@@ -226,15 +226,14 @@ export function FirstCounseling() {
             <div className="space-y-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                  <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                  <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Cierre</h3>
+                  <h3 className="text-base font-semibold text-text-primary">Cierre</h3>
                 </div>
                 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Estado Final</label>
+                    <label className={labelCls}>Estado Final</label>
                     <select
-                      className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
+                      className={nativeFieldCls}
                       value={formState.estado}
                       onChange={(e) => setFormState({...formState, estado: e.target.value})}
                     >
@@ -246,9 +245,9 @@ export function FirstCounseling() {
                   </div>
                   
                   <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Observaciones</label>
+                    <label className={labelCls}>Observaciones</label>
                     <textarea
-                      className="w-full bg-surface border border-border-soft rounded-lg p-3 text-sm focus:outline-none focus:border-primary-accent resize-none h-32 transition-all focus:ring-2 focus:ring-primary-accent/10"
+                      className={`${textareaCls} h-32`}
                       placeholder="Notas relevantes de la primera sesión..."
                       value={formState.observaciones}
                       onChange={(e) => setFormState({...formState, observaciones: e.target.value})}
@@ -258,7 +257,7 @@ export function FirstCounseling() {
               </div>
 
               {formState.estado === 'Realizada' && !isFormValid() && (
-                <div className="flex items-start gap-2 p-3 bg-danger-tint text-danger-text rounded-lg border border-danger-text/20 mt-4">
+                <div className="flex items-start gap-2 p-3 bg-danger-tint text-danger-text rounded-xl border border-danger-text/20 mt-4">
                   <AlertCircle size={16} className="mt-0.5 shrink-0" />
                   <p className="text-sm">Para marcar como "Realizada", debe confirmar la asistencia del alumno y la explicación de metodología y artículos.</p>
                 </div>

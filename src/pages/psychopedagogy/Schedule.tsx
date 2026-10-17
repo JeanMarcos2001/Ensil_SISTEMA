@@ -1,20 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Filter, Calendar as CalendarIcon, List, MoreVertical, Clock, User, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Filter, Calendar as CalendarIcon, List, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Modal } from '../../components/ui/Modal';
-import { Select } from '../../components/ui/Select';
-import { useData } from '../../context/DataContext';
+import { useData, type Schedule as ScheduleItem } from '../../context/DataContext';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { MONTHS, addDaysISO, endTime, longDayLabel, statusTone, todayLocalISO } from '../../utils/schedule';
+import { ScheduleCalendar, type CalendarMode } from './ScheduleCalendar';
+import { ScheduleFormModal } from './ScheduleFormModal';
 
 export function Schedule() {
   const { schedules } = useData();
+  const today = todayLocalISO();
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedSchedule, setSelectedSchedule] = useState<any>(null);
+  const [selectedSchedule, setSelectedSchedule] = useState<ScheduleItem | null>(null);
+  const [defaultDate, setDefaultDate] = useState<string | undefined>(undefined);
+
+  // Calendario
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>('month');
+  const [cursor, setCursor] = useState(today);
+  const [dayDetail, setDayDetail] = useState<string | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
@@ -34,20 +42,21 @@ export function Schedule() {
   const endIndex = startIndex + itemsPerPage;
   const paginatedSchedules = filteredSchedules.slice(startIndex, endIndex);
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'Confirmado': return 'success';
-      case 'Reservado': return 'info';
-      case 'Reprogramado': return 'warning';
-      case 'Cancelado': return 'danger';
-      case 'No reservó': return 'neutral';
-      default: return 'neutral';
-    }
+  const getStatusBadge = statusTone;
+
+  const handleOpenModal = (schedule?: ScheduleItem | null, date?: string) => {
+    setSelectedSchedule(schedule || null);
+    setDefaultDate(date);
+    setIsModalOpen(true);
   };
 
-  const handleOpenModal = (schedule?: any) => {
-    setSelectedSchedule(schedule || null);
-    setIsModalOpen(true);
+  // Navegación del calendario (mes o semana según la vista)
+  const navigateCalendar = (dir: -1 | 0 | 1) => {
+    if (dir === 0) { setCursor(today); return; }
+    if (calendarMode === 'week') { setCursor(addDaysISO(cursor, dir * 7)); return; }
+    const [y, m] = cursor.split('-').map(Number);
+    const next = new Date(Date.UTC(y, m - 1 + dir, 1));
+    setCursor(`${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`);
   };
 
   return (
@@ -119,11 +128,11 @@ export function Schedule() {
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-primary-accent/5 flex flex-col items-center justify-center border border-primary-accent/10">
-                          <span className="text-[10px] font-bold text-primary-accent uppercase tracking-tighter leading-none">{schedule.date.split('/')[1]}</span>
-                          <span className="text-sm font-bold text-text-primary tracking-tighter">{schedule.date.split('/')[0]}</span>
+                          <span className="text-[10px] font-bold text-primary-accent uppercase tracking-tighter leading-none">{MONTHS[Number(schedule.date.split('-')[1]) - 1]?.slice(0, 3)}</span>
+                          <span className="text-sm font-bold text-text-primary tracking-tighter">{Number(schedule.date.split('-')[2])}</span>
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-text-primary leading-tight">{schedule.time}</p>
+                          <p className="text-sm font-bold text-text-primary leading-tight">{schedule.time} – {endTime(schedule.time, schedule.duration)}</p>
                           <p className="text-[10px] text-text-muted font-medium">{schedule.duration} min</p>
                         </div>
                       </div>
@@ -165,16 +174,21 @@ export function Schedule() {
             </table>
           </div>
         ) : (
-          <div className="p-12 text-center text-text-muted bg-surface-muted/10 flex-1 flex flex-col items-center justify-center">
-            <div className="w-16 h-16 bg-surface-muted rounded-full flex items-center justify-center mb-4">
-              <CalendarIcon size={32} className="opacity-40" />
-            </div>
-            <h3 className="text-lg font-bold text-text-primary mb-1">Vista de Calendario</h3>
-            <p className="text-sm text-text-secondary">Estamos trabajando para integrar la agenda interactiva aquí.</p>
-          </div>
+          <ScheduleCalendar
+            schedules={filteredSchedules}
+            mode={calendarMode}
+            onModeChange={setCalendarMode}
+            cursor={cursor}
+            onNavigate={navigateCalendar}
+            today={today}
+            onCreate={(date) => handleOpenModal(null, date)}
+            onEdit={(sch) => handleOpenModal(sch)}
+            onShowDay={setDayDetail}
+          />
         )}
 
         {/* Pagination */}
+        {viewMode === 'list' && (
         <div className="p-4 border-t border-border-soft flex items-center justify-between bg-surface">
           <span className="text-xs font-medium text-text-muted uppercase tracking-wider">
             Mostrando {filteredSchedules.length > 0 ? startIndex + 1 : 0} a {Math.min(endIndex, filteredSchedules.length)} de {filteredSchedules.length} reservas
@@ -221,152 +235,52 @@ export function Schedule() {
             </Button>
           </div>
         </div>
+        )}
       </div>
 
-      <Modal
+      <ScheduleFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={selectedSchedule ? "Editar Reserva" : "Nueva Reserva de Asesoría"}
-        size="4xl"
+        schedule={selectedSchedule}
+        defaultDate={defaultDate}
+      />
+
+      {/* Citas de un día (desde «+N más» del calendario) */}
+      <Modal
+        isOpen={!!dayDetail}
+        onClose={() => setDayDetail(null)}
+        title={dayDetail ? `Citas del ${longDayLabel(dayDetail)}` : ''}
+        size="md"
         footer={
-          <div className="flex justify-end gap-3 w-full py-2">
-            <Button variant="ghost" onClick={() => setIsModalOpen(false)}>Descartar Cambios</Button>
-            <Button variant="primary" onClick={() => setIsModalOpen(false)} className="px-6">Guardar y Confirmar Reserva</Button>
+          <div className="flex justify-end gap-3 w-full">
+            <Button variant="ghost" onClick={() => setDayDetail(null)}>Cerrar</Button>
+            {dayDetail && dayDetail >= today && (
+              <Button variant="primary" onClick={() => { const d = dayDetail; setDayDetail(null); handleOpenModal(null, d); }}>
+                Nueva reserva
+              </Button>
+            )}
           </div>
         }
       >
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pb-4">
-          {/* Left Column */}
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Datos del Alumno</h3>
-              </div>
-              <div className="grid grid-cols-1 gap-4">
+        <div className="space-y-3 pb-2">
+          {dayDetail && filteredSchedules
+            .filter(sch => sch.date === dayDetail)
+            .sort((a, b) => a.time.localeCompare(b.time))
+            .map(sch => (
+              <button
+                key={sch.id}
+                type="button"
+                onClick={() => { setDayDetail(null); handleOpenModal(sch); }}
+                className="w-full text-left p-3 border border-border-soft rounded-xl hover:bg-surface-muted transition-colors flex items-start justify-between gap-3"
+              >
                 <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Alumno</label>
-                  <Select
-                    options={[
-                      { value: '', label: 'Buscar alumno activo...' },
-                      { value: '1', label: 'Ana García' },
-                      { value: '2', label: 'Carlos López' },
-                      { value: '3', label: 'Sofía Martínez' },
-                    ]}
-                    value={selectedSchedule?.student || ''}
-                    onChange={() => {}}
-                  />
+                  <p className="text-sm font-semibold text-text-primary">{sch.time} – {endTime(sch.time, sch.duration)} · {sch.student}</p>
+                  <p className="text-xs text-text-secondary mt-0.5">{sch.program} · {sch.level} · {sch.type} · {sch.modality}</p>
+                  <p className="text-xs text-text-muted">{sch.responsible}</p>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Programa</label>
-                    <Input value={selectedSchedule?.program || ''} disabled placeholder="Autocompletado" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Nivel</label>
-                    <Input value={selectedSchedule?.level || ''} disabled placeholder="Autocompletado" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Detalles Básicos</h3>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Tipo de cita</label>
-                  <Select
-                    options={[
-                      { value: 'primera', label: 'Primera asesoría' },
-                      { value: 'seguimiento', label: 'Seguimiento' },
-                      { value: 'reprogramacion', label: 'Reprogramación' },
-                    ]}
-                    value={selectedSchedule?.type || ''}
-                    onChange={() => {}}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Canal / Modalidad</label>
-                  <Select
-                    options={[
-                      { value: 'presencial', label: 'Presencial' },
-                      { value: 'virtual', label: 'Virtual' },
-                    ]}
-                    value={selectedSchedule?.modality || 'presencial'}
-                    onChange={() => {}}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column */}
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Programación</h3>
-              </div>
-              
-              <div className="grid grid-cols-1 gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Fecha</label>
-                    <Input type="date" value={selectedSchedule?.date || ''} onChange={() => {}} />
-                  </div>
-                  <div className="col-span-2 sm:col-span-1 grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Hora</label>
-                      <Input type="time" value={selectedSchedule?.time || ''} onChange={() => {}} />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Dur. (min)</label>
-                      <Input type="number" value={selectedSchedule?.duration || 45} onChange={() => {}} />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Responsable</label>
-                  <Select
-                    options={[
-                      { value: '1', label: 'Lic. María Torres' },
-                      { value: '2', label: 'Lic. Juan Pérez' },
-                    ]}
-                    value={selectedSchedule?.responsible || ''}
-                    onChange={() => {}}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Estado de reserva</label>
-                  <Select
-                    options={[
-                      { value: 'reservado', label: 'Reservado' },
-                      { value: 'confirmado', label: 'Confirmado' },
-                      { value: 'reprogramado', label: 'Reprogramado' },
-                      { value: 'cancelado', label: 'Cancelado' },
-                      { value: 'no_reservo', label: 'No reservó' },
-                    ]}
-                    value={selectedSchedule?.status || 'reservado'}
-                    onChange={() => {}}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Observaciones</label>
-                  <textarea
-                    className="w-full bg-surface border border-border-soft rounded-lg p-3 text-sm focus:outline-none focus:border-primary-accent resize-none h-24 transition-all focus:ring-2 focus:ring-primary-accent/10"
-                    rows={3}
-                    placeholder="Notas de agenda..."
-                  ></textarea>
-                </div>
-              </div>
-            </div>
-          </div>
+                <Badge variant={getStatusBadge(sch.status) as any}>{sch.status}</Badge>
+              </button>
+            ))}
         </div>
       </Modal>
     </div>

@@ -44,22 +44,19 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
         <p className="text-sm font-medium text-text-secondary">¿Cómo se realizará la matrícula?</p>
         <div className="grid grid-cols-2 gap-3">
           {([
-            { id: 'independiente', label: 'Alumno independiente', icon: User, hint: 'La persona se captura una sola vez y es a la vez titular y alumno.' },
-            { id: 'apoderado', label: 'Con apoderado', icon: Users, hint: 'Un titular principal (y opcionalmente otros) responde por los alumnos.' },
+            { id: 'independiente', label: 'Alumno independiente', icon: User },
+            { id: 'apoderado', label: 'Con apoderado', icon: Users },
           ] as const).map(opt => (
             <button
               key={opt.id}
               type="button"
               onClick={() => setMode(opt.id)}
-              className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-colors ${
+              className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-colors ${
                 draft.mode === opt.id ? 'border-primary-accent bg-primary-accent/5' : 'border-border-soft hover:border-primary-accent/50'
               }`}
             >
-              <opt.icon size={20} className="text-primary-accent mt-0.5 shrink-0" />
-              <span>
-                <span className="block text-sm font-semibold text-text-primary">{opt.label}</span>
-                <span className="block text-xs text-text-secondary mt-0.5">{opt.hint}</span>
-              </span>
+              <opt.icon size={20} className="text-primary-accent shrink-0" />
+              <span className="text-sm font-semibold text-text-primary">{opt.label}</span>
             </button>
           ))}
         </div>
@@ -67,8 +64,8 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
 
       {draft.mode === 'independiente' ? (
         <div className="p-5 border border-border-soft rounded-xl space-y-4">
-          <h4 className="font-semibold text-text-primary">Datos de la persona</h4>
           <PersonForm
+            title="Datos de la persona"
             person={draft.holders[0]}
             onChange={p => setHolder(0, p)}
             today={today}
@@ -92,17 +89,13 @@ export function StepHolders({ draft, update, catalogs, today }: StepProps) {
         <div className="space-y-4">
           {draft.holders.map((h, idx) => (
             <div key={idx} className="p-5 border border-border-soft rounded-xl space-y-4">
-              <div className="flex justify-between items-center">
-                <h4 className="font-semibold text-text-primary">
-                  {idx === 0 ? 'Titular principal' : idx === 1 ? 'Titular secundario' : `Titular ${idx + 1}`}
-                </h4>
-                {idx > 0 && (
+              <PersonForm
+                title={idx === 0 ? 'Titular principal' : idx === 1 ? 'Titular secundario' : `Titular ${idx + 1}`}
+                headerActions={idx > 0 && (
                   <button type="button" className="text-text-muted hover:text-danger-text" onClick={() => removeHolder(idx)}>
                     <Trash2 size={16} />
                   </button>
                 )}
-              </div>
-              <PersonForm
                 person={h}
                 onChange={p => setHolder(idx, p)}
                 today={today}

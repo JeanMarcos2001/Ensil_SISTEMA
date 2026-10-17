@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, Filter, Calendar as CalendarIcon, Download, Plus, Trash2, GripVertical } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { inputCls, labelCls, nativeFieldCls, selectCls, textareaCls } from './formStyles';
 import { Select } from '../../components/ui/Select';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Modal } from '../../components/ui/Modal';
@@ -207,13 +208,12 @@ export function MonthlySchedules() {
           <div className="lg:col-span-5 space-y-6">
             <div className="space-y-4">
               <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Cabecera del Cronograma</h3>
+                <h3 className="text-base font-semibold text-text-primary">Cabecera del Cronograma</h3>
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Sede</label>
-                  <Select
+                  <label className={labelCls}>Sede</label>
+                  <Select className={selectCls}
                     options={branches.map(b => ({ value: b.name, label: b.name }))}
                     value={formState.sede}
                     onChange={(e) => setFormState({...formState, sede: e.target.value})}
@@ -222,8 +222,8 @@ export function MonthlySchedules() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Mes</label>
-                    <Select
+                    <label className={labelCls}>Mes</label>
+                    <Select className={selectCls}
                       options={[
                         { value: 'Enero', label: 'Enero' },
                         { value: 'Febrero', label: 'Febrero' },
@@ -235,8 +235,8 @@ export function MonthlySchedules() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Año</label>
-                    <Input 
+                    <label className={labelCls}>Año</label>
+                    <Input className={inputCls} 
                       type="number" 
                       value={formState.anio}
                       onChange={(e) => setFormState({...formState, anio: parseInt(e.target.value)})}
@@ -245,8 +245,8 @@ export function MonthlySchedules() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-text-secondary uppercase tracking-wide mb-1.5">Título del Cuadro</label>
-                  <Input 
+                  <label className={labelCls}>Título del Cuadro</label>
+                  <Input className={inputCls} 
                     value={formState.titulo}
                     onChange={(e) => setFormState({...formState, titulo: e.target.value})}
                     placeholder="Ej. Cronograma de Actividades"
@@ -257,12 +257,11 @@ export function MonthlySchedules() {
 
             <div className="space-y-4 pt-4 border-t border-border-soft">
               <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Observaciones (Internas)</h3>
+                <h3 className="text-base font-semibold text-text-primary">Observaciones (Internas)</h3>
               </div>
               <div>
                 <textarea
-                  className="w-full bg-surface border border-border-soft rounded-lg p-3 text-sm focus:outline-none focus:border-primary-accent resize-none h-32 transition-all focus:ring-2 focus:ring-primary-accent/10"
+                  className={`${textareaCls} h-32`}
                   placeholder="Notas internas..."
                   value={formState.observaciones}
                   onChange={(e) => setFormState({...formState, observaciones: e.target.value})}
@@ -276,8 +275,7 @@ export function MonthlySchedules() {
             <div className="space-y-4">
               <div className="flex justify-between items-center border-b border-border-soft pb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                  <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Actividades</h3>
+                  <h3 className="text-base font-semibold text-text-primary">Actividades</h3>
                 </div>
                 <Button variant="outline" size="sm" onClick={handleAddActivity}>
                   <Plus size={16} className="mr-2" /> Agregar
@@ -299,32 +297,32 @@ export function MonthlySchedules() {
                       </div>
                       <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="sm:col-span-2">
-                          <label className="block text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">Nombre</label>
-                          <Input 
+                          <label className={labelCls}>Nombre</label>
+                          <Input className={inputCls} 
                             value={act.actividad}
                             onChange={(e) => handleActivityChange(act.id, 'actividad', e.target.value)}
                             placeholder="Nombre de la actividad"
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">Fecha</label>
-                          <Input 
+                          <label className={labelCls}>Fecha</label>
+                          <Input className={inputCls} 
                             type="date"
                             value={act.fecha}
                             onChange={(e) => handleActivityChange(act.id, 'fecha', e.target.value)}
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">Hora</label>
-                          <Input 
+                          <label className={labelCls}>Hora</label>
+                          <Input className={inputCls} 
                             value={act.hora}
                             onChange={(e) => handleActivityChange(act.id, 'hora', e.target.value)}
                             placeholder="Ej. 15:00"
                           />
                         </div>
                         <div className="sm:col-span-2">
-                          <label className="block text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">Responsable</label>
-                          <Input 
+                          <label className={labelCls}>Responsable</label>
+                          <Input className={inputCls} 
                             value={act.responsable}
                             onChange={(e) => handleActivityChange(act.id, 'responsable', e.target.value)}
                             placeholder="Responsable (Opcional)"

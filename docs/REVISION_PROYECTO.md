@@ -460,3 +460,18 @@ Reglas en `src/utils/verification.ts` (puras) y pantalla `Verification.tsx`.
 | Corrección | El filtro «Pendiente» no encontraba las matrículas nuevas (nacen con estado «Pendiente»). |
 
 Verificación: `tsc` 0 errores · `scripts/check-verification.ts` 27/27 · en navegador: sin combo de estado; el estado cambia solo al marcar (0/2 → 1/2 → 2/2 Completa); kit sin checks por componente y con opción de componentes; en modo componentes solo se descuenta lo marcado; combo de verificador (personal de Piura); guardar deshabilitado sin verificador; Contado en 2 partes sin pago → advertencia con desenfoque, tras registrar la Parte 1 → se abre la verificación.
+
+---
+
+# Psicopedagogía → Programación: reservas funcionales y calendario (2026-10-17)
+
+| Tema | Cambio |
+|---|---|
+| **Nueva reserva / Editar reserva** | El formulario ahora guarda de verdad (antes solo cerraba). **Alumno** con buscador de alumnos activos (nombre o documento) conectado a los alumnos registrados; **programa y nivel** se autocompletan desde su matrícula más reciente. **Responsable**: todo el personal activo asignado a Psicopedagogía (con su sede). Tipo de cita, modalidad, fecha, hora, duración (por defecto 45 min en primera asesoría, 30 en las demás), estado y observaciones. |
+| Validaciones | Alumno, fecha, hora, duración (5–240 min) y responsable obligatorios; una reserva nueva no puede estar en el pasado; **no se permite cruce de horarios** del mismo responsable ni del mismo alumno (las citas canceladas, reprogramadas o «No reservó» liberan el horario; «Lic.» no distingue al profesional). |
+| **Calendario** | Vista **Mes** (cuadrícula lunes–domingo, día actual resaltado, hasta 3 citas por día con «+N más», clic en un día futuro crea una reserva con esa fecha, clic en una cita la edita) y vista **Semana** (7 columnas con tarjetas completas). Navegación anterior / siguiente / Hoy, contador de citas, colores por estado y leyenda. «+N más» abre el detalle del día. La paginación solo aparece en la lista. |
+| Lista | Corrección del recuadro de fecha (mostraba datos vacíos con fechas ISO) y ahora muestra el rango horario (inicio – fin). |
+| Datos de ejemplo | Las 5 reservas semilla usan fechas relativas a hoy (así la agenda siempre tiene citas vigentes) y enlazadas a su alumno; el programa «Teens» pasó a «Kids». |
+
+Verificación: `tsc` 0 errores · `scripts/check-schedule.ts` 27/27 · en navegador: guardar vacío → error; búsqueda y autocompletado de programa/nivel; conflicto de responsable y de horario detectados; fecha pasada rechazada; reserva creada y luego editada; calendario mes / semana / navegación / «Hoy»; clic en día futuro con fecha prellenada, día pasado no abre; «+3 más» con detalle del día.
+Sin cambios: acciones «Reprogramar» y «Cancelar reserva» de la lista; la primera asesoría creada desde la matrícula sigue en su propia lista (Primera asesoría) y no genera una reserva de agenda.

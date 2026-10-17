@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Filter, Calendar as CalendarIcon, Clock, User, FileText, Activity, BookOpen, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { inputCls, labelCls, nativeFieldCls, selectCls, textareaCls } from './formStyles';
 import { Badge } from '../../components/ui/Badge';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Modal } from '../../components/ui/Modal';
@@ -82,16 +83,16 @@ export function Tracking() {
       return (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-surface-50 rounded-xl border border-border-soft">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Módulo</label>
-            <Input 
+            <label className={labelCls}>Módulo</label>
+            <Input className={inputCls} 
               placeholder="Ej. Módulo 4" 
               value={formState.metrics.modulo || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, modulo: e.target.value}})}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Velocidad (pxm)</label>
-            <Input 
+            <label className={labelCls}>Velocidad (pxm)</label>
+            <Input className={inputCls} 
               type="number" 
               placeholder="0" 
               value={formState.metrics.velocidad || ''}
@@ -99,8 +100,8 @@ export function Tracking() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Comprensión (%)</label>
-            <Input 
+            <label className={labelCls}>Comprensión (%)</label>
+            <Input className={inputCls} 
               type="number" 
               placeholder="0-100" 
               min="0" max="100"
@@ -116,24 +117,24 @@ export function Tracking() {
       return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-surface-50 rounded-xl border border-border-soft">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Nivel</label>
-            <Input 
+            <label className={labelCls}>Nivel</label>
+            <Input className={inputCls} 
               placeholder="Ej. Nivel 2" 
               value={formState.metrics.nivel || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, nivel: e.target.value}})}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Sesión</label>
-            <Input 
+            <label className={labelCls}>Sesión</label>
+            <Input className={inputCls} 
               placeholder="Ej. Sesión 5" 
               value={formState.metrics.sesion || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, sesion: e.target.value}})}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Velocidad (pxm)</label>
-            <Input 
+            <label className={labelCls}>Velocidad (pxm)</label>
+            <Input className={inputCls} 
               type="number" 
               placeholder="0" 
               value={formState.metrics.velocidad || ''}
@@ -141,8 +142,8 @@ export function Tracking() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Comprensión (%)</label>
-            <Input 
+            <label className={labelCls}>Comprensión (%)</label>
+            <Input className={inputCls} 
               type="number" 
               placeholder="0-100" 
               min="0" max="100"
@@ -158,24 +159,24 @@ export function Tracking() {
       return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-surface-50 rounded-xl border border-border-soft">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Nivel</label>
-            <Input 
+            <label className={labelCls}>Nivel</label>
+            <Input className={inputCls} 
               placeholder="Ej. Nivel 1" 
               value={formState.metrics.nivel || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, nivel: e.target.value}})}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Semana</label>
-            <Input 
+            <label className={labelCls}>Semana</label>
+            <Input className={inputCls} 
               placeholder="Ej. Semana 3" 
               value={formState.metrics.semana || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, semana: e.target.value}})}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">¿Identifica?</label>
-            <Select 
+            <label className={labelCls}>¿Identifica?</label>
+            <Select className={selectCls} 
               options={[
                 { value: 'Sí', label: 'Sí' },
                 { value: 'No', label: 'No' },
@@ -186,8 +187,8 @@ export function Tracking() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">¿Lee solo?</label>
-            <Select 
+            <label className={labelCls}>¿Lee solo?</label>
+            <Select className={selectCls} 
               options={[
                 { value: 'Sí', label: 'Sí' },
                 { value: 'No', label: 'No' },
@@ -205,8 +206,8 @@ export function Tracking() {
       return (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-surface-50 rounded-xl border border-border-soft">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Sesión / Semana</label>
-            <Input 
+            <label className={labelCls}>Sesión / Semana</label>
+            <Input className={inputCls} 
               placeholder="Ej. Sesión 2" 
               value={formState.metrics.sesion || ''}
               onChange={(e) => setFormState({...formState, metrics: {...formState.metrics, sesion: e.target.value}})}
@@ -370,9 +371,9 @@ export function Tracking() {
         title="Registrar Sesión de Seguimiento Pedagógico"
         size="4xl"
         footer={
-          <div className="flex justify-end gap-3 w-full py-2">
+          <div className="flex justify-end gap-3 w-full">
             <Button variant="ghost" onClick={() => setIsModalOpen(false)}>Descartar Registro</Button>
-            <Button variant="primary" onClick={handleSave} disabled={!selectedStudent} className="px-6">Guardar Resultados de Sesión</Button>
+            <Button variant="primary" onClick={handleSave} disabled={!selectedStudent}>Guardar Resultados de Sesión</Button>
           </div>
         }
       >
@@ -382,12 +383,12 @@ export function Tracking() {
             <div className="space-y-4">
               <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
                 <User size={16} className="text-primary-accent" />
-                <h3 className="text-xs font-bold text-text-primary uppercase tracking-widest">Identificación del Alumno</h3>
+                <h3 className="text-base font-semibold text-text-primary">Identificación del Alumno</h3>
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Alumno</label>
-                  <Select
+                  <label className="text-sm font-medium text-text-secondary">Alumno</label>
+                  <Select className={selectCls}
                     options={[{value: '', label: 'Seleccionar alumno activo...'}, ...students.map(s => ({ value: s.id, label: `${s.name} - ${s.program}` }))]}
                     value={selectedStudent?.id || ''}
                     onChange={(e) => {
@@ -400,11 +401,11 @@ export function Tracking() {
                 {selectedStudent && (
                   <div className="bg-surface-muted/50 p-4 rounded-xl border border-border-soft flex gap-6">
                     <div>
-                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-1.5">Programa Matrícula</p>
-                      <p className="text-sm font-bold text-text-primary tracking-tight">{selectedStudent.program}</p>
+                      <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Programa Matrícula</p>
+                      <p className="text-sm font-medium text-text-primary">{selectedStudent.program}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-1.5">Protocolo Aplicado</p>
+                      <p className="text-xs text-text-muted uppercase tracking-wider mb-1">Protocolo Aplicado</p>
                       <Badge variant="info" className="mt-0.5 font-bold uppercase tracking-tighter">{selectedStudent.program}</Badge>
                     </div>
                   </div>
@@ -412,17 +413,17 @@ export function Tracking() {
 
                 <div className="grid grid-cols-2 gap-5">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Fecha de Sesión</label>
+                    <label className="text-sm font-medium text-text-secondary">Fecha de Sesión</label>
                     <input 
                       type="date" 
-                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent transition-all font-medium"
+                      className={nativeFieldCls}
                       value={formState.fechaAsistencia}
                       onChange={(e) => setFormState({...formState, fechaAsistencia: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Presencia / Status</label>
-                    <Select
+                    <label className="text-sm font-medium text-text-secondary">Presencia / Status</label>
+                    <Select className={selectCls}
                       options={[
                         { value: 'Asistió', label: 'Asistió' },
                         { value: 'Faltó', label: 'Faltó' },
@@ -443,7 +444,7 @@ export function Tracking() {
               <div className="space-y-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
                   <Activity size={16} className="text-primary-accent" />
-                  <h3 className="text-xs font-bold text-text-primary uppercase tracking-widest">Rendimiento y Métricas</h3>
+                  <h3 className="text-base font-semibold text-text-primary">Rendimiento y Métricas</h3>
                 </div>
                 {renderMetricsForm()}
               </div>
@@ -452,12 +453,12 @@ export function Tracking() {
             <div className="space-y-4">
               <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
                 <FileText size={16} className="text-primary-accent" />
-                <h3 className="text-xs font-bold text-text-primary uppercase tracking-widest">Informe Pedagógico</h3>
+                <h3 className="text-base font-semibold text-text-primary">Informe Pedagógico</h3>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Observaciones y Recomendaciones</label>
+                <label className="text-sm font-medium text-text-secondary">Observaciones y Recomendaciones</label>
                 <textarea
-                  className="w-full bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none h-32 transition-all focus:ring-1 focus:ring-primary-accent/10 font-medium"
+                  className={`${textareaCls} h-32`}
                   placeholder="Describa el progreso del alumno, dificultades detectadas y compromisos para la siguiente sesión..."
                   value={formState.observaciones}
                   onChange={(e) => setFormState({...formState, observaciones: e.target.value})}

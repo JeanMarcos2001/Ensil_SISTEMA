@@ -84,12 +84,16 @@ interface PersonFormProps {
   searchPlaceholder?: string;
   /** Fecha de referencia para calcular la edad (fecha de matrícula). */
   ageOnDate: string;
+  /** Si se indica, el formulario dibuja su encabezado: título a la izquierda y el interruptor al extremo opuesto. */
+  title?: React.ReactNode;
+  /** Acciones extra del encabezado (p. ej. eliminar), a la derecha junto al interruptor. */
+  headerActions?: React.ReactNode;
 }
 
 const DOC_TYPES: DocType[] = ['DNI', 'CE', 'Pasaporte'];
 
 export function PersonForm({
-  person, onChange, extended, locked, existing, onPickExisting, searchPlaceholder, ageOnDate, today,
+  person, onChange, extended, locked, existing, onPickExisting, searchPlaceholder, ageOnDate, today, title, headerActions,
 }: PersonFormProps) {
   const [query, setQuery] = React.useState('');
   const set = (patch: Partial<DraftPerson>) => onChange({ ...person, ...patch });
@@ -107,11 +111,24 @@ export function PersonForm({
     onChange({ ...emptyPerson(), source: next });
   };
 
+  // Encabezado: título | (acciones + interruptor). Sin título, el interruptor va solo arriba.
+  const header = title !== undefined ? (
+    <div className="flex items-center justify-between gap-4">
+      <h4 className="font-semibold text-text-primary">{title}</h4>
+      <div className="flex items-center gap-3">
+        {headerActions}
+        {canChooseSource && <SourceToggle value={source} onChange={changeSource} />}
+      </div>
+    </div>
+  ) : (
+    canChooseSource && <SourceToggle value={source} onChange={changeSource} />
+  );
+
   // ------------------------------------------------------------- Persona ya registrada
   if (canChooseSource && source === 'existente') {
     return (
       <div className="space-y-4">
-        <SourceToggle value={source} onChange={changeSource} />
+        {header}
 
         {person.existingId ? (
           <div className="flex items-start justify-between gap-4 bg-success-tint border border-border-soft rounded-xl p-4">
@@ -173,7 +190,7 @@ export function PersonForm({
   const disabled = !!locked;
   return (
     <div className="space-y-4">
-      {canChooseSource && <SourceToggle value={source} onChange={changeSource} />}
+      {header}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Nombres" required>
