@@ -1,23 +1,32 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import type { Schedule } from '../../context/DataContext';
+import { CalendarDays, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import type { CapacityConfig, Schedule } from '../../context/DataContext';
 import {
+  ACTIVE_STATUSES,
   MONTHS,
   WEEKDAYS_SHORT,
-  endTime,
+  capacityFor,
+  groupByBlock,
   longDayLabel,
   monthGrid,
   monthTitle,
-  statusTone,
-  timeToMinutes,
+  rangeLabel,
+  slotLabel,
+  slotsForDate,
   weekOf,
-  type StatusTone,
+  type FlatActivity,
 } from '../../utils/schedule';
 
 export type CalendarMode = 'month' | 'week';
 
 interface Props {
+  /** Asesorías ya filtradas por sede / búsqueda. */
   schedules: Schedule[];
+  /** Actividades especiales de los cronogramas (ya filtradas por sede). */
+  activities: FlatActivity[];
+  capacity: CapacityConfig;
+  /** Sede mostrada; vacío = todas (no se compara con el cupo porque cada sede tiene el suyo). */
+  branchId: string;
   mode: CalendarMode;
   onModeChange: (m: CalendarMode) => void;
   /** Cualquier fecha del mes / semana que se muestra. */
@@ -25,45 +34,39 @@ interface Props {
   onNavigate: (dir: -1 | 0 | 1) => void;
   today: string;
   onCreate: (date: string) => void;
-  onEdit: (s: Schedule) => void;
   onShowDay: (date: string) => void;
+  onShowActivity: (activityId: string) => void;
 }
 
-const TONE: Record<StatusTone, string> = {
-  success: 'bg-success-tint text-success-text border-success-text/30',
-  info: 'bg-info-tint text-info-text border-info-text/30',
-  warning: 'bg-warning-tint text-warning-text border-warning-text/30',
-  danger: 'bg-danger-tint text-danger-text border-danger-text/30',
-  neutral: 'bg-surface-muted text-text-secondary border-border-soft',
-};
-const DOT: Record<StatusTone, string> = {
-  success: 'bg-success-text', info: 'bg-info-text', warning: 'bg-warning-text', danger: 'bg-danger-text', neutral: 'bg-text-muted',
-};
-const LEGEND = ['Confirmado', 'Reservado', 'Reprogramado', 'Cancelado', 'No reservó'];
-
-const byTime = (a: Schedule, b: Schedule) => timeToMinutes(a.time) - timeToMinutes(b.time);
-
-function EventChip({ s, onEdit }: { s: Schedule; onEdit: (s: Schedule) => void }) {
-  const tone = statusTone(s.status);
-  const dead = s.status === 'Cancelado' || s.status === 'No reservó';
-  return (
-    <button
-      type="button"
-      onClick={e => { e.stopPropagation(); onEdit(s); }}
-      title={`${s.time} · ${s.student} · ${s.type} · ${s.status}`}
-      className={`w-full text-left px-2 py-1 rounded-lg border text-xs font-medium truncate transition-shadow hover:shadow-sm ${TONE[tone]} ${dead ? 'opacity-70' : ''}`}
-    >
-      <span className="font-semibold">{s.time}</span>{' '}
-      <span className={dead ? 'line-through' : ''}>{s.student}</span>
-    </button>
-  );
+interface Block {
+  time: string;
+  count: number;
+  /** null = sin límite o sin sede elegida. */
+  capacity: number | null;
+  full: boolean;
+  names: string[];
 }
 
-export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavigate, today, onCreate, onEdit, onShowDay }: Props) {
+const ACTIVITY_CHIP = 'bg-active-tint text-primary-accent border-primary-accent/30';
+const OPEN_CHIP = 'bg-info-tint text-info-text border-info-text/30';
+const FULL_CHIP = 'bg-warning-tint text-warning-text border-warning-text/30';
+
+export function ScheduleCalendar({
+  schedules, activities, capacity, branchId, mode, onModeChange, cursor, onNavigate, today, onCreate, onShowDay, onShowActivity,
+}: Props) {
   const [year, month] = cursor.split('-').map(Number);
   const week = weekOf(cursor);
 
-  const eventsOf = (date: string) => schedules.filter(s => s.date === date).sort(byTime);
+  const activitiesOf = (date: string) => activities.filter(a => a.date === date).sort((a, b) => a.start.localeCompare(b.start));
+
+  /** Horarios del día con alumnos (solo asesorías que ocupan horario), con su cupo si hay una sede elegida. */
+  const blocksOf = (date: string): Block[] =>
+    groupByBlock(schedules.filter(s => s.date === date && ACTIVE_STATUSES.includes(s.status))).map(g => {
+      const cap = branchId ? capacityFor(capacity, branchId, date, g.time) : null;
+      return { time: g.time, count: g.items.length, capacity: cap, full: cap !== null && g.items.length >= cap, names: g.items.map(i => i.student) };
+    });
+
+  const blockText = (b: Block) => (b.capacity === null ? `${b.count}` : `${b.count}/${b.capacity}`);
 
   const title = mode === 'month'
     ? monthTitle(year, month)
@@ -74,11 +77,34 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
         return am === bm ? `${ad} – ${bd} de ${MONTHS[bm - 1].toLowerCase()} ${by}` : `${ad} ${MONTHS[am - 1].slice(0, 3).toLowerCase()} – ${bd} ${MONTHS[bm - 1].slice(0, 3).toLowerCase()} ${by}`;
       })();
 
-  const countInView = mode === 'month'
-    ? schedules.filter(s => s.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)).length
-    : week.reduce((acc, d) => acc + eventsOf(d).length, 0);
+  const inView = (d: string) => (mode === 'month' ? d.startsWith(`${year}-${String(month).padStart(2, '0')}`) : week.includes(d));
+  const countInView = schedules.filter(s => inView(s.date) && ACTIVE_STATUSES.includes(s.status)).length;
 
   const iconBtn = 'h-9 w-9 rounded-xl border border-border-soft bg-surface flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-muted transition-colors';
+
+  const ActivityChip = ({ a }: { a: FlatActivity }) => (
+    <button
+      type="button"
+      onClick={e => { e.stopPropagation(); onShowActivity(a.id); }}
+      title={`${a.name} · ${rangeLabel(a.start, a.end)} · ${a.sede}`}
+      className={`w-full text-left px-2 py-1 rounded-lg border text-xs font-medium truncate transition-shadow hover:shadow-sm ${ACTIVITY_CHIP}`}
+    >
+      <CalendarDays size={11} className="inline -mt-0.5 mr-1" />
+      <span className="font-semibold">{a.start}</span> {a.name}
+    </button>
+  );
+
+  const BlockChip = ({ date, b }: { date: string; b: Block }) => (
+    <button
+      type="button"
+      onClick={e => { e.stopPropagation(); onShowDay(date); }}
+      title={`${slotLabel(b.time)} · ${b.names.join(', ')}`}
+      className={`w-full text-left px-2 py-1 rounded-lg border text-xs font-medium truncate transition-shadow hover:shadow-sm ${b.full ? FULL_CHIP : OPEN_CHIP}`}
+    >
+      <span className="font-semibold">{b.time}</span> · {blockText(b)} {b.count === 1 ? 'alumno' : 'alumnos'}
+      {b.full && <span className="ml-1 text-[10px] font-semibold uppercase">Lleno</span>}
+    </button>
+  );
 
   return (
     <div className="p-4 space-y-4">
@@ -97,7 +123,7 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
           <h3 className="text-lg font-semibold text-text-primary ml-2 min-w-[11rem]">{title}</h3>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm text-text-secondary hidden md:inline">{countInView} {countInView === 1 ? 'cita' : 'citas'}</span>
+          <span className="text-sm text-text-secondary hidden md:inline">{countInView} {countInView === 1 ? 'asesoría' : 'asesorías'}</span>
           <div className="flex bg-surface-muted p-1 rounded-xl border border-border-soft">
             {([['month', 'Mes'], ['week', 'Semana']] as const).map(([id, label]) => (
               <button
@@ -124,18 +150,22 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
           </div>
           {monthGrid(year, month).map((weekDays, wi) => (
             <div key={wi} className="grid grid-cols-7">
-              {weekDays.map((date, di) => {
+              {weekDays.map(date => {
                 const inMonth = Number(date.split('-')[1]) === month;
                 const isToday = date === today;
-                const isPast = date < today;
-                const events = eventsOf(date);
-                const shown = events.slice(0, 3);
+                const closed = slotsForDate(date).length === 0;
+                const isPast = date < today || closed;
+                const acts = activitiesOf(date);
+                const blocks = blocksOf(date);
+                const total = acts.length + blocks.length;
+                const shownActs = acts.slice(0, 3);
+                const shownBlocks = blocks.slice(0, Math.max(0, 3 - shownActs.length));
                 return (
                   <div
                     key={date}
                     onClick={() => !isPast && onCreate(date)}
                     className={`group relative min-h-[120px] p-2 border-b border-r border-border-soft last:border-r-0 flex flex-col gap-1 transition-colors ${
-                      !inMonth ? 'bg-surface-muted/40' : di >= 5 ? 'bg-surface-muted/20' : 'bg-surface'
+                      closed ? 'bg-surface-muted/60' : !inMonth ? 'bg-surface-muted/40' : 'bg-surface'
                     } ${isPast ? 'cursor-default' : 'cursor-pointer hover:bg-active-tint/40'}`}
                   >
                     <div className="flex items-center justify-between">
@@ -146,18 +176,18 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
                       >
                         {Number(date.split('-')[2])}
                       </span>
-                      {!isPast && (
-                        <Plus size={14} className="text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-                      )}
+                      {!isPast && <Plus size={14} className="text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />}
                     </div>
-                    {shown.map(s => <EventChip key={s.id} s={s} onEdit={onEdit} />)}
-                    {events.length > 3 && (
+                    {closed && total === 0 && inMonth && <span className="text-xs text-text-muted px-1">Sin atención</span>}
+                    {shownActs.map(a => <ActivityChip key={a.id} a={a} />)}
+                    {shownBlocks.map(b => <BlockChip key={b.time} date={date} b={b} />)}
+                    {total > shownActs.length + shownBlocks.length && (
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); onShowDay(date); }}
                         className="text-xs font-medium text-primary-accent hover:underline text-left px-1"
                       >
-                        +{events.length - 3} más
+                        +{total - shownActs.length - shownBlocks.length} más
                       </button>
                     )}
                   </div>
@@ -170,10 +200,12 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
         <div className="grid grid-cols-1 md:grid-cols-7 border border-border-soft rounded-xl overflow-hidden bg-surface">
           {week.map((date, di) => {
             const isToday = date === today;
-            const isPast = date < today;
-            const events = eventsOf(date);
+            const closed = slotsForDate(date).length === 0;
+            const isPast = date < today || closed;
+            const acts = activitiesOf(date);
+            const blocks = blocksOf(date);
             return (
-              <div key={date} className={`flex flex-col border-b md:border-b-0 md:border-r border-border-soft last:border-r-0 ${di >= 5 ? 'bg-surface-muted/20' : ''}`}>
+              <div key={date} className={`flex flex-col border-b md:border-b-0 md:border-r border-border-soft last:border-r-0 ${closed ? 'bg-surface-muted/50' : ''}`}>
                 <div className={`flex items-center justify-between px-3 py-2.5 border-b border-border-soft ${isToday ? 'bg-active-tint' : 'bg-surface-muted/60'}`}>
                   <div>
                     <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider">{WEEKDAYS_SHORT[di]}</p>
@@ -191,25 +223,33 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
                   )}
                 </div>
                 <div className="p-2 space-y-2 min-h-[260px]">
-                  {events.length === 0 && <p className="text-xs text-text-muted text-center pt-4">Sin citas</p>}
-                  {events.map(s => {
-                    const tone = statusTone(s.status);
-                    const dead = s.status === 'Cancelado' || s.status === 'No reservó';
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => onEdit(s)}
-                        className={`w-full text-left p-2.5 rounded-xl border space-y-0.5 transition-shadow hover:shadow-sm ${TONE[tone]} ${dead ? 'opacity-70' : ''}`}
-                      >
-                        <p className="text-xs font-semibold">{s.time} – {endTime(s.time, s.duration)}</p>
-                        <p className={`text-sm font-semibold text-text-primary ${dead ? 'line-through' : ''}`}>{s.student}</p>
-                        <p className="text-xs">{s.program} · {s.level}</p>
-                        <p className="text-xs">{s.type} · {s.modality}</p>
-                        <p className="text-xs">{s.responsible}</p>
-                      </button>
-                    );
-                  })}
+                  {acts.length === 0 && blocks.length === 0 && (
+                    <p className="text-xs text-text-muted text-center pt-4">{closed ? 'Sin atención' : 'Sin asesorías'}</p>
+                  )}
+                  {acts.map(a => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onShowActivity(a.id)}
+                      className={`w-full text-left p-2.5 rounded-xl border space-y-0.5 transition-shadow hover:shadow-sm ${ACTIVITY_CHIP}`}
+                    >
+                      <p className="text-xs font-semibold">{rangeLabel(a.start, a.end)}</p>
+                      <p className="text-sm font-semibold text-text-primary">{a.name}</p>
+                      <p className="text-xs">{a.enrolled.length} {a.enrolled.length === 1 ? 'inscrito' : 'inscritos'}{a.capacity !== null ? ` de ${a.capacity}` : ''}</p>
+                    </button>
+                  ))}
+                  {blocks.map(b => (
+                    <button
+                      key={b.time}
+                      type="button"
+                      onClick={() => onShowDay(date)}
+                      className={`w-full text-left p-2.5 rounded-xl border space-y-0.5 transition-shadow hover:shadow-sm ${b.full ? FULL_CHIP : OPEN_CHIP}`}
+                    >
+                      <p className="text-xs font-semibold">{slotLabel(b.time)}</p>
+                      <p className="text-sm font-semibold text-text-primary">{blockText(b)} {b.count === 1 ? 'alumno' : 'alumnos'}{b.full ? ' · Lleno' : ''}</p>
+                      <p className="text-xs">{b.names.slice(0, 3).join(', ')}{b.names.length > 3 ? ` y ${b.names.length - 3} más` : ''}</p>
+                    </button>
+                  ))}
                 </div>
               </div>
             );
@@ -219,12 +259,10 @@ export function ScheduleCalendar({ schedules, mode, onModeChange, cursor, onNavi
 
       {/* Leyenda */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
-        {LEGEND.map(l => (
-          <span key={l} className="flex items-center gap-2 text-sm text-text-secondary">
-            <span className={`w-2.5 h-2.5 rounded-full ${DOT[statusTone(l)]}`} />
-            {l}
-          </span>
-        ))}
+        <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-info-text" />Horario con lugar</span>
+        <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-warning-text" />Horario lleno</span>
+        <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-primary-accent" />Actividad especial (bloquea horarios)</span>
+        {!branchId && <span className="text-xs text-text-muted">Elija una sede para ver el cupo de cada horario.</span>}
       </div>
     </div>
   );

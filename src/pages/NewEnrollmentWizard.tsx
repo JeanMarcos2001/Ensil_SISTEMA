@@ -23,6 +23,7 @@ import { StepProgram } from './enrollment/StepProgram';
 import { StepPayment } from './enrollment/StepPayment';
 import { StepSummary } from './enrollment/StepSummary';
 import { STEPS } from './enrollment/types';
+import { allActivities } from '../utils/schedule';
 
 interface NewEnrollmentWizardProps {
   onClose: () => void;
@@ -59,6 +60,7 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
     branches: data.branches, leadSources: data.leadSources, staff: data.staff, assignments: data.assignments,
     programs: data.programs, levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes,
     promotions: data.promotions, guardians: data.guardians, students: data.students, classSchedules: data.classSchedules,
+    scheduling: { schedules: data.schedules, capacity: data.capacityConfig, activities: allActivities(data.monthlySchedules) },
   };
 
   // Sede de la sesión: una sesión de filial no puede cambiarla; el Superadmin en vista global sí.

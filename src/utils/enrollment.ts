@@ -11,7 +11,6 @@ import type {
   Branch,
   CashMovement,
   ClassSchedule,
-  Counseling,
   Enrollment,
   Guardian,
   LeadSource,
@@ -23,12 +22,14 @@ import type {
   Program,
   Promotion,
   PromotionGroup,
+  Schedule,
   ScheduleMode,
   Staff,
   Student,
   Tariff,
 } from '../context/DataContext';
 import { nextNumericId, nextSequentialId } from './ids';
+import { SLOT_DURATION, checkBlock, findScheduleConflict, slotLabel, slotsForDate, weekdayIndex, type SchedulingContext } from './schedule';
 import { findPromotionOffers, buildPromotionGroups, type PromoStudent, type PromotionOffer } from './promotions';
 import {
   buildPlanInstallments,
@@ -232,6 +233,8 @@ export interface EnrollmentCatalogs {
   guardians: Guardian[];
   students: Student[];
   classSchedules: ClassSchedule[];
+  /** Agenda de Psicopedagogía (asesorías, cupos y actividades); permite validar la primera asesoría. */
+  scheduling?: SchedulingContext;
 }
 
 /** Área cuyo personal puede ser responsable de la entrevista. */
@@ -509,6 +512,8 @@ export function validateStudents(draft: EnrollmentDraft, c: EnrollmentCatalogs, 
 
 export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, quote: EnrollmentQuote): string[] {
   const e: string[] = [];
+  // Primeras asesorías de los alumnos anteriores de este mismo registro: también ocupan cupo.
+  const planned: Schedule[] = [];
   draft.students.forEach((s, i) => {
     const q = quote.students[i];
     const label = `Alumno ${i + 1}`;
@@ -521,9 +526,31 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
       if (!s.levelId) e.push(`${label}: seleccione el nivel.`);
       else if (!getProgramLevels(c.levels, program).some(l => l.id === s.levelId)) e.push(`${label}: el nivel no es válido para el programa.`);
     }
+    // Primera asesoría: usa los mismos bloques de la agenda (1 hora; con cupo; sin domingos ni actividades encima)
+    let dateOk = false;
     if (!s.counselingDate) e.push(`${label}: indique la fecha de la primera asesoría.`);
     else if (s.counselingDate < draft.context.date) e.push(`${label}: la primera asesoría no puede ser anterior a la fecha de matrícula.`);
-    if (!s.counselingTime) e.push(`${label}: indique la hora de la primera asesoría.`);
+    else if (weekdayIndex(s.counselingDate) === 6) e.push(`${label}: los domingos no hay atención; elija otra fecha para la primera asesoría.`);
+    else dateOk = true;
+    if (!s.counselingTime) e.push(`${label}: indique el horario de la primera asesoría.`);
+    else if (dateOk && !slotsForDate(s.counselingDate).includes(s.counselingTime)) {
+      e.push(`${label}: el horario de la primera asesoría no está disponible para esa fecha.`);
+    } else if (dateOk && c.scheduling) {
+      const existingId = studentPerson(draft, i).existingId;
+      const ctx = { ...c.scheduling, schedules: [...c.scheduling.schedules, ...planned] };
+      const problem = checkBlock(ctx, draft.context.branchId, s.counselingDate, s.counselingTime);
+      const clash = existingId
+        ? findScheduleConflict(ctx.schedules, { student: '', studentId: existingId, responsible: '', date: s.counselingDate, time: s.counselingTime, status: 'Reservado' })
+        : undefined;
+      if (problem) e.push(`${label}: ${problem}`);
+      else if (clash) e.push(`${label}: ya tiene una asesoría ese día de ${slotLabel(clash.schedule.time)}.`);
+      else {
+        planned.push({
+          id: `borrador-${i}`, student: label, program: '', level: '', date: s.counselingDate, time: s.counselingTime,
+          duration: SLOT_DURATION, responsible: '', status: 'Reservado', branchId: draft.context.branchId,
+        });
+      }
+    }
     if (!s.paymentTypeId) { e.push(`${label}: seleccione el tipo de pago.`); return; }
     if (!q.tariff) e.push(`${label}: no hay un tarifario vigente para el tipo de pago elegido.`);
     if (s.startDate && s.startDate < draft.context.date) e.push(`${label}: la fecha de inicio de clases no puede ser anterior a la matrícula.`);
@@ -595,7 +622,7 @@ export interface ExistingState {
   plans: Plan[];
   payments: Payment[];
   promotionGroups: PromotionGroup[];
-  counselings: Counseling[];
+  schedules: Schedule[];
 }
 
 export interface EnrollmentBatch {
@@ -608,7 +635,8 @@ export interface EnrollmentBatch {
   payments: Payment[];
   cashMovements: Omit<CashMovement, 'id' | 'user'>[];
   promotionGroups: PromotionGroup[];
-  counselings: Counseling[];
+  /** Primera asesoría de cada alumno, como asesoría real de la agenda. */
+  schedules: Schedule[];
 }
 
 export interface BatchResult {
@@ -680,6 +708,7 @@ export function buildEnrollmentBatch(
   const enrollmentByKey: Record<string, string> = {};
   const planByKey: Record<string, string> = {};
   const balanceByGuardian = new Map<string, number>();
+  const studentIds: string[] = [];
 
   draft.students.forEach((ds, i) => {
     const q = quote.students[i];
@@ -714,6 +743,7 @@ export function buildEnrollmentBatch(
       });
     }
 
+    studentIds[i] = studentId!;
     const enrollmentId = nextSequentialId('MAT', [...enrollmentIdPool, ...enrollments.map(e => e.id)], { year });
     enrollmentByKey[ds.key] = enrollmentId;
     const planId = nextSequentialId('PLN', [...planIdPool, ...plans.map(p => p.id)]);
@@ -766,20 +796,24 @@ export function buildEnrollmentBatch(
     });
   });
 
-  // ---- Primera asesoría de cada alumno (fecha y hora definidas en el paso Programa)
-  const counselings: Counseling[] = [];
-  const counselingIdPool = state.counselings.map(c => c.id);
+  // ---- Primera asesoría de cada alumno: asesoría real de la agenda (sede de la matrícula; responsable = quien entrevistó)
+  const newSchedules: Schedule[] = [];
+  const scheduleIdPool = state.schedules.map(x => x.id);
   draft.students.forEach((ds, i) => {
     const q = quote.students[i];
-    counselings.push({
-      id: nextNumericId([...counselingIdPool, ...counselings.map(c => c.id)]),
+    newSchedules.push({
+      id: nextNumericId([...scheduleIdPool, ...newSchedules.map(x => x.id)]),
       student: fullName(studentPerson(draft, i)),
+      studentId: studentIds[i],
+      branchId: draft.context.branchId,
       program: q.program!.name,
       level: q.level?.name ?? 'Sin nivel',
       date: ds.counselingDate,
       time: ds.counselingTime,
-      responsible: 'Por asignar',
-      status: 'Pendiente',
+      duration: SLOT_DURATION,
+      responsible: interviewerName,
+      status: 'Reservado',
+      isFirst: true,
     });
   });
 
@@ -869,6 +903,6 @@ export function buildEnrollmentBatch(
 
   return {
     ok: true,
-    batch: { newGuardians, guardianUpdates, newStudents, studentUpdates, enrollments, plans, payments, cashMovements, promotionGroups, counselings },
+    batch: { newGuardians, guardianUpdates, newStudents, studentUpdates, enrollments, plans, payments, cashMovements, promotionGroups, schedules: newSchedules },
   };
 }

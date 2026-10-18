@@ -31,8 +31,7 @@ import { Kardex } from '../../pages/logistics/Kardex';
 import { Adjustments } from '../../pages/logistics/Adjustments';
 import { Messaging } from '../../pages/Messaging';
 import { Schedule } from '../../pages/psychopedagogy/Schedule';
-import { FirstCounseling } from '../../pages/psychopedagogy/FirstCounseling';
-import { Tracking } from '../../pages/psychopedagogy/Tracking';
+import { StudentHistory } from '../../pages/psychopedagogy/StudentHistory';
 import { MonthlySchedules } from '../../pages/psychopedagogy/MonthlySchedules';
 import { StaffPage } from '../../pages/Staff';
 import { ContractsPage } from '../../pages/Contracts';
@@ -118,8 +117,7 @@ export function AppShell() {
     
     // Psychopedagogy Module
     if (activeItem === 'Programación') return <Schedule />;
-    if (activeItem === 'Primera asesoría') return <FirstCounseling />;
-    if (activeItem === 'Seguimiento') return <Tracking />;
+    if (activeItem === 'Historial del alumno') return <StudentHistory />;
     if (activeItem === 'Cronogramas mensuales') return <MonthlySchedules />;
     
     return (

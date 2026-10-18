@@ -5,61 +5,71 @@ import { Modal } from '../../components/ui/Modal';
 import { useData, type Schedule, type Student } from '../../context/DataContext';
 import { getInterviewerOptions } from '../../utils/enrollment';
 import {
-  STATUS_OPTIONS,
-  TYPE_OPTIONS,
+  SLOT_DURATION,
+  allActivities,
+  blockState,
+  blockText,
+  branchOfStudent,
   findScheduleConflict,
+  latestEnrollment,
   longDayLabel,
+  slotLabel,
+  slotsForDate,
+  suggestedResponsible,
   todayLocalISO,
+  validateReservation,
   validateSchedule,
+  weekdayIndex,
 } from '../../utils/schedule';
 import { labelCls, nativeFieldCls, textareaCls } from './formStyles';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /** Reserva a editar; `null` para crear una nueva. */
+  /** Asesoría a reprogramar; `null` para reservar una nueva. */
   schedule: Schedule | null;
-  /** Fecha sugerida al crear desde el calendario. */
+  /** Fecha sugerida al reservar desde el calendario. */
   defaultDate?: string;
+  /** Alumno con el que se abre al reservar (p. ej. desde «Sin asesoría esta semana»). */
+  defaultStudentId?: string;
 }
 
 interface FormState {
   studentId: string;
   student: string;
+  branchId: string;
   program: string;
   level: string;
-  type: string;
-  modality: string;
   date: string;
   time: string;
-  duration: number;
   responsible: string;
-  status: string;
   observations: string;
 }
 
 const emptyForm = (date: string): FormState => ({
-  studentId: '', student: '', program: '', level: '', type: 'Primera asesoría', modality: 'Presencial',
-  date, time: '', duration: 45, responsible: '', status: 'Reservado', observations: '',
+  studentId: '', student: '', branchId: '', program: '', level: '', date, time: '', responsible: '', observations: '',
 });
-
-const defaultDuration = (type: string) => (type === 'Primera asesoría' ? 45 : 30);
 
 /** Programa y nivel vigentes del alumno según su matrícula más reciente. */
 function programOf(student: Student, enrollments: ReturnType<typeof useData>['enrollments']) {
-  const own = enrollments.filter(e => e.studentId === student.id || e.student === student.name);
-  const latest = own.sort((a, b) => (a.dateISO ?? '').localeCompare(b.dateISO ?? '')).pop();
+  const latest = latestEnrollment(student, enrollments);
   if (latest) return { program: latest.program, level: latest.level };
   const [program = '', level = ''] = (student.program || '').split(' - ');
   return { program, level };
 }
 
-export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Props) {
-  const { students, enrollments, schedules, staff, assignments, branches, addSchedule, updateSchedule } = useData();
+export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defaultStudentId }: Props) {
+  const { students, enrollments, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate || today));
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const isReschedule = !!schedule;
+
+  const ctx = useMemo(
+    () => ({ schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) }),
+    [schedules, capacityConfig, monthlySchedules]
+  );
 
   // Responsables: todo el personal activo asignado a Psicopedagogía
   const responsibles = useMemo(
@@ -70,6 +80,11 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
     [staff, assignments, branches]
   );
 
+  const fillStudent = (s: Student): Partial<FormState> => {
+    const { program, level } = programOf(s, enrollments);
+    return { studentId: s.id, student: s.name, branchId: branchOfStudent(s, enrollments) ?? '', program, level };
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
@@ -77,15 +92,16 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
     if (schedule) {
       const known = students.find(s => s.id === schedule.studentId) ?? students.find(s => s.name === schedule.student);
       setForm({
-        studentId: known?.id ?? schedule.studentId ?? '',
-        student: schedule.student, program: schedule.program, level: schedule.level, type: schedule.type,
-        modality: schedule.modality, date: schedule.date, time: schedule.time, duration: schedule.duration,
-        responsible: schedule.responsible, status: schedule.status, observations: schedule.observations ?? '',
+        studentId: known?.id ?? schedule.studentId ?? '', student: schedule.student,
+        branchId: schedule.branchId ?? (known ? branchOfStudent(known, enrollments) ?? '' : ''),
+        program: schedule.program, level: schedule.level,
+        date: schedule.date, time: schedule.time, responsible: schedule.responsible, observations: schedule.observations ?? '',
       });
     } else {
-      setForm(emptyForm(defaultDate || today));
+      const preset = defaultStudentId ? students.find(s => s.id === defaultStudentId) : undefined;
+      setForm({ ...emptyForm(defaultDate || today), ...(preset ? fillStudent(preset) : {}) });
     }
-  }, [isOpen, schedule, defaultDate]);
+  }, [isOpen, schedule, defaultDate, defaultStudentId]);
 
   const set = (patch: Partial<FormState>) => { setError(null); setForm(f => ({ ...f, ...patch })); };
 
@@ -96,34 +112,45 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
     : [];
 
   const pickStudent = (s: Student) => {
-    const { program, level } = programOf(s, enrollments);
-    set({ studentId: s.id, student: s.name, program, level });
+    set({ ...fillStudent(s), time: '' });
     setQuery('');
   };
 
+  const pickTime = (time: string) => {
+    // Si el horario ya tiene un responsable, se propone el mismo (el salón lo atiende una persona)
+    const proposed = !form.responsible && time ? suggestedResponsible(schedules, form.branchId, form.date, time) : '';
+    set({ time, ...(proposed ? { responsible: proposed } : {}) });
+  };
+
+  const branchName = branches.find(b => b.id === form.branchId)?.name;
+
+  // Horarios del día elegido (cada uno de 1 hora) con su cupo, y cuáles no admiten más alumnos
+  const slots = form.date ? slotsForDate(form.date) : [];
+  const closedDay = !!form.date && weekdayIndex(form.date) === 6;
+  const stateOf = (time: string) => blockState(ctx, form.branchId, form.date, time, schedule?.id);
+  const chosen = form.time && form.branchId ? stateOf(form.time) : undefined;
+
   const handleSave = () => {
-    const isNew = !schedule;
-    const problem = validateSchedule({ ...form, isNew }, today);
+    const slotChanged = !schedule || schedule.date !== form.date || schedule.time !== form.time;
+    const cand = { ...form, status: 'Reservado' };
+    // Si solo cambian observaciones o responsable, el horario (que ya ocupaba) no se vuelve a evaluar contra el cupo
+    const problem = slotChanged
+      ? validateReservation(ctx, { ...cand, checkPast: true }, today, schedule?.id)
+      : validateSchedule({ ...cand, checkPast: false }, today) ?? (findScheduleConflict(schedules, cand, schedule?.id) ? 'El alumno ya tiene otra asesoría a esa hora.' : null);
     if (problem) { setError(problem); return; }
 
-    const conflict = findScheduleConflict(schedules, form, schedule?.id);
-    if (conflict) {
-      const c = conflict.schedule;
-      setError(
-        conflict.who === 'responsable'
-          ? `${c.responsible} ya tiene una cita ese día de ${c.time} con ${c.student}. Elija otro horario o responsable.`
-          : `${c.student} ya tiene una cita ese día a las ${c.time}.`
-      );
-      return;
-    }
-
-    const data = {
-      student: form.student.trim(), studentId: form.studentId || undefined, program: form.program, level: form.level,
-      type: form.type, date: form.date, time: form.time, duration: form.duration, responsible: form.responsible.trim(),
-      modality: form.modality, status: form.status, observations: form.observations.trim() || undefined,
+    const base = {
+      student: form.student.trim(), studentId: form.studentId || undefined, branchId: form.branchId, program: form.program, level: form.level,
+      date: form.date, time: form.time, duration: SLOT_DURATION, responsible: form.responsible.trim(),
+      observations: form.observations.trim() || undefined,
     };
-    if (schedule) updateSchedule(schedule.id, data);
-    else addSchedule(data);
+    if (schedule) {
+      // Cambiar fecha, horario o responsable reprograma la asesoría (estado automático)
+      const moved = slotChanged || schedule.responsible.trim() !== form.responsible.trim();
+      updateSchedule(schedule.id, { ...base, status: moved ? 'Reprogramado' : schedule.status });
+    } else {
+      addSchedule({ ...base, status: 'Reservado' });
+    }
     onClose();
   };
 
@@ -135,12 +162,12 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={schedule ? 'Editar Reserva' : 'Nueva Reserva de Asesoría'}
+      title={isReschedule ? 'Reprogramar Asesoría' : 'Reservar Asesoría'}
       size="4xl"
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Descartar Cambios</Button>
-          <Button variant="primary" onClick={handleSave}>{schedule ? 'Guardar Cambios' : 'Guardar y Confirmar Reserva'}</Button>
+          <Button variant="primary" onClick={handleSave}>{isReschedule ? 'Guardar Reprogramación' : 'Guardar y Confirmar Reserva'}</Button>
         </div>
       }
     >
@@ -168,13 +195,15 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
                         <p className="font-semibold text-text-primary">{form.student}</p>
                         {!form.studentId && <p className="text-xs text-text-muted">Alumno de una reserva anterior (sin ficha vinculada)</p>}
                       </div>
-                      <button
-                        type="button"
-                        className="text-xs text-primary-accent hover:underline shrink-0"
-                        onClick={() => set({ studentId: '', student: '', program: '', level: '' })}
-                      >
-                        Cambiar
-                      </button>
+                      {!isReschedule && (
+                        <button
+                          type="button"
+                          className="text-xs text-primary-accent hover:underline shrink-0"
+                          onClick={() => set({ studentId: '', student: '', branchId: '', program: '', level: '', time: '' })}
+                        >
+                          Cambiar
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-1.5">
@@ -207,7 +236,11 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelCls}>Sede</label>
+                    <input className={`${nativeFieldCls} disabled:bg-surface-muted disabled:text-text-muted`} value={branchName ?? ''} disabled placeholder="Autocompletado" readOnly />
+                  </div>
                   <div>
                     <label className={labelCls}>Programa</label>
                     <input className={`${nativeFieldCls} disabled:bg-surface-muted disabled:text-text-muted`} value={form.program} disabled placeholder="Autocompletado" readOnly />
@@ -217,96 +250,79 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate }: Pr
                     <input className={`${nativeFieldCls} disabled:bg-surface-muted disabled:text-text-muted`} value={form.level} disabled placeholder="Autocompletado" readOnly />
                   </div>
                 </div>
+                {form.student && !form.branchId && (
+                  <p className="text-xs text-danger-text">El alumno no tiene una matrícula con sede; no se puede reservar su horario.</p>
+                )}
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="pb-2 border-b border-border-soft">
-                <h3 className="text-base font-semibold text-text-primary">Detalles Básicos</h3>
+                <h3 className="text-base font-semibold text-text-primary">Observaciones</h3>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelCls}>Tipo de cita</label>
-                  <select
-                    className={nativeFieldCls}
-                    value={form.type}
-                    onChange={e => set({ type: e.target.value, duration: schedule ? form.duration : defaultDuration(e.target.value) })}
-                  >
-                    {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Canal / Modalidad</label>
-                  <select className={nativeFieldCls} value={form.modality} onChange={e => set({ modality: e.target.value })}>
-                    <option value="Presencial">Presencial</option>
-                    <option value="Virtual">Virtual</option>
-                  </select>
-                </div>
-              </div>
+              <textarea
+                className={`${textareaCls} h-24`}
+                rows={3}
+                placeholder="Notas de agenda..."
+                value={form.observations}
+                onChange={e => set({ observations: e.target.value })}
+              ></textarea>
             </div>
           </div>
 
           {/* Columna derecha */}
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="pb-2 border-b border-border-soft">
-                <h3 className="text-base font-semibold text-text-primary">Programación</h3>
+          <div className="space-y-4">
+            <div className="pb-2 border-b border-border-soft">
+              <h3 className="text-base font-semibold text-text-primary">Programación</h3>
+            </div>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <label className={labelCls}>Fecha <span className="text-error">*</span></label>
+                <input
+                  type="date"
+                  min={today}
+                  className={nativeFieldCls}
+                  value={form.date}
+                  onChange={e => set({ date: e.target.value, time: '' })}
+                />
+                {form.date && !closedDay && <p className="text-xs text-text-muted mt-1">{longDayLabel(form.date)}</p>}
+                {closedDay && <p className="text-xs text-danger-text mt-1">Los domingos no hay atención. Elija de lunes a sábado.</p>}
               </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2 sm:col-span-1">
-                    <label className={labelCls}>Fecha <span className="text-error">*</span></label>
-                    <input
-                      type="date"
-                      min={schedule ? undefined : today}
-                      className={nativeFieldCls}
-                      value={form.date}
-                      onChange={e => set({ date: e.target.value })}
-                    />
-                    {form.date && <p className="text-xs text-text-muted mt-1">{longDayLabel(form.date)}</p>}
-                  </div>
-                  <div className="col-span-2 sm:col-span-1 grid grid-cols-2 gap-2">
-                    <div>
-                      <label className={labelCls}>Hora <span className="text-error">*</span></label>
-                      <input type="time" className={nativeFieldCls} value={form.time} onChange={e => set({ time: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className={labelCls}>Dur. (min)</label>
-                      <input
-                        type="number" min={5} max={240} step={5}
-                        className={nativeFieldCls}
-                        value={form.duration}
-                        onChange={e => set({ duration: parseInt(e.target.value) || 0 })}
-                      />
-                    </div>
-                  </div>
-                </div>
 
-                <div>
-                  <label className={labelCls}>Responsable <span className="text-error">*</span></label>
-                  <select className={nativeFieldCls} value={form.responsible} onChange={e => set({ responsible: e.target.value })}>
-                    <option value="">{responsibleOptions.length ? 'Seleccionar responsable...' : 'No hay personal asignado a Psicopedagogía'}</option>
-                    {responsibleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                </div>
+              <div>
+                <label className={labelCls}>Horario <span className="text-error">*</span></label>
+                <select
+                  className={nativeFieldCls}
+                  value={form.time}
+                  disabled={!form.date || closedDay || !form.branchId}
+                  onChange={e => pickTime(e.target.value)}
+                >
+                  <option value="">
+                    {!form.student ? 'Elija primero al alumno' : !form.date ? 'Elija primero la fecha' : closedDay ? 'Sin atención' : 'Seleccionar horario...'}
+                  </option>
+                  {(form.branchId ? slots : []).map(t => {
+                    const st = stateOf(t);
+                    const unavailable = (st.kind === 'full' || st.kind === 'blocked') && t !== form.time;
+                    return (
+                      <option key={t} value={t} disabled={unavailable}>
+                        {slotLabel(t)} — {blockText(st)}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-xs text-text-muted mt-1">
+                  {chosen
+                    ? `Cada horario es un salón con cupo. Este: ${blockText(chosen)}.`
+                    : 'Cada asesoría dura 1 hora. Lun–Vie 3 a 8 p. m.; sábados 9 a 1 p. m. y 4 a 8 p. m.'}
+                </p>
+              </div>
 
-                <div>
-                  <label className={labelCls}>Estado de reserva</label>
-                  <select className={nativeFieldCls} value={form.status} onChange={e => set({ status: e.target.value })}>
-                    {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className={labelCls}>Observaciones</label>
-                  <textarea
-                    className={`${textareaCls} h-24`}
-                    rows={3}
-                    placeholder="Notas de agenda..."
-                    value={form.observations}
-                    onChange={e => set({ observations: e.target.value })}
-                  ></textarea>
-                </div>
+              <div>
+                <label className={labelCls}>Responsable <span className="text-error">*</span></label>
+                <select className={nativeFieldCls} value={form.responsible} onChange={e => set({ responsible: e.target.value })}>
+                  <option value="">{responsibleOptions.length ? 'Seleccionar responsable...' : 'No hay personal asignado a Psicopedagogía'}</option>
+                  {responsibleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
               </div>
             </div>
           </div>

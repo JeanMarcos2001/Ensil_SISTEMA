@@ -10,6 +10,7 @@ import {
   type DraftStudent,
 } from '../../utils/enrollment';
 import { buildPromotionGroups, suggestGroups } from '../../utils/promotions';
+import { blockState, blockText, longDayLabel, slotLabel, slotsForDate, weekdayIndex } from '../../utils/schedule';
 import { Field, StepHeader, inputCls } from './fields';
 import { STEPS, type StepProps } from './types';
 
@@ -197,22 +198,43 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
             <div className="space-y-2 pt-4 border-t border-border-soft">
               <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Primera asesoría</p>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Fecha de la primera asesoría" required hint="No puede ser anterior a la fecha de matrícula.">
+                <Field
+                  label="Fecha de la primera asesoría"
+                  required
+                  hint={
+                    s.counselingDate && weekdayIndex(s.counselingDate) === 6
+                      ? 'Los domingos no hay atención. Elija de lunes a sábado.'
+                      : s.counselingDate ? longDayLabel(s.counselingDate) : 'No puede ser anterior a la fecha de matrícula.'
+                  }
+                >
                   <input
                     type="date"
                     min={draft.context.date}
                     className={inputCls}
                     value={s.counselingDate}
-                    onChange={e => setStudent(idx, { counselingDate: e.target.value })}
+                    onChange={e => setStudent(idx, { counselingDate: e.target.value, counselingTime: '' })}
                   />
                 </Field>
-                <Field label="Hora de la primera asesoría" required hint="Hora exacta acordada con el alumno o su titular.">
-                  <input
-                    type="time"
+                <Field label="Horario de la primera asesoría" required hint="Bloques de 1 hora de la agenda de Psicopedagogía de la sede.">
+                  <select
                     className={inputCls}
                     value={s.counselingTime}
+                    disabled={!s.counselingDate || slotsForDate(s.counselingDate).length === 0}
                     onChange={e => setStudent(idx, { counselingTime: e.target.value })}
-                  />
+                  >
+                    <option value="">{!s.counselingDate ? 'Elija primero la fecha' : slotsForDate(s.counselingDate).length === 0 ? 'Sin atención' : 'Seleccionar horario...'}</option>
+                    {slotsForDate(s.counselingDate).map(t => {
+                      const state = catalogs.scheduling
+                        ? blockState(catalogs.scheduling, draft.context.branchId, s.counselingDate, t)
+                        : undefined;
+                      const unavailable = !!state && (state.kind === 'full' || state.kind === 'blocked');
+                      return (
+                        <option key={t} value={t} disabled={unavailable && t !== s.counselingTime}>
+                          {slotLabel(t)}{state ? ` — ${blockText(state)}` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </Field>
               </div>
             </div>

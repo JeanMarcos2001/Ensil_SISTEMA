@@ -1,85 +1,115 @@
-import React, { useState } from 'react';
-import { Search, Filter, Calendar as CalendarIcon, Download, Plus, Trash2, GripVertical } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search, Calendar as CalendarIcon, Download, Plus, Trash2, GripVertical, AlertCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
-import { inputCls, labelCls, nativeFieldCls, selectCls, textareaCls } from './formStyles';
+import { inputCls, labelCls, nativeFieldCls, textareaCls } from './formStyles';
 import { Select } from '../../components/ui/Select';
 import { ActionMenu } from '../../components/ui/ActionMenu';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Modal } from '../../components/ui/Modal';
-import { useData } from '../../context/DataContext';
+import { useData, type MonthlySchedule, type ScheduleActivity } from '../../context/DataContext';
+import { MONTHS, affectedSchedules, rangeLabel, todayLocalISO, validateActivity } from '../../utils/schedule';
+import { CapacityInput } from './CapacityInput';
+import { ActivityEnrollModal } from './ActivityEnrollModal';
 
+interface FormState {
+  branchId: string;
+  mes: string;
+  anio: number;
+  titulo: string;
+  observaciones: string;
+  actividades: ScheduleActivity[];
+}
+
+const newActivity = (order: number): ScheduleActivity => ({
+  id: `new-${Date.now()}-${order}`, actividad: '', fecha: '', horaInicio: '', horaFin: '', responsable: '', orden: order, cupo: null, inscritos: [],
+});
+
+const seats = (a: ScheduleActivity) => (a.cupo === null ? `${a.inscritos.length} inscritos` : `${a.inscritos.length}/${a.cupo} inscritos`);
+
+/**
+ * Cronogramas mensuales por sede. Las actividades (con fecha, hora de inicio y fin, y cupo) se ven en el calendario de
+ * Programación, bloquean los horarios de asesoría de su sede y admiten inscripción de alumnos.
+ */
 export function MonthlySchedules() {
-  const { monthlySchedules, branches } = useData();
+  const { monthlySchedules, branches, schedules, addMonthlySchedule, updateMonthlySchedule, deleteMonthlySchedule } = useData();
+  const today = todayLocalISO();
+  const activeBranches = branches.filter(b => b.status === 'Activo');
   const [searchTerm, setSearchTerm] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [selectedSchedule, setSelectedSchedule] = useState<any>(null);
+  const [selectedSchedule, setSelectedSchedule] = useState<MonthlySchedule | null>(null);
+  const [toDelete, setToDelete] = useState<MonthlySchedule | null>(null);
+  const [enroll, setEnroll] = useState<{ open: boolean; activityId?: string; branchId?: string }>({ open: false });
+  const [error, setError] = useState<string | null>(null);
 
-  // Form state
-  const [formState, setFormState] = useState({
-    sede: 'Piura',
-    mes: 'Abril',
-    anio: 2026,
-    titulo: '',
-    observaciones: '',
-    actividades: [] as any[]
+  const [formState, setFormState] = useState<FormState>({
+    branchId: '', mes: MONTHS[Number(today.split('-')[1]) - 1], anio: Number(today.split('-')[0]), titulo: '', observaciones: '', actividades: [],
   });
 
-  const handleOpenDrawer = (schedule?: any) => {
+  const years = useMemo(
+    () => [...new Set([Number(today.split('-')[0]), ...monthlySchedules.map(m => m.anio)])].sort(),
+    [monthlySchedules, today]
+  );
+
+  const filtered = monthlySchedules.filter(m =>
+    (!branchFilter || m.branchId === branchFilter) &&
+    (!monthFilter || m.mes === monthFilter) &&
+    (!yearFilter || String(m.anio) === yearFilter) &&
+    (m.titulo.toLowerCase().includes(searchTerm.toLowerCase()) || m.sede.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  const handleOpenDrawer = (schedule?: MonthlySchedule) => {
+    setError(null);
     if (schedule) {
       setSelectedSchedule(schedule);
       setFormState({
-        sede: schedule.sede,
-        mes: schedule.mes,
-        anio: schedule.anio,
-        titulo: schedule.titulo,
-        observaciones: schedule.observaciones,
-        actividades: [...schedule.actividades]
+        branchId: schedule.branchId, mes: schedule.mes, anio: schedule.anio, titulo: schedule.titulo,
+        observaciones: schedule.observaciones, actividades: schedule.actividades.map(a => ({ ...a })),
       });
     } else {
+      const mes = MONTHS[Number(today.split('-')[1]) - 1];
+      const anio = Number(today.split('-')[0]);
       setSelectedSchedule(null);
-      setFormState({
-        sede: 'Piura',
-        mes: 'Abril',
-        anio: 2026,
-        titulo: 'Nuevo Cronograma',
-        observaciones: '',
-        actividades: []
-      });
+      setFormState({ branchId: branchFilter || activeBranches[0]?.id || '', mes, anio, titulo: `Cronograma de Actividades - ${mes} ${anio}`, observaciones: '', actividades: [] });
     }
     setIsDrawerOpen(true);
   };
 
-  const handleAddActivity = () => {
-    setFormState({
-      ...formState,
-      actividades: [
-        ...formState.actividades,
-        { 
-          id: `new-${Date.now()}`, 
-          actividad: '', 
-          fecha: '', 
-          hora: '', 
-          responsable: '', 
-          orden: formState.actividades.length + 1 
-        }
-      ]
-    });
-  };
+  const set = (patch: Partial<FormState>) => { setError(null); setFormState(f => ({ ...f, ...patch })); };
 
-  const handleRemoveActivity = (id: string) => {
-    setFormState({
-      ...formState,
-      actividades: formState.actividades.filter(a => a.id !== id)
-    });
-  };
+  const handleAddActivity = () => set({ actividades: [...formState.actividades, newActivity(formState.actividades.length + 1)] });
+  const handleRemoveActivity = (id: string) => set({ actividades: formState.actividades.filter(a => a.id !== id) });
+  const handleActivityChange = (id: string, patch: Partial<ScheduleActivity>) =>
+    set({ actividades: formState.actividades.map(a => (a.id === id ? { ...a, ...patch } : a)) });
 
-  const handleActivityChange = (id: string, field: string, value: string) => {
-    setFormState({
-      ...formState,
-      actividades: formState.actividades.map(a => 
-        a.id === id ? { ...a, [field]: value } : a
-      )
-    });
+  const handleSave = () => {
+    if (!formState.branchId) { setError('Seleccione la sede.'); return; }
+    if (!formState.titulo.trim()) { setError('Indique el título del cuadro.'); return; }
+    if (!Number.isInteger(formState.anio) || formState.anio < 2000) { setError('Indique un año válido.'); return; }
+    const duplicate = monthlySchedules.find(m => m.id !== selectedSchedule?.id && m.branchId === formState.branchId && m.mes === formState.mes && m.anio === formState.anio);
+    if (duplicate) { setError(`Ya existe un cronograma de ${duplicate.sede} para ${formState.mes} ${formState.anio}. Edítelo en lugar de crear otro.`); return; }
+    const period = { mes: formState.mes, anio: formState.anio };
+    for (const a of formState.actividades) {
+      const problem = validateActivity(a, period);
+      if (problem) { setError(problem); return; }
+      if (a.cupo !== null && a.cupo < a.inscritos.length) { setError(`${a.actividad.trim()}: el cupo (${a.cupo}) es menor que los inscritos (${a.inscritos.length}).`); return; }
+    }
+    const data = {
+      branchId: formState.branchId,
+      sede: branches.find(b => b.id === formState.branchId)?.name ?? '',
+      mes: formState.mes,
+      anio: formState.anio,
+      titulo: formState.titulo.trim(),
+      observaciones: formState.observaciones.trim(),
+      actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), responsable: a.responsable.trim(), orden: i + 1 })),
+    };
+    if (selectedSchedule) updateMonthlySchedule(selectedSchedule.id, data);
+    else addMonthlySchedule(data);
+    setIsDrawerOpen(false);
   };
 
   return (
@@ -87,7 +117,7 @@ export function MonthlySchedules() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Cronogramas Mensuales</h1>
-          <p className="text-text-secondary mt-1">Genera y exporta el cuadro mensual de actividades por sede.</p>
+          <p className="text-text-secondary mt-1">Actividades especiales por sede. Bloquean los horarios de asesoría de su fecha y admiten inscripción de alumnos.</p>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
           <Button variant="outline" className="flex-1 sm:flex-none">
@@ -102,8 +132,8 @@ export function MonthlySchedules() {
       </div>
 
       <div className="bg-surface border border-border-soft rounded-xl overflow-hidden flex flex-col">
-        <div className="p-4 border-b border-border-soft flex flex-col sm:flex-row gap-4 justify-between items-center bg-surface-50">
-          <div className="relative w-full sm:w-96">
+        <div className="p-4 border-b border-border-soft flex flex-col lg:flex-row gap-4 justify-between items-center bg-surface-50">
+          <div className="relative w-full lg:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={20} />
             <Input
               placeholder="Buscar por título o sede..."
@@ -112,30 +142,25 @@ export function MonthlySchedules() {
               className="pl-10 w-full"
             />
           </div>
-          <div className="flex gap-3 w-full sm:w-auto">
-            <Select
-              options={[
-                { value: '2026', label: '2026' },
-                { value: '2025', label: '2025' },
-              ]}
-              value="2026"
-              onChange={() => {}}
-              className="w-32"
-            />
-            <Select
-              options={[
-                { value: 'Abril', label: 'Abril' },
-                { value: 'Marzo', label: 'Marzo' },
-              ]}
-              value="Abril"
-              onChange={() => {}}
-              className="w-40"
-            />
+          <div className="flex flex-wrap gap-3 w-full lg:w-auto">
+            <select className={`${nativeFieldCls} lg:w-44`} value={branchFilter} onChange={e => setBranchFilter(e.target.value)} aria-label="Filtrar por sede">
+              <option value="">Todas las sedes</option>
+              {activeBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+            <select className={`${nativeFieldCls} lg:w-40`} value={monthFilter} onChange={e => setMonthFilter(e.target.value)} aria-label="Filtrar por mes">
+              <option value="">Todos los meses</option>
+              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select className={`${nativeFieldCls} lg:w-32`} value={yearFilter} onChange={e => setYearFilter(e.target.value)} aria-label="Filtrar por año">
+              <option value="">Todos los años</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
-          {monthlySchedules.map((schedule) => (
+          {filtered.length === 0 && <p className="col-span-full text-center text-sm text-text-muted py-10">No hay cronogramas para los filtros elegidos.</p>}
+          {filtered.map((schedule) => (
             <div key={schedule.id} className="bg-surface border border-border-soft rounded-xl overflow-hidden hover:shadow-md transition-shadow flex flex-col">
               <div className="p-4 border-b border-border-soft bg-surface-50 flex justify-between items-start">
                 <div>
@@ -152,20 +177,31 @@ export function MonthlySchedules() {
                     { label: 'Editar cronograma', onClick: () => handleOpenDrawer(schedule) },
                     { label: 'Exportar a PDF', onClick: () => {} },
                     { label: 'Exportar a Imagen', onClick: () => {} },
-                    { label: 'Eliminar', onClick: () => {}, danger: true },
+                    { label: 'Eliminar', onClick: () => setToDelete(schedule), danger: true },
                   ]}
                 />
               </div>
               <div className="p-4 flex-1">
                 <p className="text-sm font-medium text-text-secondary mb-3">Actividades ({schedule.actividades.length})</p>
                 <div className="space-y-3">
-                  {schedule.actividades.slice(0, 3).map((act, idx) => (
-                    <div key={idx} className="flex gap-3 text-sm">
+                  {schedule.actividades.length === 0 && <p className="text-sm text-text-muted">Aún no hay actividades.</p>}
+                  {schedule.actividades.slice(0, 3).map((act) => (
+                    <div key={act.id} className="flex gap-3 text-sm">
                       <div className="w-12 shrink-0 text-text-muted font-medium">{act.fecha.split('-')[2]}/{act.fecha.split('-')[1]}</div>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <p className="text-text-primary font-medium line-clamp-1">{act.actividad}</p>
-                        <p className="text-text-secondary text-xs">{act.hora}</p>
+                        <p className="text-text-secondary text-xs">{rangeLabel(act.horaInicio, act.horaFin)}</p>
+                        <p className="text-text-muted text-xs">{seats(act)}</p>
                       </div>
+                      {act.fecha >= today && (
+                        <button
+                          type="button"
+                          onClick={() => setEnroll({ open: true, activityId: `${schedule.id}:${act.id}`, branchId: schedule.branchId })}
+                          className="self-start text-xs font-medium text-primary-accent hover:bg-active-tint rounded-lg px-2 py-1 shrink-0"
+                        >
+                          Inscribir
+                        </button>
+                      )}
                     </div>
                   ))}
                   {schedule.actividades.length > 3 && (
@@ -185,6 +221,23 @@ export function MonthlySchedules() {
         </div>
       </div>
 
+      <ActivityEnrollModal
+        isOpen={enroll.open}
+        onClose={() => setEnroll({ open: false })}
+        activityId={enroll.activityId}
+        branchId={enroll.branchId}
+      />
+
+      <ConfirmDialog
+        isOpen={!!toDelete}
+        onClose={() => setToDelete(null)}
+        onConfirm={() => { if (toDelete) deleteMonthlySchedule(toDelete.id); setToDelete(null); }}
+        title="Eliminar cronograma"
+        description={toDelete ? `¿Eliminar «${toDelete.titulo}» (${toDelete.sede}, ${toDelete.mes} ${toDelete.anio})? Sus actividades e inscripciones se perderán y los horarios bloqueados quedarán libres.` : ''}
+        variant="danger"
+        confirmLabel="SÍ, ELIMINAR"
+      />
+
       <Modal
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
@@ -198,147 +251,172 @@ export function MonthlySchedules() {
             </Button>
             <div className="flex gap-3">
               <Button variant="ghost" onClick={() => setIsDrawerOpen(false)}>Cancelar</Button>
-              <Button variant="primary" onClick={() => setIsDrawerOpen(false)}>Guardar Cronograma</Button>
+              <Button variant="primary" onClick={handleSave}>Guardar Cronograma</Button>
             </div>
           </div>
         }
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 pb-4">
-          {/* Left Column */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <h3 className="text-base font-semibold text-text-primary">Cabecera del Cronograma</h3>
-              </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className={labelCls}>Sede</label>
-                  <Select className={selectCls}
-                    options={branches.map(b => ({ value: b.name, label: b.name }))}
-                    value={formState.sede}
-                    onChange={(e) => setFormState({...formState, sede: e.target.value})}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Mes</label>
-                    <Select className={selectCls}
-                      options={[
-                        { value: 'Enero', label: 'Enero' },
-                        { value: 'Febrero', label: 'Febrero' },
-                        { value: 'Marzo', label: 'Marzo' },
-                        { value: 'Abril', label: 'Abril' },
-                      ]}
-                      value={formState.mes}
-                      onChange={(e) => setFormState({...formState, mes: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Año</label>
-                    <Input className={inputCls} 
-                      type="number" 
-                      value={formState.anio}
-                      onChange={(e) => setFormState({...formState, anio: parseInt(e.target.value)})}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className={labelCls}>Título del Cuadro</label>
-                  <Input className={inputCls} 
-                    value={formState.titulo}
-                    onChange={(e) => setFormState({...formState, titulo: e.target.value})}
-                    placeholder="Ej. Cronograma de Actividades"
-                  />
-                </div>
-              </div>
+        <div className="space-y-6 pb-4">
+          {error && (
+            <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <p>{error}</p>
             </div>
-
-            <div className="space-y-4 pt-4 border-t border-border-soft">
-              <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
-                <h3 className="text-base font-semibold text-text-primary">Observaciones (Internas)</h3>
-              </div>
-              <div>
-                <textarea
-                  className={`${textareaCls} h-32`}
-                  placeholder="Notas internas..."
-                  value={formState.observaciones}
-                  onChange={(e) => setFormState({...formState, observaciones: e.target.value})}
-                ></textarea>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="space-y-4">
-              <div className="flex justify-between items-center border-b border-border-soft pb-2">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-semibold text-text-primary">Actividades</h3>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Left Column */}
+            <div className="lg:col-span-5 space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
+                  <h3 className="text-base font-semibold text-text-primary">Cabecera del Cronograma</h3>
                 </div>
-                <Button variant="outline" size="sm" onClick={handleAddActivity}>
-                  <Plus size={16} className="mr-2" /> Agregar
-                </Button>
-              </div>
-              
-              <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
-                {formState.actividades.length === 0 ? (
-                  <div className="text-center py-12 text-text-muted border-2 border-dashed border-border-soft rounded-xl bg-surface-50">
-                    <CalendarIcon size={32} className="mx-auto mb-3 opacity-20" />
-                    <p className="font-medium text-text-primary">No hay actividades</p>
-                    <p className="text-sm mt-1">Haz clic en Agregar para comenzar</p>
+                <div className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className={labelCls}>Sede</label>
+                    <select className={nativeFieldCls} value={formState.branchId} onChange={e => set({ branchId: e.target.value })}>
+                      {activeBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
                   </div>
-                ) : (
-                  formState.actividades.map((act) => (
-                    <div key={act.id} className="flex gap-3 items-start p-3 bg-surface-50 border border-border-soft rounded-xl group hover:border-border-strong transition-colors">
-                      <div className="mt-2 cursor-move text-text-muted hover:text-text-primary transition-colors">
-                        <GripVertical size={20} />
-                      </div>
-                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="sm:col-span-2">
-                          <label className={labelCls}>Nombre</label>
-                          <Input className={inputCls} 
-                            value={act.actividad}
-                            onChange={(e) => handleActivityChange(act.id, 'actividad', e.target.value)}
-                            placeholder="Nombre de la actividad"
-                          />
-                        </div>
-                        <div>
-                          <label className={labelCls}>Fecha</label>
-                          <Input className={inputCls} 
-                            type="date"
-                            value={act.fecha}
-                            onChange={(e) => handleActivityChange(act.id, 'fecha', e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelCls}>Hora</label>
-                          <Input className={inputCls} 
-                            value={act.hora}
-                            onChange={(e) => handleActivityChange(act.id, 'hora', e.target.value)}
-                            placeholder="Ej. 15:00"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className={labelCls}>Responsable</label>
-                          <Input className={inputCls} 
-                            value={act.responsable}
-                            onChange={(e) => handleActivityChange(act.id, 'responsable', e.target.value)}
-                            placeholder="Responsable (Opcional)"
-                          />
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => handleRemoveActivity(act.id)}
-                        className="mt-6 p-2 text-text-muted hover:text-danger hover:bg-danger-tint rounded-lg transition-colors"
-                        title="Eliminar actividad"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Mes</label>
+                      <select className={nativeFieldCls} value={formState.mes} onChange={e => set({ mes: e.target.value })}>
+                        {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
                     </div>
-                  ))
-                )}
+                    <div>
+                      <label className={labelCls}>Año</label>
+                      <Input className={inputCls}
+                        type="number"
+                        value={formState.anio}
+                        onChange={(e) => set({ anio: parseInt(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={labelCls}>Título del Cuadro</label>
+                    <Input className={inputCls}
+                      value={formState.titulo}
+                      onChange={(e) => set({ titulo: e.target.value })}
+                      placeholder="Ej. Cronograma de Actividades"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-border-soft">
+                <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
+                  <h3 className="text-base font-semibold text-text-primary">Observaciones (Internas)</h3>
+                </div>
+                <div>
+                  <textarea
+                    className={`${textareaCls} h-32`}
+                    placeholder="Notas internas..."
+                    value={formState.observaciones}
+                    onChange={(e) => set({ observaciones: e.target.value })}
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-border-soft pb-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-text-primary">Actividades</h3>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={handleAddActivity}>
+                    <Plus size={16} className="mr-2" /> Agregar
+                  </Button>
+                </div>
+                <p className="text-sm text-text-secondary">Durante cada actividad, los horarios de asesoría de la sede quedan bloqueados.</p>
+
+                <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
+                  {formState.actividades.length === 0 ? (
+                    <div className="text-center py-12 text-text-muted border-2 border-dashed border-border-soft rounded-xl bg-surface-50">
+                      <CalendarIcon size={32} className="mx-auto mb-3 opacity-20" />
+                      <p className="font-medium text-text-primary">No hay actividades</p>
+                      <p className="text-sm mt-1">Haz clic en Agregar para comenzar</p>
+                    </div>
+                  ) : (
+                    formState.actividades.map((act) => {
+                      const hits = act.fecha && act.horaInicio && act.horaFin && act.horaFin > act.horaInicio
+                        ? affectedSchedules(schedules, formState.branchId, act)
+                        : [];
+                      return (
+                        <div key={act.id} className="flex gap-3 items-start p-3 bg-surface-50 border border-border-soft rounded-xl group hover:border-border-strong transition-colors">
+                          <div className="mt-2 cursor-move text-text-muted hover:text-text-primary transition-colors">
+                            <GripVertical size={20} />
+                          </div>
+                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-6 gap-3">
+                            <div className="sm:col-span-6">
+                              <label className={labelCls}>Nombre</label>
+                              <Input className={inputCls}
+                                value={act.actividad}
+                                onChange={(e) => handleActivityChange(act.id, { actividad: e.target.value })}
+                                placeholder="Nombre de la actividad"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelCls}>Fecha</label>
+                              <Input className={inputCls}
+                                type="date"
+                                value={act.fecha}
+                                onChange={(e) => handleActivityChange(act.id, { fecha: e.target.value })}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelCls}>Hora de inicio</label>
+                              <Input className={inputCls}
+                                type="time"
+                                value={act.horaInicio}
+                                onChange={(e) => handleActivityChange(act.id, { horaInicio: e.target.value })}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelCls}>Hora de fin</label>
+                              <Input className={inputCls}
+                                type="time"
+                                value={act.horaFin}
+                                onChange={(e) => handleActivityChange(act.id, { horaFin: e.target.value })}
+                              />
+                            </div>
+                            <div className="sm:col-span-3">
+                              <label className={labelCls}>Responsable</label>
+                              <Input className={inputCls}
+                                value={act.responsable}
+                                onChange={(e) => handleActivityChange(act.id, { responsable: e.target.value })}
+                                placeholder="Responsable (Opcional)"
+                              />
+                            </div>
+                            <div className="sm:col-span-3">
+                              <label className={labelCls}>Cupo de inscripción</label>
+                              <CapacityInput value={act.cupo} onChange={(v) => handleActivityChange(act.id, { cupo: v })} />
+                            </div>
+                            {act.inscritos.length > 0 && (
+                              <p className="sm:col-span-6 text-xs text-text-muted">{act.inscritos.length} {act.inscritos.length === 1 ? 'alumno inscrito' : 'alumnos inscritos'}.</p>
+                            )}
+                            {hits.length > 0 && (
+                              <p className="sm:col-span-6 text-xs text-warning-text bg-warning-tint rounded-lg px-3 py-2">
+                                {hits.length} {hits.length === 1 ? 'asesoría ya reservada queda' : 'asesorías ya reservadas quedan'} dentro de este horario ({hits.map(h => `${h.student} ${h.time}`).join(', ')}). Reprográmelas desde Programación.
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleRemoveActivity(act.id)}
+                            className="mt-6 p-2 text-text-muted hover:text-danger hover:bg-danger-tint rounded-lg transition-colors"
+                            title="Eliminar actividad"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
           </div>

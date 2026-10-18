@@ -81,7 +81,7 @@ const catalogs = (over: Partial<EnrollmentCatalogs> = {}): EnrollmentCatalogs =>
   branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes,
   promotions: [promo], guardians: [], students: [], classSchedules, ...over,
 });
-const empty: ExistingState = { guardians: [], students: [], enrollments: [], plans: [], payments: [], promotionGroups: [], counselings: [] };
+const empty: ExistingState = { guardians: [], students: [], enrollments: [], plans: [], payments: [], promotionGroups: [], schedules: [] };
 const NOW = '2026-10-10T15:00:00.000Z';
 const TODAY = '2026-10-10';
 
@@ -99,7 +99,7 @@ function draftWith(students: { program: string; level?: string; type: string; du
   d.students = students.map((s, i) => ({
     ...emptyStudent(), key: `k${i}`, person: person(i + 1), relationship: mode === 'apoderado' ? 'Hijo(a)' : '',
     situation: 'estudiando' as const, institutionType: 'Colegio', school: 'I.E. San Martín', grade: '4° Primaria',
-    counselingDate: '2026-10-14', counselingTime: '16:30',
+    counselingDate: '2026-10-14', counselingTime: '16:00',
     programId: s.program, levelId: s.level ?? '', paymentTypeId: s.type, dueDates: s.dueDates ?? [],
   }));
   return d;
@@ -351,7 +351,7 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const a1 = base(); a1.students[0].counselingDate = '';
   check('Sin fecha de primera asesoría → rechazado', probe(a1).some(m => /fecha de la primera asesoría/.test(m)));
   const a2 = base(); a2.students[0].counselingTime = '';
-  check('Sin hora de primera asesoría → rechazado', probe(a2).some(m => /hora de la primera asesoría/.test(m)));
+  check('Sin horario de primera asesoría → rechazado', probe(a2).some(m => /horario de la primera asesoría/.test(m)));
   const a3 = base(); a3.students[0].counselingDate = '2026-10-09';
   check('Asesoría anterior a la matrícula → rechazada', probe(a3).some(m => /anterior a la fecha de matrícula/.test(m)));
   const a4 = base(); a4.students[0].counselingDate = TODAY;
@@ -359,20 +359,60 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const a5 = base(); a5.students[0].paymentTypeId = '';
   check('La asesoría se valida aunque falte el tipo de pago', probe({ ...a5, students: [{ ...a5.students[0], counselingDate: '' }] }).some(m => /asesoría/.test(m)));
 
-  // Se crea una asesoría Pendiente por alumno con la fecha y hora indicadas
+  // Mismos bloques que la agenda: 1 hora exacta, sin domingos
+  const sab = base(); sab.students[0].counselingDate = '2026-10-17'; sab.students[0].counselingTime = '09:00';
+  check('Sábado 9:00 → válido', !probe(sab).some(m => /asesoría/.test(m)));
+  const dom = base(); dom.students[0].counselingDate = '2026-10-18';
+  check('Domingo → rechazado', probe(dom).some(m => /domingos no hay atención/.test(m)));
+  const fuera = base(); fuera.students[0].counselingTime = '16:30';
+  check('Hora fuera de los bloques (16:30) → rechazada', probe(fuera).some(m => /no está disponible para esa fecha/.test(m)));
+  const lun9 = base(); lun9.students[0].counselingTime = '09:00';
+  check('Lunes–viernes a las 9:00 → rechazado (solo sábado)', probe(lun9).some(m => /no está disponible para esa fecha/.test(m)));
+
+  // Cupo y actividades de la agenda de la sede
+  const sch = (id: string, over: Record<string, unknown> = {}) => ({
+    id, student: `Otro ${id}`, studentId: `X${id}`, branchId: 'FIL-AYA', program: 'Kids', level: 'K1', date: '2026-10-14', time: '16:00',
+    duration: 60, responsible: 'Ana', status: 'Reservado', ...over,
+  }) as any;
+  const sched = (schedules: any[], activities: any[] = [], defaultCapacity: number | null = 2) =>
+    catalogs({ scheduling: { schedules, capacity: { defaultCapacity, byBranch: {}, overrides: [] }, activities } });
+  const probeIn = (c: EnrollmentCatalogs, d: EnrollmentDraft) => validateProgram(d, c, quoteEnrollment(d, c));
+
+  check('Horario con lugar → válido', !probeIn(sched([sch('1')]), base()).some(m => /asesoría/.test(m)));
+  check('Horario completo (2 de 2) → rechazado', probeIn(sched([sch('1'), sch('2')]), base()).some(m => /completo: 2 de 2/.test(m)));
+  check('Una asesoría cancelada no ocupa cupo', !probeIn(sched([sch('1'), sch('2', { status: 'Cancelado' })]), base()).some(m => /asesoría/.test(m)));
+  check('Sin límite → siempre hay lugar', !probeIn(sched([sch('1'), sch('2'), sch('3'), sch('4')], [], null), base()).some(m => /asesoría/.test(m)));
+  check('Cupo de otra sede no cuenta', !probeIn(sched([sch('1', { branchId: 'FIL-PIU' }), sch('2', { branchId: 'FIL-PIU' })]), base()).some(m => /asesoría/.test(m)));
+  const marathon = { id: 'm:1', monthlyId: 'm', activityId: '1', branchId: 'FIL-AYA', sede: 'Ayacucho', name: 'Maratón', date: '2026-10-14', start: '15:30', end: '17:00', responsible: '', capacity: null, enrolled: [] };
+  check('Actividad de la sede encima del horario → rechazado', probeIn(sched([], [marathon]), base()).some(m => /ocupado por la actividad «Maratón»/.test(m)));
+  check('Actividad de otra sede no bloquea', !probeIn(sched([], [{ ...marathon, branchId: 'FIL-PIU' }]), base()).some(m => /asesoría/.test(m)));
+  check('Actividad que termina antes del bloque no bloquea', !probeIn(sched([], [{ ...marathon, start: '14:00', end: '16:00' }]), base()).some(m => /asesoría/.test(m)));
+  const dup = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }, { program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  check('Los alumnos del mismo registro también ocupan cupo (3.º con cupo 2 → rechazado)',
+    probeIn(sched([]), dup).filter(m => /completo/.test(m)).length === 1 && /Alumno 3/.test(probeIn(sched([]), dup).find(m => /completo/.test(m)) ?? ''));
+  const same = base(); same.students[0].person = { ...same.students[0].person, existingId: 'ALU-9' };
+  check('Alumno existente con otra asesoría a la misma hora → rechazado', probeIn(sched([sch('1', { studentId: 'ALU-9' })]), same).some(m => /ya tiene una asesoría/.test(m)));
+
+  // Se crea una asesoría real de la agenda por alumno (Reservado, primera asesoría, sede de la matrícula)
   const two = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }]);
-  two.students[0].counselingDate = '2026-10-12'; two.students[0].counselingTime = '09:00';
-  two.students[1].counselingDate = '2026-10-13'; two.students[1].counselingTime = '17:45';
+  two.students[0].counselingDate = '2026-10-12'; two.students[0].counselingTime = '15:00';
+  two.students[1].counselingDate = '2026-10-13'; two.students[1].counselingTime = '17:00';
   two.promotion = { promotionId: 'PR1', groups: [['k0', 'k1']] };
   two.payments[quoteEnrollment(two, cat).units[0].key] = [usdPart(700)];
-  const b = build(two, cat, { ...empty, counselings: [{ id: '5' } as any] });
-  check('Guarda una primera asesoría por alumno', b.ok && b.batch!.counselings.length === 2, b.error);
+  const b = build(two, cat, { ...empty, schedules: [{ id: '5' } as any] });
+  check('Guarda una primera asesoría por alumno', b.ok && b.batch!.schedules.length === 2, b.error);
   check('Asesoría con la fecha y hora de cada alumno',
-    b.batch!.counselings[0].date === '2026-10-12' && b.batch!.counselings[0].time === '09:00' &&
-    b.batch!.counselings[1].date === '2026-10-13' && b.batch!.counselings[1].time === '17:45');
-  check('Asesoría: estado Pendiente, programa/nivel y correlativo continuo',
-    b.batch!.counselings[0].status === 'Pendiente' && b.batch!.counselings[0].program === 'Pre-Kids' &&
-    b.batch!.counselings[1].level === 'Kids 2' && b.batch!.counselings.map(c => c.id).join() === '6,7');
+    b.batch!.schedules[0].date === '2026-10-12' && b.batch!.schedules[0].time === '15:00' &&
+    b.batch!.schedules[1].date === '2026-10-13' && b.batch!.schedules[1].time === '17:00');
+  check('Asesoría: Reservado, primera, 60 min, programa/nivel y correlativo continuo',
+    b.batch!.schedules.every(x => x.status === 'Reservado' && x.isFirst === true && x.duration === 60) &&
+    b.batch!.schedules[0].program === 'Pre-Kids' && b.batch!.schedules[1].level === 'Kids 2' && b.batch!.schedules.map(x => x.id).join() === '6,7');
+  check('Asesoría: sede de la matrícula, alumno vinculado y responsable = quien entrevistó',
+    b.batch!.schedules.every(x => x.branchId === 'FIL-AYA') &&
+    b.batch!.schedules[0].studentId === b.batch!.newStudents[0].id && b.batch!.schedules[1].studentId === b.batch!.newStudents[1].id &&
+    b.batch!.schedules.every(x => x.responsible.length > 0 && x.responsible !== 'Por asignar'));
+  const blocked = build(two, sched([sch('1', { date: '2026-10-12', time: '15:00' }), sch('2', { date: '2026-10-12', time: '15:00' })]), empty);
+  check('Si el horario se llenó, no se guarda nada', !blocked.ok && /completo/.test(blocked.error ?? ''), blocked.error);
 }
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useRef, useState, ReactNode } from 'r
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { nextNumericId, nextSequentialId } from '../utils/ids';
+import { allActivities, MONTHS } from '../utils/schedule';
 
 // Types
 export interface Guardian {
@@ -446,45 +447,88 @@ export interface Schedule {
   student: string;
   program: string;
   level: string;
-  type: string;
+  /** @deprecated Ya no existe tipo de cita: todo son asesorías. */
+  type?: string;
   date: string;
   time: string;
+  /** Siempre 60 (las asesorías duran 1 hora exacta). */
   duration: number;
   responsible: string;
-  modality: string;
-  status: string;
+  /** @deprecated No existe modalidad virtual. */
+  modality?: string;
+  status: string; // Reservado | Reprogramado | Asistió | Faltó | Cancelado
   studentId?: string; // Alumno registrado al que pertenece la reserva
+  /** Sede de la asesoría = sede del alumno (cada sede tiene sus propios bloques, cupos y cronogramas). */
+  branchId?: string;
   observations?: string;
+  isFirst?: boolean; // Primera asesoría del alumno (la crea la matrícula)
 }
 
-export interface Counseling {
-  id: string;
-  student: string;
-  program: string;
-  level: string;
-  date: string;
-  time: string;
-  responsible: string;
-  status: string;
+/** Cierre de la primera asesoría (checklist). */
+export interface FirstSessionChecklist {
+  guardianAttended: boolean;
+  methodologyExplained: boolean;
+  itemsExplained: boolean;
 }
 
+/** Registro de la sesión de una asesoría a la que el alumno asistió (avance, métricas y observaciones). */
 export interface Tracking {
   id: string;
   studentId: string;
+  /** Asesoría de la agenda a la que corresponde la sesión (los registros antiguos no la tienen). */
+  scheduleId?: string;
   date: string;
   status: string;
   metrics: any;
   observations: string;
+  checklist?: FirstSessionChecklist;
+}
+
+/** Actividad especial de un cronograma mensual (p. ej. una maratón). Bloquea los horarios de asesoría de su sede. */
+export interface ScheduleActivity {
+  id: string;
+  actividad: string;
+  fecha: string;
+  horaInicio: string; // HH:MM
+  horaFin: string; // HH:MM
+  responsable: string;
+  orden: number;
+  /** Máximo de alumnos inscritos; null = sin límite. */
+  cupo: number | null;
+  /** IDs de los alumnos inscritos. */
+  inscritos: string[];
 }
 
 export interface MonthlySchedule {
   id: string;
+  /** Sede (cada sede tiene su propio cronograma). */
+  branchId: string;
   sede: string;
   mes: string;
   anio: number;
   titulo: string;
-  actividades: any[];
+  actividades: ScheduleActivity[];
   observaciones: string;
+}
+
+/** Cupo distinto al habitual para un horario concreto de una sede. */
+export interface CapacityOverride {
+  id: string;
+  branchId: string;
+  date: string;
+  time: string;
+  /** null = sin límite. */
+  capacity: number | null;
+}
+
+/**
+ * Cupo de alumnos por horario de asesoría. Prioridad: excepción por fecha y horario > cupo de la sede > cupo general.
+ * `null` significa «sin límite».
+ */
+export interface CapacityConfig {
+  defaultCapacity: number | null;
+  byBranch: Record<string, number | null>;
+  overrides: CapacityOverride[];
 }
 
 export interface Staff {
@@ -725,9 +769,13 @@ interface DataContextType {
   schedules: Schedule[];
   addSchedule: (data: Omit<Schedule, 'id'>) => Schedule;
   updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>) => void;
-  counselings: Counseling[];
   trackings: Tracking[];
   monthlySchedules: MonthlySchedule[];
+  addMonthlySchedule: (data: Omit<MonthlySchedule, 'id'>) => MonthlySchedule;
+  updateMonthlySchedule: (id: string, data: Partial<Omit<MonthlySchedule, 'id'>>) => void;
+  deleteMonthlySchedule: (id: string) => void;
+  capacityConfig: CapacityConfig;
+  setCapacityConfig: (config: CapacityConfig) => void;
   staff: Staff[];
   contracts: Contract[];
   assignments: Assignment[];
@@ -775,7 +823,8 @@ interface DataContextType {
   deleteGuardian: (id: string) => void;
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
-  addTracking: (tracking: Omit<Tracking, 'id'>) => void;
+  addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
+  updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
   registerPayment: (planId: string, installmentId: string, paymentData: any) => StockResult;
   refinanceInstallment: (planId: string, installmentId: string, refinanceData: any) => void;
   addLeadSource: (name: string) => void;
@@ -1177,18 +1226,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'DEV-2024-001', date: '2024-03-05', branch: 'Piura', material: 'Cartuchera', type: 'Devolución', qty: 1, reason: 'Devolución', user: 'Ventas Piura' },
   ]);
 
-  // Reservas de ejemplo con fechas relativas a hoy (así la agenda siempre muestra citas vigentes)
+  // Reservas de ejemplo con fechas relativas a hoy (siempre en días con atención y en horarios permitidos)
   const seedDay = (offset: number) => {
     const d = new Date();
     d.setDate(d.getDate() + offset);
+    while (d.getDay() === 0) d.setDate(d.getDate() + 1); // domingo: sin atención
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
   const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', program: 'Kids', level: 'Nivel 1', type: 'Primera asesoría', date: seedDay(0), time: '10:00', duration: 45, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Confirmado' },
-    { id: '2', student: 'Sofia Castro', studentId: 'ALU-002', program: 'Kids', level: 'Nivel 2', type: 'Seguimiento', date: seedDay(0), time: '11:00', duration: 30, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Reservado' },
-    { id: '3', student: 'Lucas Vega', studentId: 'ALU-003', program: 'Kids', level: 'Nivel 3', type: 'Reprogramación', date: seedDay(1), time: '15:30', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Cancelado' },
-    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', program: 'Pre-Kids', level: 'Nivel 1', type: 'Primera asesoría', date: seedDay(2), time: '09:00', duration: 45, responsible: 'Lic. Juan Pérez', modality: 'Virtual', status: 'Confirmado' },
-    { id: '5', student: 'Diego Torres', studentId: 'ALU-005', program: 'Kids', level: 'Nivel 1', type: 'Seguimiento', date: seedDay(3), time: '16:00', duration: 30, responsible: 'Lic. María Torres', modality: 'Presencial', status: 'Reservado' },
+    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true },
+    { id: '2', student: 'Sofia Castro', studentId: 'ALU-002', branchId: 'FIL-CHI', program: 'Kids', level: 'Nivel 2', date: seedDay(0), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado' },
+    { id: '3', student: 'Lucas Vega', studentId: 'ALU-003', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 3', date: seedDay(1), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Cancelado' },
+    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', branchId: 'FIL-CHI', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true },
+    { id: '5', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(3), time: '18:00', duration: 60, responsible: 'Lic. María Torres', status: 'Reservado' },
   ]);
 
   const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
@@ -1201,14 +1251,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setSchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
   };
 
-  const [counselings, setCounselings] = useState<Counseling[]>([
-    { id: '1', student: 'Mateo Ruiz', program: 'Kids', level: 'Básico 1', date: '2026-04-01', time: '10:00', responsible: 'Lic. María Torres', status: 'Pendiente' },
-    { id: '2', student: 'Sofia Castro', program: 'Teens', level: 'Intermedio', date: '2026-04-01', time: '11:00', responsible: 'Lic. Juan Pérez', status: 'Pendiente' },
-    { id: '3', student: 'Lucas Vega', program: 'Kids', level: 'Básico 2', date: '2026-03-30', time: '15:30', responsible: 'Lic. María Torres', status: 'Reprogramada' },
-    { id: '4', student: 'Valentina Silva', program: 'Pre-Kids', level: 'Inicial', date: '2026-04-03', time: '09:00', responsible: 'Lic. Juan Pérez', status: 'Pendiente' },
-    { id: '5', student: 'Diego Torres', program: 'Teens', level: 'Avanzado', date: '2026-04-04', time: '16:00', responsible: 'Lic. María Torres', status: 'Pendiente' },
-  ]);
-
   const [trackings, setTrackings] = useState<Tracking[]>([
     { id: '1', studentId: 'ALU-001', date: '2026-03-24', status: 'Asistió', metrics: { modulo: 'Módulo 3', velocidad: 250, comprension: 85 }, observations: 'Buen progreso en lectura rápida.' },
     { id: '2', studentId: 'ALU-001', date: '2026-03-17', status: 'Asistió', metrics: { modulo: 'Módulo 3', velocidad: 220, comprension: 80 }, observations: 'Se recomienda repasar ejercicios de fijación.' },
@@ -1217,33 +1259,49 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: '5', studentId: 'ALU-004', date: '2026-03-26', status: 'Asistió', metrics: { nivel: 'Nivel 1', sesion: 'Sesión 2', velocidad: 100, comprension: 70 }, observations: 'Mejorando la pronunciación.' },
   ]);
 
+  const seedMonth = (iso: string) => ({ mes: MONTHS[Number(iso.split('-')[1]) - 1], anio: Number(iso.split('-')[0]) });
   const [monthlySchedules, setMonthlySchedules] = useState<MonthlySchedule[]>([
     {
       id: '1',
+      branchId: 'FIL-PIU',
       sede: 'Piura',
-      mes: 'Abril',
-      anio: 2026,
-      titulo: 'Cronograma de Actividades - Abril 2026',
+      ...seedMonth(seedDay(5)),
+      titulo: 'Cronograma de Actividades - Piura',
       actividades: [
-        { id: 'a1', actividad: 'Evaluación de Campo Visual', fecha: '2026-04-05', hora: '09:00 - 13:00', responsable: 'Lic. María Torres', orden: 1 },
-        { id: 'a2', actividad: 'Taller de Ortografía', fecha: '2026-04-12', hora: '15:00 - 17:00', responsable: 'Lic. Juan Pérez', orden: 2 },
-        { id: 'a3', actividad: 'Maratón de Lectura', fecha: '2026-04-20', hora: '10:00 - 12:00', responsable: 'Equipo Psicopedagogía', orden: 3 },
+        { id: 'a1', actividad: 'Taller de Ortografía', fecha: seedDay(2), horaInicio: '15:00', horaFin: '17:00', responsable: 'Lic. Juan Pérez', orden: 1, cupo: 12, inscritos: [] },
+        { id: 'a2', actividad: 'Maratón de Lectura', fecha: seedDay(5), horaInicio: '16:00', horaFin: '18:00', responsable: 'Equipo Psicopedagogía', orden: 2, cupo: null, inscritos: ['ALU-001', 'ALU-005'] },
       ],
       observaciones: 'Mes con enfoque en comprensión lectora.'
     },
     {
       id: '2',
+      branchId: 'FIL-CHI',
       sede: 'Chiclayo',
-      mes: 'Abril',
-      anio: 2026,
+      ...seedMonth(seedDay(3)),
       titulo: 'Actividades Psicopedagógicas Chiclayo',
       actividades: [
-        { id: 'b1', actividad: 'Taller para Padres', fecha: '2026-04-08', hora: '18:00 - 19:30', responsable: 'Lic. Ana Gómez', orden: 1 },
-        { id: 'b2', actividad: 'Evaluación de Avance', fecha: '2026-04-25', hora: 'Todo el día', responsable: '', orden: 2 },
+        { id: 'b1', actividad: 'Taller para Padres', fecha: seedDay(3), horaInicio: '18:00', horaFin: '19:30', responsable: 'Lic. Ana Gómez', orden: 1, cupo: 20, inscritos: [] },
+        { id: 'b2', actividad: 'Evaluación de Avance', fecha: seedDay(6), horaInicio: '15:00', horaFin: '20:00', responsable: '', orden: 2, cupo: null, inscritos: [] },
       ],
       observaciones: ''
     }
   ]);
+
+  const addMonthlySchedule = (data: Omit<MonthlySchedule, 'id'>): MonthlySchedule => {
+    const created: MonthlySchedule = { ...data, id: nextNumericId(monthlySchedules.map(x => x.id)) };
+    setMonthlySchedules(prev => [...prev, created]);
+    return created;
+  };
+
+  const updateMonthlySchedule = (id: string, data: Partial<Omit<MonthlySchedule, 'id'>>) => {
+    setMonthlySchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
+  };
+
+  const deleteMonthlySchedule = (id: string) => {
+    setMonthlySchedules(prev => prev.filter(x => x.id !== id));
+  };
+
+  const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
@@ -2160,8 +2218,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const registerEnrollments = (draft: EnrollmentDraft) => {
     const result = buildEnrollmentBatch(
       draft,
-      { branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students, classSchedules },
-      { guardians, students, enrollments, plans, payments, promotionGroups, counselings },
+      {
+        branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students, classSchedules,
+        scheduling: { schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) },
+      },
+      { guardians, students, enrollments, plans, payments, promotionGroups, schedules },
       { now: new Date().toISOString(), userName: currentUser.name }
     );
     if (!result.ok || !result.batch) return { ok: false, error: result.error };
@@ -2186,7 +2247,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setPlans(prev => [...prev, ...b.plans]);
     setPayments(prev => [...b.payments, ...prev]);
     setPromotionGroups(prev => [...prev, ...b.promotionGroups]);
-    setCounselings(prev => [...prev, ...b.counselings]);
+    setSchedules(prev => [...prev, ...b.schedules]);
     setCashMovements(prev => [
       ...b.cashMovements.map((m, i) => ({
         ...m, id: `CJ-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`, user: currentUser.name,
@@ -2197,12 +2258,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
   };
 
-  const addTracking = (trackingData: Omit<Tracking, 'id'>) => {
+  const addTracking = (trackingData: Omit<Tracking, 'id'>): Tracking => {
     const newTracking: Tracking = {
       ...trackingData,
       id: `TRK-${Date.now().toString().slice(-4)}`
     };
     setTrackings(prev => [newTracking, ...prev]);
+    return newTracking;
+  };
+
+  const updateTracking = (id: string, data: Partial<Omit<Tracking, 'id'>>) => {
+    setTrackings(prev => prev.map(t => (t.id === id ? { ...t, ...data } : t)));
   };
 
   const addProgram = (programData: Omit<Program, 'id'>) => {
@@ -2435,9 +2501,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       schedules, 
       addSchedule,
       updateSchedule,
-      counselings, 
       trackings, 
       monthlySchedules, 
+      addMonthlySchedule,
+      updateMonthlySchedule,
+      deleteMonthlySchedule,
+      capacityConfig,
+      setCapacityConfig,
       staff,
       contracts,
       assignments,
@@ -2486,6 +2556,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       deleteGuardian,
       registerEnrollments,
       addTracking, 
+      updateTracking,
       registerPayment, 
       refinanceInstallment,
       addLeadSource,

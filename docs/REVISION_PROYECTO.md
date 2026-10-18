@@ -475,3 +475,26 @@ Verificación: `tsc` 0 errores · `scripts/check-verification.ts` 27/27 · en na
 
 Verificación: `tsc` 0 errores · `scripts/check-schedule.ts` 27/27 · en navegador: guardar vacío → error; búsqueda y autocompletado de programa/nivel; conflicto de responsable y de horario detectados; fecha pasada rechazada; reserva creada y luego editada; calendario mes / semana / navegación / «Hoy»; clic en día futuro con fecha prellenada, día pasado no abre; «+3 más» con detalle del día.
 Sin cambios: acciones «Reprogramar» y «Cancelar reserva» de la lista; la primera asesoría creada desde la matrícula sigue en su propia lista (Primera asesoría) y no genera una reserva de agenda.
+
+
+# Psicopedagogía: reordenamiento del módulo (2026-10-17)
+
+Ejecuta las 7 decisiones del plan (`docs/PLAN_PSICOPEDAGOGIA.md`). Toda atención nace de una asesoría programada.
+
+| Tema | Cambio |
+|---|---|
+| **Reservar asesoría** | Sin modalidad ni tipo de cita; horarios exactos de 1 hora (L–V 3–8 p. m.; sábado 9–1 y 4–8 p. m.; domingo sin atención); estado automático (Reservado / Reprogramado). |
+| **Estado «Asistió»** | Reemplaza a «Confirmado». Se marca desde el día de la asesoría; al registrar la sesión se marca solo. Una asesoría con asistencia ya no se reprograma ni se cancela. |
+| **Cupo por horario** | Cada horario es un salón con varios alumnos. Se configura en **Programación → Cupos**: cupo general (1–50 o **Sin límite**), cupo propio por sede y **excepciones por fecha y horario**. Propuesto de inicio: 6 (los salones atienden entre 5 y 8). El mismo responsable puede atender a varios alumnos a la vez; el único cruce que se vigila es el del alumno. Los horarios llenos aparecen deshabilitados («Completo (6 de 6)»). Bajar el cupo no afecta lo ya reservado. |
+| **Sede** | Cada asesoría pertenece a la sede de la matrícula más reciente del alumno (`branchId`). El cupo y el bloqueo son por sede. Programación tiene su propio filtro de sede (no depende del selector provisional del encabezado). |
+| **Sin atención sin reserva** | La sesión solo se registra desde una asesoría programada cuya fecha ya llegó. |
+| **Menú** (basado en agendas de tutoría / SIS: agenda central + ficha del estudiante + calendario de eventos) | **Programación** (agenda, asistencia, registro de sesión, actividades especiales, cupos, panel «Sin asesoría esta semana») · **Historial del alumno** (solo consulta) · **Cronogramas mensuales**. «Primera asesoría» y «Seguimiento» se fusionaron en Programación. |
+| **Registro de sesión** | Ligado a la asesoría (`Tracking.scheduleId`). Métricas por programa (extraídas a `SessionMetricsForm`). Si es primera asesoría, checklist de cierre (metodología y artículos obligatorios). Los registros antiguos sin asesoría se muestran en el historial como «Registros anteriores». |
+| **Cronogramas mensuales** | Ahora persisten (crear, editar, eliminar). Cada actividad tiene fecha, **hora de inicio y fin**, responsable, **cupo** (o sin límite) e **inscritos**. Una sede no repite mes/año. Aviso si hay asesorías ya reservadas dentro del horario de una actividad. |
+| **Bloqueo por actividad** | Una actividad de una sede bloquea, en esa fecha, los horarios de asesoría que pisa (p. ej. maratón de 4 a 6 p. m. → bloques 4–5 y 5–6). Se ve en el formulario («Bloqueado: Maratón») y en el calendario. |
+| **Inscripción en actividades** | Desde Cronogramas (botón *Inscribir* por actividad) y desde Programación → *Actividades especiales*. Valida sede, cupo, duplicados y que el alumno no tenga una asesoría que se cruce. |
+| **Calendario** | Muestra por horario cuántos alumnos hay (con cupo si se filtra una sede, «Lleno» en ámbar) y las actividades especiales; clic en un horario abre la **agenda del día** con acciones por alumno. |
+| **Fase D: primera asesoría de la matrícula** | El paso Programa del asistente usa los mismos bloques (selector de horarios con su cupo) y valida cupo, domingos y actividades. Al guardar crea una **asesoría real** (`isFirst`, Reservado, sede de la matrícula, responsable = quien entrevistó) en la agenda; se eliminó la lista aparte `counselings`. |
+
+Verificación: `tsc` 0 errores · `vite build` · `check-schedule.ts` 110/110 · `check-enrollment.ts` 90/90 · tarifas, promociones, inventario y verificación sin cambios. En navegador: horarios bloqueados por la actividad solo en su sede; «Completo (1 de 1)» tras bajar el cupo; registro de primera asesoría (checklist obligatorio) → «Sesión registrada»; calendario con bloques, actividades y agenda del día; inscripción (rechazo por otra sede, alta correcta); historial con sesión y registros anteriores.
+Pendiente: permisos por rol; el selector de sede del encabezado sigue siendo provisional; exportar cronogramas (PDF / imagen) sigue sin implementar.
