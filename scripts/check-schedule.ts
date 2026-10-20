@@ -32,6 +32,9 @@ import {
   slotLabel,
   slotsForDate,
   statusTone,
+  slotsToRange,
+  rangeToSlots,
+  toggleActivitySlot,
   studentsWithoutSession,
   suggestedResponsible,
   upsertOverride,
@@ -212,9 +215,29 @@ check('Actividad completa → válida', validateActivity(okAct, period) === null
 check('Sin nombre → rechazada', /nombre/.test(validateActivity({ ...okAct, actividad: ' ' }, period) ?? ''));
 check('Sin fecha → rechazada', /fecha/.test(validateActivity({ ...okAct, fecha: '' }, period) ?? ''));
 check('Fecha fuera del mes del cronograma → rechazada', /dentro de Noviembre 2026/.test(validateActivity({ ...okAct, fecha: '2026-12-01' }, period) ?? ''));
-check('Sin horas → rechazada', /hora de inicio y la de fin/.test(validateActivity({ ...okAct, horaFin: '' }, period) ?? ''));
+check('Sin horas → rechazada', /elija las horas/.test(validateActivity({ ...okAct, horaFin: '' }, period) ?? ''));
 check('Fin anterior al inicio → rechazada', /posterior a la de inicio/.test(validateActivity({ ...okAct, horaInicio: '18:00', horaFin: '16:00' }, period) ?? ''));
 check('Cupo inválido → rechazada; sin límite → válida', /cupo/.test(validateActivity({ ...okAct, cupo: 0 }, period) ?? '') && validateActivity({ ...okAct, cupo: null }, period) === null);
+
+check('Actividad en domingo → rechazada', /domingos/.test(validateActivity({ ...okAct, fecha: '2026-11-01' }, { mes: 'Noviembre', anio: 2026 }) ?? ''));
+check('Actividad de 4 horas → rechazada (máximo 3)', /entre 1 y 3 horas/.test(validateActivity({ ...okAct, horaInicio: '15:00', horaFin: '19:00' }, period) ?? ''));
+check('Actividad de 3 horas → válida', validateActivity({ ...okAct, horaInicio: '15:00', horaFin: '18:00' }, period) === null);
+check('Actividad con horas fuera de la agenda (15:30–16:30) → rechazada', /entre 1 y 3 horas/.test(validateActivity({ ...okAct, horaInicio: '15:30', horaFin: '16:30' }, period) ?? ''));
+check('Actividad que cruza el almuerzo del sábado (12:00–14:00) → rechazada', /entre 1 y 3 horas/.test(validateActivity({ ...okAct, fecha: '2026-11-14', horaInicio: '12:00', horaFin: '14:00' }, period) ?? ''));
+check('Sábado por la mañana (9:00–12:00) → válida', validateActivity({ ...okAct, fecha: '2026-11-14', horaInicio: '09:00', horaFin: '12:00' }, period) === null);
+
+// ---------------------------------------------------------------- Horas de una actividad (hasta 3 consecutivas)
+const martes = '2026-11-10', sab14 = '2026-11-14';
+check('Elegir una hora', toggleActivitySlot(martes, [], '16:00').join() === '16:00');
+check('Sumar la hora siguiente y la anterior', toggleActivitySlot(martes, ['16:00'], '17:00').join() === '16:00,17:00' && toggleActivitySlot(martes, ['16:00'], '15:00').join() === '15:00,16:00');
+check('Máximo 3 consecutivas: la cuarta empieza una selección nueva', toggleActivitySlot(martes, ['15:00', '16:00', '17:00'], '18:00').join() === '18:00');
+check('Una hora lejana empieza una selección nueva', toggleActivitySlot(martes, ['15:00'], '18:00').join() === '18:00');
+check('Tocar un extremo lo quita; tocar el del medio deja solo esa hora',
+  toggleActivitySlot(martes, ['15:00', '16:00', '17:00'], '17:00').join() === '15:00,16:00' && toggleActivitySlot(martes, ['15:00', '16:00', '17:00'], '16:00').join() === '16:00');
+check('Sábado: 12:00 y 16:00 no son consecutivas (la tarde empieza una selección nueva)', toggleActivitySlot(sab14, ['12:00'], '16:00').join() === '16:00');
+check('Una hora que no existe ese día se ignora (9:00 en lunes)', toggleActivitySlot(martes, ['16:00'], '09:00').join() === '16:00');
+check('Rango de las horas elegidas', JSON.stringify(slotsToRange(['17:00', '15:00', '16:00'])) === JSON.stringify({ horaInicio: '15:00', horaFin: '18:00' }) && slotsToRange([]) === null);
+check('Rango → horas (ida y vuelta)', rangeToSlots(martes, '16:00', '18:00').join() === '16:00,17:00' && rangeToSlots(martes, '15:30', '17:00').length === 0 && rangeToSlots(sab14, '12:00', '14:00').length === 0);
 
 // ---------------------------------------------------------------- Inscripción en actividades
 const act = acti[0];

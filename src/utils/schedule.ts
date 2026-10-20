@@ -308,6 +308,41 @@ export function affectedSchedules(
   );
 }
 
+/** Una actividad puede ocupar hasta 3 horas consecutivas de la agenda. */
+export const MAX_ACTIVITY_HOURS = 3;
+
+const sortTimes = (times: string[]) => [...times].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+const consecutive = (a: string, b: string) => timeToMinutes(b) - timeToMinutes(a) === SLOT_DURATION;
+
+/**
+ * Marca o desmarca una hora al armar una actividad. La selección siempre son horas consecutivas (máximo 3):
+ * una hora contigua se suma; una hora lejana (o si ya hay 3) empieza una selección nueva; tocar un extremo lo quita.
+ */
+export function toggleActivitySlot(date: string, selected: string[], slot: string): string[] {
+  if (!slotsForDate(date).includes(slot)) return selected;
+  const cur = sortTimes(selected);
+  if (cur.includes(slot)) return slot === cur[0] || slot === cur[cur.length - 1] ? cur.filter(t => t !== slot) : [slot];
+  if (cur.length === 0) return [slot];
+  const touches = consecutive(slot, cur[0]) || consecutive(cur[cur.length - 1], slot);
+  return touches && cur.length < MAX_ACTIVITY_HOURS ? sortTimes([...cur, slot]) : [slot];
+}
+
+/** Rango (inicio y fin) de las horas elegidas; null si no hay ninguna. */
+export function slotsToRange(selected: string[]): { horaInicio: string; horaFin: string } | null {
+  if (selected.length === 0) return null;
+  const cur = sortTimes(selected);
+  return { horaInicio: cur[0], horaFin: endTime(cur[cur.length - 1], SLOT_DURATION) };
+}
+
+/** Horas de la agenda que cubre un rango; vacío si el rango no coincide exactamente con horas de atención consecutivas. */
+export function rangeToSlots(date: string, horaInicio: string, horaFin: string): string[] {
+  if (!date || !horaInicio || !horaFin) return [];
+  const slots = slotsForDate(date).filter(t => timeToMinutes(t) >= timeToMinutes(horaInicio) && timeToMinutes(t) + SLOT_DURATION <= timeToMinutes(horaFin));
+  const range = slotsToRange(slots);
+  const contiguous = slots.every((t, i) => i === 0 || consecutive(slots[i - 1], t));
+  return range && contiguous && range.horaInicio === horaInicio && range.horaFin === horaFin ? slots : [];
+}
+
 /** Validación de una actividad al guardar el cronograma. */
 export function validateActivity(
   a: { actividad: string; fecha: string; horaInicio: string; horaFin: string; cupo: number | null },
@@ -318,8 +353,11 @@ export function validateActivity(
   if (!a.fecha) return `${name}: indique la fecha.`;
   const [y, m] = a.fecha.split('-').map(Number);
   if (MONTHS[m - 1] !== period.mes || y !== period.anio) return `${name}: la fecha debe estar dentro de ${period.mes} ${period.anio}.`;
-  if (!a.horaInicio || !a.horaFin) return `${name}: indique la hora de inicio y la de fin.`;
+  if (weekdayIndex(a.fecha) === 6) return `${name}: los domingos no hay atención; elija de lunes a sábado.`;
+  if (!a.horaInicio || !a.horaFin) return `${name}: elija las horas de la actividad.`;
   if (timeToMinutes(a.horaFin) <= timeToMinutes(a.horaInicio)) return `${name}: la hora de fin debe ser posterior a la de inicio.`;
+  const hours = rangeToSlots(a.fecha, a.horaInicio, a.horaFin).length;
+  if (hours < 1 || hours > MAX_ACTIVITY_HOURS) return `${name}: elija entre 1 y ${MAX_ACTIVITY_HOURS} horas consecutivas dentro del horario de atención.`;
   if (!isValidCapacity(a.cupo)) return `${name}: el cupo debe ser un número entero entre ${MIN_CAPACITY} y ${MAX_CAPACITY}, o sin límite.`;
   return null;
 }

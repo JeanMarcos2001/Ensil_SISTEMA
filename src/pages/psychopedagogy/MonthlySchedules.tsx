@@ -9,9 +9,21 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type MonthlySchedule, type ScheduleActivity } from '../../context/DataContext';
-import { MONTHS, affectedSchedules, rangeLabel, todayLocalISO, validateActivity } from '../../utils/schedule';
+import {
+  MAX_ACTIVITY_HOURS,
+  MONTHS,
+  affectedSchedules,
+  rangeLabel,
+  rangeToSlots,
+  slotsForDate,
+  slotsToRange,
+  todayLocalISO,
+  toggleActivitySlot,
+  validateActivity,
+} from '../../utils/schedule';
 import { CapacityInput } from './CapacityInput';
 import { ActivityEnrollModal } from './ActivityEnrollModal';
+import { ActivityDatePicker } from './ActivityDatePicker';
 
 interface FormState {
   branchId: string;
@@ -25,6 +37,10 @@ interface FormState {
 const newActivity = (order: number): ScheduleActivity => ({
   id: `new-${Date.now()}-${order}`, actividad: '', fecha: '', horaInicio: '', horaFin: '', responsable: '', orden: order, cupo: null, inscritos: [],
 });
+
+const autoTitle = (mes: string, anio: number) => `Cronograma de Actividades - ${mes} ${anio}`;
+
+const slotText = (t: string) => `${Number(t.split(':')[0]) % 12 || 12}:00 ${Number(t.split(':')[0]) >= 12 ? 'p. m.' : 'a. m.'}`;
 
 const seats = (a: ScheduleActivity) => (a.cupo === null ? `${a.inscritos.length} inscritos` : `${a.inscritos.length}/${a.cupo} inscritos`);
 
@@ -74,7 +90,7 @@ export function MonthlySchedules() {
       const mes = MONTHS[Number(today.split('-')[1]) - 1];
       const anio = Number(today.split('-')[0]);
       setSelectedSchedule(null);
-      setFormState({ branchId: branchFilter || activeBranches[0]?.id || '', mes, anio, titulo: `Cronograma de Actividades - ${mes} ${anio}`, observaciones: '', actividades: [] });
+      setFormState({ branchId: branchFilter || activeBranches[0]?.id || '', mes, anio, titulo: autoTitle(mes, anio), observaciones: '', actividades: [] });
     }
     setIsDrawerOpen(true);
   };
@@ -105,7 +121,7 @@ export function MonthlySchedules() {
       anio: formState.anio,
       titulo: formState.titulo.trim(),
       observaciones: formState.observaciones.trim(),
-      actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), responsable: a.responsable.trim(), orden: i + 1 })),
+      actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), responsable: '', orden: i + 1 })),
     };
     if (selectedSchedule) updateMonthlySchedule(selectedSchedule.id, data);
     else addMonthlySchedule(data);
@@ -265,7 +281,7 @@ export function MonthlySchedules() {
           )}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Left Column */}
-            <div className="lg:col-span-5 space-y-6">
+            <div className="lg:col-span-4 space-y-6">
               <div className="space-y-4">
                 <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
                   <h3 className="text-base font-semibold text-text-primary">Cabecera del Cronograma</h3>
@@ -281,7 +297,7 @@ export function MonthlySchedules() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Mes</label>
-                      <select className={nativeFieldCls} value={formState.mes} onChange={e => set({ mes: e.target.value })}>
+                      <select className={nativeFieldCls} value={formState.mes} onChange={e => set({ mes: e.target.value, ...(formState.titulo === autoTitle(formState.mes, formState.anio) ? { titulo: autoTitle(e.target.value, formState.anio) } : {}) })}>
                         {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                     </div>
@@ -290,7 +306,10 @@ export function MonthlySchedules() {
                       <Input className={inputCls}
                         type="number"
                         value={formState.anio}
-                        onChange={(e) => set({ anio: parseInt(e.target.value) })}
+                        onChange={(e) => {
+                          const anio = parseInt(e.target.value);
+                          set({ anio, ...(formState.titulo === autoTitle(formState.mes, formState.anio) && anio ? { titulo: autoTitle(formState.mes, anio) } : {}) });
+                        }}
                       />
                     </div>
                   </div>
@@ -322,7 +341,7 @@ export function MonthlySchedules() {
             </div>
 
             {/* Right Column */}
-            <div className="lg:col-span-7 space-y-6">
+            <div className="lg:col-span-8 space-y-6">
               <div className="space-y-4">
                 <div className="flex justify-between items-center border-b border-border-soft pb-2">
                   <div className="flex items-center gap-2">
@@ -332,7 +351,7 @@ export function MonthlySchedules() {
                     <Plus size={16} className="mr-2" /> Agregar
                   </Button>
                 </div>
-                <p className="text-sm text-text-secondary">Durante cada actividad, los horarios de asesoría de la sede quedan bloqueados.</p>
+                <p className="text-sm text-text-secondary">Cada actividad ocupa hasta {MAX_ACTIVITY_HOURS} horas consecutivas y bloquea los horarios de asesoría de la sede. El responsable se define después, desde una sesión de Psicopedagogía.</p>
 
                 <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
                   {formState.actividades.length === 0 ? (
@@ -343,6 +362,7 @@ export function MonthlySchedules() {
                     </div>
                   ) : (
                     formState.actividades.map((act) => {
+                      const chosen = rangeToSlots(act.fecha, act.horaInicio, act.horaFin);
                       const hits = act.fecha && act.horaInicio && act.horaFin && act.horaFin > act.horaInicio
                         ? affectedSchedules(schedules, formState.branchId, act)
                         : [];
@@ -351,8 +371,8 @@ export function MonthlySchedules() {
                           <div className="mt-2 cursor-move text-text-muted hover:text-text-primary transition-colors">
                             <GripVertical size={20} />
                           </div>
-                          <div className="flex-1 grid grid-cols-1 sm:grid-cols-6 gap-3">
-                            <div className="sm:col-span-6">
+                          <div className="flex-1 min-w-0 space-y-3">
+                            <div>
                               <label className={labelCls}>Nombre</label>
                               <Input className={inputCls}
                                 value={act.actividad}
@@ -360,47 +380,68 @@ export function MonthlySchedules() {
                                 placeholder="Nombre de la actividad"
                               />
                             </div>
-                            <div className="sm:col-span-2">
-                              <label className={labelCls}>Fecha</label>
-                              <Input className={inputCls}
-                                type="date"
-                                value={act.fecha}
-                                onChange={(e) => handleActivityChange(act.id, { fecha: e.target.value })}
-                              />
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className={labelCls}>Fecha</label>
+                                <ActivityDatePicker
+                                  value={act.fecha}
+                                  mes={formState.mes}
+                                  anio={formState.anio}
+                                  minDate={today}
+                                  onChange={(fecha) => {
+                                    // Al cambiar de día, se conservan las horas solo si ese día también las tiene
+                                    const keep = rangeToSlots(fecha, act.horaInicio, act.horaFin).length > 0;
+                                    handleActivityChange(act.id, { fecha, ...(keep ? {} : { horaInicio: '', horaFin: '' }) });
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label className={labelCls}>Cupo de inscripción</label>
+                                <CapacityInput value={act.cupo} onChange={(v) => handleActivityChange(act.id, { cupo: v })} />
+                              </div>
                             </div>
-                            <div className="sm:col-span-2">
-                              <label className={labelCls}>Hora de inicio</label>
-                              <Input className={inputCls}
-                                type="time"
-                                value={act.horaInicio}
-                                onChange={(e) => handleActivityChange(act.id, { horaInicio: e.target.value })}
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className={labelCls}>Hora de fin</label>
-                              <Input className={inputCls}
-                                type="time"
-                                value={act.horaFin}
-                                onChange={(e) => handleActivityChange(act.id, { horaFin: e.target.value })}
-                              />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className={labelCls}>Responsable</label>
-                              <Input className={inputCls}
-                                value={act.responsable}
-                                onChange={(e) => handleActivityChange(act.id, { responsable: e.target.value })}
-                                placeholder="Responsable (Opcional)"
-                              />
-                            </div>
-                            <div className="sm:col-span-3">
-                              <label className={labelCls}>Cupo de inscripción</label>
-                              <CapacityInput value={act.cupo} onChange={(v) => handleActivityChange(act.id, { cupo: v })} />
+                            <div>
+                              <label className={labelCls}>Horas de la actividad</label>
+                              {!act.fecha ? (
+                                <p className="text-sm text-text-muted border border-dashed border-border-soft rounded-xl px-3 py-2.5">Elija primero la fecha para ver las horas disponibles.</p>
+                              ) : (
+                                <>
+                                  <div className="flex flex-wrap gap-2">
+                                    {slotsForDate(act.fecha).map(t => {
+                                      const on = chosen.includes(t);
+                                      return (
+                                        <button
+                                          key={t}
+                                          type="button"
+                                          aria-pressed={on}
+                                          onClick={() => {
+                                            const range = slotsToRange(toggleActivitySlot(act.fecha, chosen, t));
+                                            handleActivityChange(act.id, { horaInicio: range?.horaInicio ?? '', horaFin: range?.horaFin ?? '' });
+                                          }}
+                                          className={`h-9 px-3 rounded-lg border text-sm font-medium transition-colors ${
+                                            on
+                                              ? 'bg-primary-accent border-primary-accent text-white shadow-sm'
+                                              : 'bg-surface border-border-soft text-text-primary hover:bg-active-tint'
+                                          }`}
+                                        >
+                                          {slotText(t)}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <p className="text-xs text-text-muted mt-1.5">
+                                    {chosen.length > 0
+                                      ? `${rangeLabel(act.horaInicio, act.horaFin)} · ${chosen.length} ${chosen.length === 1 ? 'hora' : 'horas'}`
+                                      : `Elija hasta ${MAX_ACTIVITY_HOURS} horas consecutivas.`}
+                                  </p>
+                                </>
+                              )}
                             </div>
                             {act.inscritos.length > 0 && (
-                              <p className="sm:col-span-6 text-xs text-text-muted">{act.inscritos.length} {act.inscritos.length === 1 ? 'alumno inscrito' : 'alumnos inscritos'}.</p>
+                              <p className="text-xs text-text-muted">{act.inscritos.length} {act.inscritos.length === 1 ? 'alumno inscrito' : 'alumnos inscritos'}.</p>
                             )}
                             {hits.length > 0 && (
-                              <p className="sm:col-span-6 text-xs text-warning-text bg-warning-tint rounded-lg px-3 py-2">
+                              <p className="text-xs text-warning-text bg-warning-tint rounded-lg px-3 py-2">
                                 {hits.length} {hits.length === 1 ? 'asesoría ya reservada queda' : 'asesorías ya reservadas quedan'} dentro de este horario ({hits.map(h => `${h.student} ${h.time}`).join(', ')}). Reprográmelas desde Programación.
                               </p>
                             )}

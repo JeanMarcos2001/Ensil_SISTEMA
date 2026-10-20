@@ -1268,8 +1268,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       ...seedMonth(seedDay(5)),
       titulo: 'Cronograma de Actividades - Piura',
       actividades: [
-        { id: 'a1', actividad: 'Taller de Ortografía', fecha: seedDay(2), horaInicio: '15:00', horaFin: '17:00', responsable: 'Lic. Juan Pérez', orden: 1, cupo: 12, inscritos: [] },
-        { id: 'a2', actividad: 'Maratón de Lectura', fecha: seedDay(5), horaInicio: '16:00', horaFin: '18:00', responsable: 'Equipo Psicopedagogía', orden: 2, cupo: null, inscritos: ['ALU-001', 'ALU-005'] },
+        { id: 'a1', actividad: 'Taller de Ortografía', fecha: seedDay(2), horaInicio: '16:00', horaFin: '18:00', responsable: '', orden: 1, cupo: 12, inscritos: [] },
+        { id: 'a2', actividad: 'Maratón de Lectura', fecha: seedDay(5), horaInicio: '17:00', horaFin: '19:00', responsable: '', orden: 2, cupo: null, inscritos: ['ALU-001', 'ALU-005'] },
       ],
       observaciones: 'Mes con enfoque en comprensión lectora.'
     },
@@ -1280,8 +1280,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       ...seedMonth(seedDay(3)),
       titulo: 'Actividades Psicopedagógicas Chiclayo',
       actividades: [
-        { id: 'b1', actividad: 'Taller para Padres', fecha: seedDay(3), horaInicio: '18:00', horaFin: '19:30', responsable: 'Lic. Ana Gómez', orden: 1, cupo: 20, inscritos: [] },
-        { id: 'b2', actividad: 'Evaluación de Avance', fecha: seedDay(6), horaInicio: '15:00', horaFin: '20:00', responsable: '', orden: 2, cupo: null, inscritos: [] },
+        { id: 'b1', actividad: 'Taller para Padres', fecha: seedDay(3), horaInicio: '18:00', horaFin: '20:00', responsable: '', orden: 1, cupo: 20, inscritos: [] },
+        { id: 'b2', actividad: 'Evaluación de Avance', fecha: seedDay(6), horaInicio: '16:00', horaFin: '19:00', responsable: '', orden: 2, cupo: null, inscritos: [] },
       ],
       observaciones: ''
     }
