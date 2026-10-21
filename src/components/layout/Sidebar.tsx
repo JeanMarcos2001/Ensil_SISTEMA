@@ -17,6 +17,23 @@ const NAV_ITEMS = [
   { id: 'sistema', icon: ShieldCheck, label: 'Sistema' },
 ];
 
+/** Minúsculas y sin tildes, conservando la longitud (para poder resaltar la coincidencia en el texto original). */
+const fold = (t: string) => [...t].map(c => c.normalize('NFD')[0]).join('').toLowerCase();
+
+/** Resalta la parte del texto que coincide con lo buscado. */
+function Highlight({ text, term }: { text: string; term: string }) {
+  const q = fold(term.trim());
+  const i = q ? fold(text).indexOf(q) : -1;
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark className="bg-warning-text/25 text-inherit font-semibold rounded-sm">{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
 interface SidebarProps {
   isOpen: boolean;
   activeModule: string;
@@ -89,20 +106,19 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
     });
   };
 
+  // Búsqueda (sin distinguir tildes): solo cuenta mientras haya texto en el buscador
+  const query = fold(searchTerm.trim());
+  const searching = query.length > 0;
+  const labelMatches = (label: string) => searching && fold(label).includes(query);
+  const itemMatches = (moduleId: string, item: string) => searching && canShowItem(moduleId, item) && fold(item).includes(query);
+
   // Filter items based on search
   const filteredNavItems = useMemo(() => {
-    if (!searchTerm) return NAV_ITEMS;
-    
-    const lowerSearch = searchTerm.toLowerCase();
-    return NAV_ITEMS.filter(navItem => {
-      // Check if module name matches
-      if (navItem.label.toLowerCase().includes(lowerSearch)) return true;
-      
-      // Check if any item in the module matches
-      const moduleItems = getAllItemsForModule(navItem.id);
-      return moduleItems.some(item => item.toLowerCase().includes(lowerSearch));
-    });
-  }, [searchTerm]);
+    if (!searching) return NAV_ITEMS;
+    return NAV_ITEMS.filter(navItem =>
+      labelMatches(navItem.label) || getAllItemsForModule(navItem.id).some(item => itemMatches(navItem.id, item))
+    );
+  }, [searchTerm, currentBranchId, currentUser.role]);
 
   return (
     <div 
@@ -113,10 +129,10 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
       {/* Search Bar */}
       <div className="px-3 pt-2 pb-2">
         <div 
-          className={`relative flex items-center w-full p-2 rounded-xl transition-all duration-300 ${isOpen ? 'bg-surface-muted border border-border-soft' : 'bg-transparent border-transparent hover:bg-surface-muted cursor-pointer'}`} 
+          className={`relative flex items-center w-full p-1 rounded-xl transition-all duration-300 ${isOpen ? 'bg-surface-muted border border-border-soft' : 'bg-transparent border-transparent hover:bg-surface-muted cursor-pointer'}`} 
           onClick={!isOpen ? onOpenSidebar : undefined}
         >
-          <div className="flex items-center justify-center w-8 h-8 shrink-0">
+          <div className="flex items-center justify-center w-8 h-7 shrink-0">
             {isOpen && searchTerm ? (
               <button onClick={(e) => { e.stopPropagation(); setSearchTerm(''); }} className="text-text-muted hover:text-text-primary w-full h-full flex items-center justify-center">
                 <X size={16} />
@@ -139,7 +155,9 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
       {/* Navigation Menu */}
       <div className="flex-1 overflow-y-auto pt-1 pb-4 px-3 flex flex-col gap-0 custom-scrollbar">
         {filteredNavItems.map((navItem) => {
-          const isExpanded = expandedSections.includes(navItem.id);
+          // Al buscar, se despliegan solos los grupos donde hay coincidencias (y se pliegan al borrar el texto)
+          const hasMatchInside = getAllItemsForModule(navItem.id).some(item => itemMatches(navItem.id, item));
+          const isExpanded = searching ? (hasMatchInside || labelMatches(navItem.label)) : expandedSections.includes(navItem.id);
           const isActiveModule = activeModule === navItem.id;
           const Icon = navItem.icon;
           const moduleInfo = MODULE_DATA[navItem.id];
@@ -148,7 +166,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
             <div key={navItem.id} className="flex flex-col">
               <button
                 onClick={() => handleSectionClick(navItem.id, navItem.isDirect)}
-                className={`flex items-center w-full p-2 rounded-xl transition-colors relative overflow-hidden ${
+                className={`flex items-center w-full py-[3px] px-2 rounded-xl transition-colors relative overflow-hidden ${
                   isActiveModule && !isOpen
                     ? 'bg-active-tint text-primary-accent'
                     : isActiveModule && isOpen
@@ -161,7 +179,9 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
                   <Icon size={20} className={isActiveModule ? 'text-primary-accent' : 'text-text-muted'} />
                 </div>
                 <div className={`flex items-center justify-between flex-1 transition-all duration-300 whitespace-nowrap ${isOpen ? 'opacity-100 ml-2' : 'opacity-0 w-0 ml-0'}`}>
-                  <span className="text-sm">{navItem.label}</span>
+                  <span className="text-sm leading-5">
+                    <Highlight text={navItem.label} term={searchTerm} />
+                  </span>
                   {!navItem.isDirect && (
                     <div className={`transition-transform duration-200 ${isExpanded ? 'rotate-90 text-primary-accent' : 'text-text-muted'}`}>
                       <ChevronRight size={16} />
@@ -177,7 +197,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
                     isExpanded && isOpen ? 'max-h-[500px] opacity-100 mt-1' : 'max-h-0 opacity-0'
                   }`}
                 >
-                <div className="pl-12 pr-2 pb-2 flex flex-col gap-0.5 relative">
+                <div className="pl-10 pr-1 pb-2 flex flex-col gap-0.5 relative">
                   {/* Vertical line indicator */}
                   <div className="absolute left-[24px] top-0 bottom-4 w-px bg-border-soft"></div>
                   
@@ -192,21 +212,22 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
                         if (!canShowItem(navItem.id, item)) return null;
                         
                         const isItemActive = activeItem === item;
-                        // Filter items if searching
-                        if (searchTerm && !item.toLowerCase().includes(searchTerm.toLowerCase()) && !navItem.label.toLowerCase().includes(searchTerm.toLowerCase())) {
-                          return null;
-                        }
+                        const isMatch = itemMatches(navItem.id, item);
+                        // Al buscar: si el módulo coincide por nombre se ven todas sus opciones; si no, solo las que coinciden
+                        if (searching && !isMatch && !labelMatches(navItem.label)) return null;
                         return (
                           <button
                             key={item}
                             onClick={() => onItemSelect(item, navItem.id)}
-                            className={`w-full text-left py-1.5 px-3 rounded-lg text-sm transition-colors relative flex items-center justify-between ${
+                            className={`w-full text-left py-1.5 px-2 rounded-lg text-sm transition-colors relative flex items-center justify-between ${
                               isItemActive 
                                 ? 'bg-active-tint text-primary-accent font-medium' 
+                                : isMatch
+                                ? 'bg-warning-tint/70 text-text-primary ring-1 ring-warning-text/30'
                                 : 'text-text-secondary hover:bg-surface-muted hover:text-text-primary'
                             }`}
                           >
-                            <span className="truncate block">{item}</span>
+                            <span className="truncate block"><Highlight text={item} term={isMatch ? searchTerm : ''} /></span>
                           </button>
                         );
                       })}
@@ -240,7 +261,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
       <div className="mt-auto p-3 border-t border-border-soft flex flex-col gap-1">
         <button 
           onClick={onOpenSettings}
-          className={`flex items-center w-full p-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
+          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
           title={!isOpen ? "Configuración" : undefined}
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">
@@ -251,7 +272,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
           </div>
         </button>
         <button 
-          className={`flex items-center w-full p-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
+          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
           title={!isOpen ? "Ayuda" : undefined}
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">
@@ -262,7 +283,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
           </div>
         </button>
         <button 
-          className={`flex items-center w-full p-2 rounded-xl text-danger-text hover:bg-danger-tint transition-colors relative overflow-hidden`}
+          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text hover:bg-danger-tint transition-colors relative overflow-hidden`}
           title={!isOpen ? "Cerrar sesión" : undefined}
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">

@@ -88,12 +88,14 @@ interface PersonFormProps {
   title?: React.ReactNode;
   /** Acciones extra del encabezado (p. ej. eliminar), a la derecha junto al interruptor. */
   headerActions?: React.ReactNode;
+  /** No pide ni muestra el teléfono (alumnos dependientes de un apoderado). */
+  hidePhone?: boolean;
 }
 
 const DOC_TYPES: DocType[] = ['DNI', 'CE', 'Pasaporte'];
 
 export function PersonForm({
-  person, onChange, extended, locked, existing, onPickExisting, searchPlaceholder, ageOnDate, today, title, headerActions,
+  person, onChange, extended, locked, existing, onPickExisting, searchPlaceholder, ageOnDate, today, title, headerActions, hidePhone,
 }: PersonFormProps) {
   const [query, setQuery] = React.useState('');
   const set = (patch: Partial<DraftPerson>) => onChange({ ...person, ...patch });
@@ -137,8 +139,8 @@ export function PersonForm({
                 {[person.names, person.lastNameP, person.lastNameM].filter(Boolean).join(' ')}
               </p>
               <p className="text-text-secondary">{person.docType} {person.docNumber}</p>
-              {(person.phone || person.email) && (
-                <p className="text-text-secondary">{[person.phone, person.email].filter(Boolean).join(' · ')}</p>
+              {((!hidePhone && person.phone) || person.email) && (
+                <p className="text-text-secondary">{[hidePhone ? '' : person.phone, person.email].filter(Boolean).join(' · ')}</p>
               )}
               <p className="text-xs text-success-text font-medium pt-1">Persona ya registrada: se reutilizará su ficha.</p>
             </div>
@@ -213,9 +215,11 @@ export function PersonForm({
         <Field label="Fecha de nacimiento" required hint={age !== null && age >= 0 ? `Edad: ${age} años` : undefined}>
           <input type="date" max={today} className={inputCls} disabled={disabled} value={person.birthDate} onChange={e => set({ birthDate: e.target.value })} />
         </Field>
-        <Field label="Teléfono">
-          <input className={inputCls} disabled={disabled} value={person.phone} onChange={e => set({ phone: e.target.value })} placeholder="9 dígitos" />
-        </Field>
+        {!hidePhone && (
+          <Field label="Teléfono">
+            <input className={inputCls} disabled={disabled} value={person.phone} onChange={e => set({ phone: e.target.value })} placeholder="9 dígitos" />
+          </Field>
+        )}
         {extended && (
           <>
             <Field label="Correo">

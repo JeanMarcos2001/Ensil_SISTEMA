@@ -7,6 +7,8 @@ import type { Schedule, Tracking } from '../../context/DataContext';
 import {
   availableActions,
   capacityFor,
+  changeBlockedByNotice,
+  noticeMessage,
   groupByBlock,
   longDayLabel,
   rangeLabel,
@@ -91,18 +93,23 @@ export function DayAgendaModal({
 
         {blocks.map(g => {
           const active = g.items.filter(s => ACTIVE_STATUSES.includes(s.status)).length;
-          const cap = branchId ? capacityFor(capacity, branchId, date, g.time) : null;
+          const isFirstBlock = g.items.some(s => s.isFirst);
+          const cap = branchId && !isFirstBlock ? capacityFor(capacity, branchId, date, g.time) : null;
           return (
             <div key={g.time} className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold text-text-primary">{slotLabel(g.time)}</p>
-                <Badge variant={cap !== null && active >= cap ? 'warning' : 'neutral'}>
-                  {cap !== null ? `${active} de ${cap} ${cap === 1 ? 'cupo' : 'cupos'}` : `${active} ${active === 1 ? 'alumno' : 'alumnos'}`}
+                <Badge variant={isFirstBlock ? 'success' : cap !== null && active >= cap ? 'warning' : 'neutral'}>
+                  {isFirstBlock
+                    ? `Primera asesoría · ${active} ${active === 1 ? 'alumno' : 'alumnos'} · sin cupo`
+                    : cap !== null ? `${active} de ${cap} ${cap === 1 ? 'cupo' : 'cupos'}` : `${active} ${active === 1 ? 'alumno' : 'alumnos'}`}
                 </Badge>
               </div>
               {g.items.map(s => {
                 const session = trackings.find(t => t.scheduleId === s.id);
-                const actions = availableActions(s, today);
+                const now = new Date();
+                const actions = availableActions(s, today, now);
+                const lockedByNotice = changeBlockedByNotice(s, now);
                 return (
                   <div key={s.id} className="p-3 border border-border-soft rounded-xl space-y-2">
                     <div className="flex items-start justify-between gap-3">
@@ -116,6 +123,9 @@ export function DayAgendaModal({
                         {s.status === 'Asistió' && <p className="text-xs text-text-muted">{session ? 'Sesión registrada' : 'Sin sesión'}</p>}
                       </div>
                     </div>
+                    {lockedByNotice && (
+                      <p className="text-xs text-text-muted">{noticeMessage(s.date, s.time)}</p>
+                    )}
                     {actions.length > 0 && (
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         {actions.map(a => (

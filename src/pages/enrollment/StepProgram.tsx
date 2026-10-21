@@ -10,7 +10,7 @@ import {
   type DraftStudent,
 } from '../../utils/enrollment';
 import { buildPromotionGroups, suggestGroups } from '../../utils/promotions';
-import { blockState, blockText, longDayLabel, slotLabel, slotsForDate, weekdayIndex } from '../../utils/schedule';
+import { firstBlockText, firstSessionBlock, longDayLabel, slotLabel, slotsForDate, weekdayIndex } from '../../utils/schedule';
 import { Field, StepHeader, inputCls } from './fields';
 import { STEPS, type StepProps } from './types';
 
@@ -215,7 +215,7 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
                     onChange={e => setStudent(idx, { counselingDate: e.target.value, counselingTime: '' })}
                   />
                 </Field>
-                <Field label="Horario de la primera asesoría" required hint="Bloques de 1 hora de la agenda de Psicopedagogía de la sede.">
+                <Field label="Horario de la primera asesoría" required hint="Solo horarios vacíos: la primera asesoría no se mezcla con asesorías ni actividades. Los alumnos de este registro pueden compartir horario.">
                   <select
                     className={inputCls}
                     value={s.counselingTime}
@@ -225,12 +225,12 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
                     <option value="">{!s.counselingDate ? 'Elija primero la fecha' : slotsForDate(s.counselingDate).length === 0 ? 'Sin atención' : 'Seleccionar horario...'}</option>
                     {slotsForDate(s.counselingDate).map(t => {
                       const state = catalogs.scheduling
-                        ? blockState(catalogs.scheduling, draft.context.branchId, s.counselingDate, t)
+                        ? firstSessionBlock(catalogs.scheduling, draft.context.branchId, s.counselingDate, t)
                         : undefined;
-                      const unavailable = !!state && (state.kind === 'full' || state.kind === 'blocked');
+                      const unavailable = !!state && (state.kind === 'taken' || state.kind === 'blocked');
                       return (
                         <option key={t} value={t} disabled={unavailable && t !== s.counselingTime}>
-                          {slotLabel(t)}{state ? ` — ${blockText(state)}` : ''}
+                          {slotLabel(t)}{state ? ` — ${firstBlockText(state)}` : ''}
                         </option>
                       );
                     })}

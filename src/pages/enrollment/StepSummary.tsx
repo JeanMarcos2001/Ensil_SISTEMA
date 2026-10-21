@@ -1,5 +1,6 @@
 import React from 'react';
 import { fullName, studentPerson, unitPaymentStatus } from '../../utils/enrollment';
+import { documentLabel } from '../../utils/payments';
 import { StepHeader } from './fields';
 import { STEPS, type StepProps } from './types';
 
@@ -94,6 +95,7 @@ export function StepSummary({ draft, catalogs, quote }: StepProps) {
                 />
               ))}
               {parts.some(p => p.evidence) && <Row k="Evidencias" v={parts.map(p => p.evidence).filter(Boolean).join(', ')} />}
+              {draft.paymentDocs[u.key] && <Row k="Comprobante" v={`${draft.paymentDocs[u.key].type} ${documentLabel(draft.paymentDocs[u.key])}`} />}
               <Row k="Total equivalente" v={st.validTc ? usd(st.registered) : 'Falta TC'} />
             </div>
           );

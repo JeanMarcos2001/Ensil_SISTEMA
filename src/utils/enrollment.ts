@@ -29,7 +29,14 @@ import type {
   Tariff,
 } from '../context/DataContext';
 import { nextNumericId, nextSequentialId } from './ids';
-import { SLOT_DURATION, checkBlock, findScheduleConflict, slotLabel, slotsForDate, weekdayIndex, type SchedulingContext } from './schedule';
+import {
+  buildPaymentRecord,
+  documentLabel,
+  emptyDocument,
+  validatePaymentInput,
+  type PaymentDocument,
+} from './payments';
+import { SLOT_DURATION, checkFirstSessionBlock, findScheduleConflict, slotLabel, slotsForDate, weekdayIndex, type SchedulingContext } from './schedule';
 import { findPromotionOffers, buildPromotionGroups, type PromoStudent, type PromotionOffer } from './promotions';
 import {
   buildPlanInstallments,
@@ -136,6 +143,8 @@ export interface EnrollmentDraft {
   promotion: { promotionId: string; groups: string[][] } | null;
   /** Partes de pago por unidad de pago (grupo promocional o alumno contado). */
   payments: Record<string, PaymentPart[]>;
+  /** Comprobante (boleta / factura) de cada unidad de pago. */
+  paymentDocs: Record<string, PaymentDocument>;
 }
 
 export const emptyPerson = (): DraftPerson => ({
@@ -159,6 +168,7 @@ export const emptyDraft = (today: string, branchId = ''): EnrollmentDraft => ({
   students: [emptyStudent()],
   promotion: null,
   payments: {},
+  paymentDocs: {},
 });
 
 /** Persona efectiva de un alumno. En modo independiente el Alumno 1 ES el titular (no se duplica). */
@@ -512,8 +522,6 @@ export function validateStudents(draft: EnrollmentDraft, c: EnrollmentCatalogs, 
 
 export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, quote: EnrollmentQuote): string[] {
   const e: string[] = [];
-  // Primeras asesorías de los alumnos anteriores de este mismo registro: también ocupan cupo.
-  const planned: Schedule[] = [];
   draft.students.forEach((s, i) => {
     const q = quote.students[i];
     const label = `Alumno ${i + 1}`;
@@ -526,7 +534,8 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
       if (!s.levelId) e.push(`${label}: seleccione el nivel.`);
       else if (!getProgramLevels(c.levels, program).some(l => l.id === s.levelId)) e.push(`${label}: el nivel no es válido para el programa.`);
     }
-    // Primera asesoría: usa los mismos bloques de la agenda (1 hora; con cupo; sin domingos ni actividades encima)
+    // Primera asesoría: mismos bloques de la agenda (1 hora, sin domingos), en un horario VACÍO, sin cupo y sin actividades encima.
+    // Los alumnos de este mismo registro pueden compartir horario (ninguno lo ocupa aún en la agenda real).
     let dateOk = false;
     if (!s.counselingDate) e.push(`${label}: indique la fecha de la primera asesoría.`);
     else if (s.counselingDate < draft.context.date) e.push(`${label}: la primera asesoría no puede ser anterior a la fecha de matrícula.`);
@@ -537,19 +546,12 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
       e.push(`${label}: el horario de la primera asesoría no está disponible para esa fecha.`);
     } else if (dateOk && c.scheduling) {
       const existingId = studentPerson(draft, i).existingId;
-      const ctx = { ...c.scheduling, schedules: [...c.scheduling.schedules, ...planned] };
-      const problem = checkBlock(ctx, draft.context.branchId, s.counselingDate, s.counselingTime);
+      const problem = checkFirstSessionBlock(c.scheduling, draft.context.branchId, s.counselingDate, s.counselingTime);
       const clash = existingId
-        ? findScheduleConflict(ctx.schedules, { student: '', studentId: existingId, responsible: '', date: s.counselingDate, time: s.counselingTime, status: 'Reservado' })
+        ? findScheduleConflict(c.scheduling.schedules, { student: '', studentId: existingId, responsible: '', date: s.counselingDate, time: s.counselingTime, status: 'Reservado' })
         : undefined;
       if (problem) e.push(`${label}: ${problem}`);
       else if (clash) e.push(`${label}: ya tiene una asesoría ese día de ${slotLabel(clash.schedule.time)}.`);
-      else {
-        planned.push({
-          id: `borrador-${i}`, student: label, program: '', level: '', date: s.counselingDate, time: s.counselingTime,
-          duration: SLOT_DURATION, responsible: '', status: 'Reservado', branchId: draft.context.branchId,
-        });
-      }
     }
     if (!s.paymentTypeId) { e.push(`${label}: seleccione el tipo de pago.`); return; }
     if (!q.tariff) e.push(`${label}: no hay un tarifario vigente para el tipo de pago elegido.`);
@@ -568,19 +570,7 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
   return e;
 }
 
-const METHODS_NEED_OPERATION = ['Transferencia', 'Yape', 'Plin', 'Depósito'];
-const METHODS_NEED_BANK = ['Transferencia', 'Depósito'];
-export const PAYMENT_METHODS = ['Efectivo', 'Transferencia', 'Yape', 'Plin', 'Depósito', 'Tarjeta'];
-
-export function validatePartRules(part: PaymentPart, label: string): string[] {
-  const e: string[] = [];
-  if (!(part.amount > 0)) e.push(`${label}: el monto debe ser mayor a 0.`);
-  if (part.currency === 'PEN' && !(part.exchangeRate && part.exchangeRate > 0)) e.push(`${label}: indique el tipo de cambio (TC).`);
-  if (!part.method) e.push(`${label}: seleccione el medio de pago.`);
-  if (METHODS_NEED_BANK.includes(part.method) && !part.bank?.trim()) e.push(`${label}: indique el banco o entidad.`);
-  if (METHODS_NEED_OPERATION.includes(part.method) && !part.operationNumber?.trim()) e.push(`${label}: indique el N° de operación.`);
-  return e;
-}
+export { PAYMENT_METHODS } from './payments';
 
 /** Equivalente en USD de una unidad de pago y su saldo pendiente. */
 export function unitPaymentStatus(parts: PaymentPart[], required: number) {
@@ -590,15 +580,26 @@ export function unitPaymentStatus(parts: PaymentPart[], required: number) {
   return { registered: paid, pending: roundMoney(required - paid), validTc: valid };
 }
 
-export function validatePayments(draft: EnrollmentDraft, quote: EnrollmentQuote): string[] {
+export function validatePayments(draft: EnrollmentDraft, quote: EnrollmentQuote, existing: Payment[] = []): string[] {
   const e: string[] = [];
+  const used = new Map<string, string>();
   quote.units.forEach(u => {
     const parts = draft.payments[u.key] ?? [];
-    if (parts.length === 0) { e.push(`${u.label}: registre al menos una parte de pago.`); return; }
-    parts.forEach((p, i) => e.push(...validatePartRules(p, `${u.label} · parte ${i + 1}`)));
-    const st = unitPaymentStatus(parts, u.required);
-    if (st.validTc && Math.abs(st.pending) > 0.01) {
-      e.push(`${u.label}: la suma de las partes (USD ${st.registered.toFixed(2)}) debe ser exactamente USD ${u.required.toFixed(2)}.`);
+    const document = draft.paymentDocs[u.key] ?? emptyDocument();
+    // Partes (monto, TC, medio, banco, operación, evidencia) + comprobante + repeticiones frente a pagos ya registrados
+    e.push(...validatePaymentInput({ parts, document }, existing, u.label));
+    if (parts.length > 0) {
+      const st = unitPaymentStatus(parts, u.required);
+      if (st.validTc && Math.abs(st.pending) > 0.01) {
+        e.push(`${u.label}: la suma de las partes (USD ${st.registered.toFixed(2)}) debe ser exactamente USD ${u.required.toFixed(2)}.`);
+      }
+    }
+    // El mismo comprobante no puede usarse en dos unidades del mismo registro
+    if (document.serie.trim() && document.number.trim()) {
+      const key = documentLabel(document);
+      const other = used.get(key);
+      if (other) e.push(`${u.label}: el comprobante ${key} ya se usó en ${other}.`);
+      used.set(key, u.label);
     }
   });
   return e;
@@ -665,7 +666,7 @@ export function buildEnrollmentBatch(
     ...validateHolders(draft, c, today),
     ...validateStudents(draft, c, today),
     ...validateProgram(draft, c, quote),
-    ...validatePayments(draft, quote),
+    ...validatePayments(draft, quote, state.payments),
   ];
   if (quote.warnings.length) errors.push(...quote.warnings);
   if (errors.length > 0) return { ok: false, error: errors[0] };
@@ -737,7 +738,7 @@ export function buildEnrollmentBatch(
         ...situationData(ds),
         titular: titularName, status: 'Activo',
         docType: person.docType, names: person.names.trim(), lastNameP: person.lastNameP.trim(), lastNameM: person.lastNameM.trim(),
-        birthDate: birth, phone: person.phone.trim(), email: person.email.trim(), address: person.address.trim(),
+        birthDate: birth, phone: draft.mode === 'apoderado' ? '' : person.phone.trim(), email: person.email.trim(), address: person.address.trim(),
         guardianIds: draft.mode === 'apoderado' ? guardianIds : [],
         relationship: draft.mode === 'apoderado' ? ds.relationship : '',
       });
@@ -814,6 +815,9 @@ export function buildEnrollmentBatch(
       responsible: interviewerName,
       status: 'Reservado',
       isFirst: true,
+      // Los alumnos del mismo registro comparten el horario; el registro se identifica con la primera matrícula del lote
+      registrationId: enrollments[0].id,
+      enrollmentId: enrollmentByKey[ds.key],
     });
   });
 
@@ -849,34 +853,24 @@ export function buildEnrollmentBatch(
       });
     }
 
-    payments.push({
+    // Un pago por unidad (un comprobante) con una parte por medio usado; un movimiento de caja por parte.
+    const built = buildPaymentRecord({
       id: paymentId,
       date: formatDisplayDate(opts.now.slice(0, 10)),
       student: names.join(' + '),
       concept: u.kind === 'group' ? `Contado grupal — ${u.label}` : 'Contado',
-      amount: u.required,
-      method: Array.from(new Set(parts.map(p => p.method))).join(' / '),
-      receipt: parts.map(p => p.operationNumber).filter(Boolean).join(', ') || 'S/N',
-      status: 'Aprobado',
+      amountUSD: u.required,
       parts,
-      currency: 'USD',
-      promotionGroupId: groupId,
+      document: draft.paymentDocs[u.key],
+      cashConcept: u.kind === 'group' ? 'Ingreso matrícula (promoción grupal)' : 'Ingreso matrícula (contado)',
+      cashReference: `${enrollmentIds.join(', ')} / ${names.join(' + ')}`,
+      branchId: branch.id,
       enrollmentIds,
+      promotionGroupId: groupId,
+      cashDate: opts.now,
     });
-
-    // Un movimiento de caja por parte: dinero real, en su moneda.
-    parts.forEach(p => {
-      const usd = p.currency === 'USD' ? p.amount : roundMoney(p.amount / (p.exchangeRate || 1));
-      cashMovements.push({
-        date: opts.now,
-        kind: 'Ingreso',
-        concept: u.kind === 'group' ? 'Ingreso matrícula (promoción grupal)' : 'Ingreso matrícula (contado)',
-        reference: `${enrollmentIds.join(', ')} / ${names.join(' + ')}`,
-        currency: p.currency, amount: p.amount, exchangeRate: p.exchangeRate, amountUSD: usd,
-        method: p.method, bank: p.bank, operationNumber: p.operationNumber,
-        branchId: branch.id, paymentId, enrollmentIds, status: 'Aplicado',
-      });
-    });
+    payments.push(built.payment);
+    cashMovements.push(...built.cashMovements);
   });
 
   // ---- Contadores de titulares (existentes y nuevos)

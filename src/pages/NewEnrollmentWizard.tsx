@@ -114,12 +114,13 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
   // Pagos que ya no corresponden a una unidad vigente se descartan
   useEffect(() => {
     const keys = new Set(quote.units.map(u => u.key));
-    const stale = Object.keys(draft.payments).filter(k => !keys.has(k));
+    const stale = [...Object.keys(draft.payments), ...Object.keys(draft.paymentDocs)].filter(k => !keys.has(k));
     if (stale.length > 0) {
       setDraft(d => {
         const next = { ...d.payments };
-        stale.forEach(k => delete next[k]);
-        return { ...d, payments: next };
+        const docs = { ...d.paymentDocs };
+        stale.forEach(k => { delete next[k]; delete docs[k]; });
+        return { ...d, payments: next, paymentDocs: docs };
       });
     }
   }, [quote.units.map(u => u.key).join('|')]);
@@ -155,7 +156,7 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
       case 2: return validateHolders(draft, catalogs, today);
       case 3: return validateStudents(draft, catalogs, today);
       case 4: return validateProgram(draft, catalogs, quote);
-      case 5: return validatePayments(draft, quote);
+      case 5: return validatePayments(draft, quote, data.payments);
       default: return [];
     }
   };

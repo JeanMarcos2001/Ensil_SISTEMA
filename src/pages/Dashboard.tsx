@@ -2,7 +2,11 @@ import React from 'react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { ArrowUpRight, ArrowDownRight, Users, CreditCard, DollarSign, FileCheck, AlertCircle, Clock, Plus, FileText, Building } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Users, CreditCard, DollarSign, FileCheck, AlertCircle, Clock, Plus, FileText, Building, CalendarClock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useData } from '../context/DataContext';
+import { todayLocalISO } from '../utils/schedule';
+import { validityCounts } from '../utils/validity';
 
 function KPICard({ title, value, trend, trendValue, icon: Icon, alert = false }: any) {
   return (
@@ -28,14 +32,20 @@ function KPICard({ title, value, trend, trendValue, icon: Icon, alert = false }:
 }
 
 export function Dashboard() {
+  const { enrollments, programs, schedules } = useData();
+  const navigate = useNavigate();
+  const expiring = validityCounts({ enrollments, programs, schedules }, todayLocalISO())['por-vencer'];
   return (
     <div className="flex flex-col gap-6">
       {/* Row 1: KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
         <KPICard title="Matrículas Activas" value="1,248" trend="up" trendValue="12%" icon={Users} />
         <KPICard title="Cartera Pendiente" value="$45,200" trend="down" trendValue="3.2%" icon={CreditCard} />
         <KPICard title="Pagos del Día" value="$8,450" trend="up" trendValue="8.1%" icon={DollarSign} />
         <KPICard title="Verificaciones" value="24" icon={FileCheck} />
+        <div role="link" tabIndex={0} className="cursor-pointer rounded-xl hover:shadow-md transition-shadow" onClick={() => navigate('/operacion/matriculas?vigencia=por-vencer')} onKeyDown={e => e.key === 'Enter' && navigate('/operacion/matriculas?vigencia=por-vencer')}>
+          <KPICard title="Matrículas por vencer" value={String(expiring)} icon={CalendarClock} alert={expiring > 0} />
+        </div>
         <KPICard title="Alertas de Stock" value="7" icon={AlertCircle} alert />
         <KPICard title="Solicitudes" value="12" icon={Clock} />
       </div>

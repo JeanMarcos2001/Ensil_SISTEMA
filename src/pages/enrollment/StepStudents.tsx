@@ -22,7 +22,7 @@ export function StepStudents({ draft, update, catalogs, today }: StepProps) {
       ...emptyPerson(), source: 'existente', existingId: s.id,
       docType: (s.docType as DraftPerson['docType']) || 'DNI', docNumber: s.doc,
       names: s.names ?? s.name, lastNameP: s.lastNameP ?? '', lastNameM: s.lastNameM ?? '',
-      birthDate: s.birthDate ?? '', phone: s.phone ?? '', email: s.email ?? '', address: s.address ?? '',
+      birthDate: s.birthDate ?? '', phone: draft.mode === 'apoderado' ? '' : s.phone ?? '', email: s.email ?? '', address: s.address ?? '',
     };
     // La ficha guardada trae su situación; si es antigua, se infiere de si tenía colegio.
     const situation: Situation | '' = s.occupationStatus ?? (s.colegio || s.grado ? 'estudiando' : '');
@@ -46,22 +46,21 @@ export function StepStudents({ draft, update, catalogs, today }: StepProps) {
         const person = studentPerson(draft, idx);
         return (
           <div key={s.key} className="p-5 border border-border-soft rounded-xl space-y-4">
-            <div className="flex justify-between items-center">
-              <h4 className="font-semibold text-text-primary">Alumno {idx + 1}</h4>
-              {idx > 0 && (
-                <button type="button" className="text-text-muted hover:text-danger-text" onClick={() => removeStudent(idx)}>
-                  <Trash2 size={16} />
-                </button>
-              )}
-            </div>
-
             {sameAsHolder ? (
               <>
-                <PersonForm person={person} onChange={() => undefined} today={today} ageOnDate={draft.context.date} locked />
+                <PersonForm title={`Alumno ${idx + 1}`} person={person} onChange={() => undefined} today={today} ageOnDate={draft.context.date} locked />
                 <p className="text-xs text-text-muted">Datos tomados del paso Titulares (la misma persona; no se duplican).</p>
               </>
             ) : (
               <PersonForm
+                title={`Alumno ${idx + 1}`}
+                headerActions={idx > 0 && (
+                  <button type="button" className="text-text-muted hover:text-danger-text" onClick={() => removeStudent(idx)} aria-label={`Quitar alumno ${idx + 1}`}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+                // Un alumno dependiente de un apoderado no tiene teléfono propio: el contacto es el del titular
+                hidePhone={draft.mode === 'apoderado'}
                 person={s.person}
                 onChange={p => setStudent(idx, { person: p })}
                 today={today}

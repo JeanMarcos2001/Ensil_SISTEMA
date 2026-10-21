@@ -3,14 +3,40 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, Bookmark, X } from 'lucide-react';
+import { Search, Filter, Bookmark, X } from 'lucide-react';
 import { useData } from '../context/DataContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { longDayLabel, todayLocalISO } from '../utils/schedule';
+import {
+  VALIDITY_LABEL,
+  canEnableExtension,
+  enrollmentValidity,
+  programOf,
+  validityCounts,
+  type Validity,
+  type ValidityState,
+} from '../utils/validity';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 
+const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
+  'sin-inicio': 'neutral',
+  'por-iniciar': 'info',
+  vigente: 'success',
+  'por-vencer': 'warning',
+  'base-finalizada': 'danger',
+  extension: 'info',
+  finalizada: 'neutral',
+};
+
 export function Enrollments() {
-  const { enrollments, students, guardians, branches, isEnrollmentWizardOpen, setIsEnrollmentWizardOpen } = useData();
+  const { enrollments, students, guardians, branches, programs, schedules, enableExtension, isEnrollmentWizardOpen, setIsEnrollmentWizardOpen } = useData();
+  const today = todayLocalISO();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const vigenciaFilter = (searchParams.get('vigencia') ?? '') as ValidityState | '';
+  const [toExtend, setToExtend] = useState<{ id: string; student: string; validity: Validity } | null>(null);
+  const [extendError, setExtendError] = useState<string | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -19,12 +45,18 @@ export function Enrollments() {
   const itemsPerPage = useTablePagination();
   const navigate = useNavigate();
 
+  // Vigencia de cada matrícula activa (duración base + garantía, desde la primera asesoría)
+  const validityOf = (e: (typeof enrollments)[number]) =>
+    e.status === 'Activa' ? enrollmentValidity(e, programOf(e, programs), schedules, today) : undefined;
+  const counts = validityCounts({ enrollments, programs, schedules }, today);
+
   const filteredEnrollments = enrollments.filter(e => {
     const matchesSearch = 
       e.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       e.student.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBranch = !selectedBranch || e.sede === selectedBranch;
-    return matchesSearch && matchesBranch;
+    const matchesValidity = !vigenciaFilter || validityOf(e)?.state === vigenciaFilter;
+    return matchesSearch && matchesBranch && matchesValidity;
   });
 
   const totalPages = Math.ceil(filteredEnrollments.length / itemsPerPage);
@@ -34,7 +66,13 @@ export function Enrollments() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, vigenciaFilter]);
+
+  const setVigencia = (v: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (v) next.set('vigencia', v); else next.delete('vigencia');
+    setSearchParams(next, { replace: true });
+  };
 
   const handleOpenDetail = (id: string) => {
     setSelectedEnrollment(id);
@@ -52,10 +90,6 @@ export function Enrollments() {
           <Button variant="ghost" className="hidden sm:flex items-center gap-2">
             <Bookmark size={16} />
             Guardar vista
-          </Button>
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
-            <Download size={16} />
-            Exportar
           </Button>
           <Button variant="primary" onClick={() => setIsEnrollmentWizardOpen(true)}>Nueva matrícula</Button>
         </div>
@@ -104,6 +138,30 @@ export function Enrollments() {
           </div>
         </div>
 
+        {/* Vigencia: alertas de matrículas por vencer */}
+        <div className="px-4 py-3 border-b border-border-soft flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider mr-1">Vigencia</span>
+          {([
+            ['', 'Todas', null],
+            ['por-vencer', 'Por vencer', counts['por-vencer']],
+            ['base-finalizada', 'Base finalizada', counts['base-finalizada']],
+            ['extension', 'En extensión', counts.extension],
+          ] as const).map(([value, label, n]) => (
+            <button
+              key={value || 'todas'}
+              type="button"
+              onClick={() => setVigencia(value)}
+              className={`h-8 px-3 rounded-lg border text-sm font-medium transition-colors ${
+                vigenciaFilter === value
+                  ? 'bg-primary-accent border-primary-accent text-white'
+                  : 'bg-surface border-border-soft text-text-secondary hover:bg-surface-muted'
+              }`}
+            >
+              {label}{n !== null && <span className="ml-1.5 opacity-80">({n})</span>}
+            </button>
+          ))}
+        </div>
+
         {/* Data Table */}
         <div className="overflow-x-auto flex-1">
           <table className="w-full text-sm text-left">
@@ -114,6 +172,7 @@ export function Enrollments() {
                 <th className="px-6 py-3 font-medium">Alumno</th>
                 <th className="px-6 py-3 font-medium">Programa</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
+                <th className="px-6 py-3 font-medium">Vigencia</th>
                 <th className="px-6 py-3 font-medium">Plan</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -134,12 +193,42 @@ export function Enrollments() {
                     <Badge variant={row.status === 'Activa' ? 'success' : 'danger'}>{row.status}</Badge>
                   </td>
                   <td className="px-6 py-3">
+                    {(() => {
+                      const v = validityOf(row);
+                      if (!v) return <span className="text-text-muted">—</span>;
+                      return (
+                        <div className="space-y-0.5">
+                          <Badge variant={VALIDITY_VARIANT[v.state]}>{VALIDITY_LABEL[v.state]}</Badge>
+                          {v.state === 'por-vencer' && (
+                            <p className="text-xs text-text-secondary">
+                              Termina la base el {longDayLabel(v.baseEnd!)} (quedan {v.daysToBaseEnd} {v.daysToBaseEnd === 1 ? 'día' : 'días'})
+                              {v.extensionMonths > 0 ? ` · extensión +${v.extensionMonths} meses` : ''}
+                            </p>
+                          )}
+                          {v.state === 'base-finalizada' && <p className="text-xs text-text-secondary">Terminó el {longDayLabel(v.baseEnd!)} · sin extensión</p>}
+                          {v.state === 'extension' && <p className="text-xs text-text-secondary">Hasta el {longDayLabel(v.extensionEnd!)}</p>}
+                          {(v.state === 'vigente' || v.state === 'por-iniciar') && (
+                            <p className="text-xs text-text-muted">
+                              {v.extensionEnabled ? `Extensión habilitada · hasta el ${longDayLabel(v.extensionEnd!)}` : `Base hasta el ${longDayLabel(v.baseEnd!)}`}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-6 py-3">
                     <Badge variant={row.plan === 'Al día' ? 'success' : row.plan === 'Parcial' ? 'warning' : 'danger'}>{row.plan}</Badge>
                   </td>
                   <td className="px-6 py-3 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(row.id) },
+                        ...(() => {
+                          const v = validityOf(row);
+                          return v && canEnableExtension(v)
+                            ? [{ label: 'Habilitar extensión', onClick: () => { setExtendError(null); setToExtend({ id: row.id, student: row.student, validity: v }); } }]
+                            : [];
+                        })(),
                         { label: 'Editar datos', onClick: () => {} },
                         { label: 'Ver plan', onClick: () => {} },
                         { label: 'Solicitar caída', onClick: () => {}, danger: true },
@@ -191,6 +280,29 @@ export function Enrollments() {
         </div>
       </div>
 
+      <ConfirmDialog
+        isOpen={!!toExtend}
+        onClose={() => setToExtend(null)}
+        onConfirm={() => {
+          if (!toExtend) return;
+          const r = enableExtension(toExtend.id);
+          if (!r.ok) setExtendError(r.error ?? 'No se pudo habilitar la extensión.');
+          setToExtend(null);
+        }}
+        title="Habilitar extensión"
+        description={toExtend
+          ? `Se habilitará el período de extensión de ${toExtend.validity.extensionMonths} meses de ${toExtend.student} (${toExtend.id}), hasta el ${longDayLabel(toExtend.validity.extensionEnd!)}. Seguirá apareciendo en Programación y Actividades.`
+          : ''}
+        variant="primary"
+        confirmLabel="SÍ, HABILITAR"
+      />
+      {extendError && (
+        <div className="fixed bottom-4 right-4 z-[100] bg-danger-tint border border-danger-text/20 text-danger-text text-sm rounded-xl px-4 py-3 shadow-lg" role="alert">
+          {extendError}
+          <button type="button" className="ml-3 underline" onClick={() => setExtendError(null)}>Cerrar</button>
+        </div>
+      )}
+
       {/* Detail Modal */}
       <Modal 
         isOpen={isDetailOpen} 
@@ -219,6 +331,10 @@ export function Enrollments() {
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <Badge variant={enrollment?.status === 'Activa' ? 'success' : 'danger'}>{enrollment?.status}</Badge>
+                      {(() => {
+                        const v = enrollment ? validityOf(enrollment) : undefined;
+                        return v ? <Badge variant={VALIDITY_VARIANT[v.state]}>{VALIDITY_LABEL[v.state]}</Badge> : null;
+                      })()}
                       <span className="text-xs text-text-muted">Inscrito: {enrollment?.date}</span>
                     </div>
                   </div>

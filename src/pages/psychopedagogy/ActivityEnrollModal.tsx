@@ -4,10 +4,13 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { useData } from '../../context/DataContext';
+import { isStudentWorkable } from '../../utils/validity';
 import {
   allActivities,
   branchOfStudent,
+  canChangeWithNotice,
   longDayLabel,
+  noticeMessage,
   rangeLabel,
   seatsLeft,
   todayLocalISO,
@@ -30,7 +33,7 @@ const capText = (capacity: number | null, enrolled: number) => (capacity === nul
 
 /** Actividades especiales de los cronogramas mensuales: ver y administrar los alumnos inscritos. */
 export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: Props) {
-  const { monthlySchedules, updateMonthlySchedule, students, enrollments, schedules } = useData();
+  const { monthlySchedules, updateMonthlySchedule, students, enrollments, schedules, programs } = useData();
   const today = todayLocalISO();
   const [selectedId, setSelectedId] = useState<string>('');
   const [query, setQuery] = useState('');
@@ -56,7 +59,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
 
   const matches = selected && query.trim().length >= 2
     ? students
-        .filter(s => s.status === 'Activo' && !selected.enrolled.includes(s.id) &&
+        .filter(s => isStudentWorkable(s, { enrollments, programs, schedules }, today) && !selected.enrolled.includes(s.id) &&
           `${s.name} ${s.doc}`.toLowerCase().includes(query.trim().toLowerCase()))
         .slice(0, 6)
     : [];
@@ -82,6 +85,8 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   };
 
   const nameOf = (id: string) => students.find(s => s.id === id)?.name ?? id;
+  // Regla de 24 horas: la inscripción solo se quita con anticipación
+  const canRemove = !!selected && canChangeWithNotice(selected.date, selected.start, new Date());
 
   return (
     <Modal
@@ -144,6 +149,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                 </p>
                 <p className="text-xs text-text-muted mt-1">
                   Durante la actividad, esos horarios de asesoría quedan bloqueados en {selected.sede}.
+                  {selected.date >= today && !canRemove && ' Ya no se pueden quitar inscripciones (faltan menos de 24 horas).'}
                 </p>
               </div>
 
@@ -196,9 +202,10 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                       {selected.date >= today && (
                         <button
                           type="button"
+                          disabled={!canRemove}
                           onClick={() => patchActivity(a => withoutEnrollment(a, id))}
-                          className="p-1.5 text-text-muted hover:text-danger-text hover:bg-danger-tint rounded-lg transition-colors"
-                          title="Quitar inscripción"
+                          className="p-1.5 text-text-muted hover:text-danger-text hover:bg-danger-tint rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted disabled:cursor-not-allowed"
+                          title={canRemove ? 'Quitar inscripción' : noticeMessage(selected.date, selected.start)}
                         >
                           <Trash2 size={16} />
                         </button>

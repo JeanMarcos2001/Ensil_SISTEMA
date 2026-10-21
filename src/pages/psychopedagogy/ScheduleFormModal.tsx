@@ -4,13 +4,18 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Schedule, type Student } from '../../context/DataContext';
 import { getInterviewerOptions } from '../../utils/enrollment';
+import { isStudentWorkable, studentExpiring, studentLimit } from '../../utils/validity';
 import {
   SLOT_DURATION,
   allActivities,
   blockState,
   blockText,
   branchOfStudent,
+  changeBlockedByNotice,
   findScheduleConflict,
+  firstBlockText,
+  firstSessionBlock,
+  noticeMessage,
   latestEnrollment,
   longDayLabel,
   slotLabel,
@@ -59,7 +64,7 @@ function programOf(student: Student, enrollments: ReturnType<typeof useData>['en
 }
 
 export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defaultStudentId }: Props) {
-  const { students, enrollments, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule } = useData();
+  const { students, enrollments, programs, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate || today));
   const [query, setQuery] = useState('');
@@ -103,11 +108,17 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
     }
   }, [isOpen, schedule, defaultDate, defaultStudentId]);
 
+  // Vigencia del programa (duración base + garantía desde la primera asesoría): solo aparecen alumnos con matrícula vigente
+  const vigencia = useMemo(() => ({ enrollments, programs, schedules }), [enrollments, programs, schedules]);
+  const picked = form.studentId ? students.find(s => s.id === form.studentId) : undefined;
+  const limit = picked ? studentLimit(picked, vigencia, today) : undefined;
+  const expiring = picked ? studentExpiring(picked, vigencia, today) : undefined;
+
   const set = (patch: Partial<FormState>) => { setError(null); setForm(f => ({ ...f, ...patch })); };
 
   const matches = query.trim().length >= 2
     ? students
-        .filter(s => s.status === 'Activo' && `${s.name} ${s.doc}`.toLowerCase().includes(query.trim().toLowerCase()))
+        .filter(s => isStudentWorkable(s, vigencia, today) && `${s.name} ${s.doc}`.toLowerCase().includes(query.trim().toLowerCase()))
         .slice(0, 6)
     : [];
 
@@ -127,12 +138,28 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
   // Horarios del día elegido (cada uno de 1 hora) con su cupo, y cuáles no admiten más alumnos
   const slots = form.date ? slotsForDate(form.date) : [];
   const closedDay = !!form.date && weekdayIndex(form.date) === 6;
-  const stateOf = (time: string) => blockState(ctx, form.branchId, form.date, time, schedule?.id);
-  const chosen = form.time && form.branchId ? stateOf(form.time) : undefined;
+  // Una primera asesoría solo puede ir a un horario vacío (o al de su mismo registro); una asesoría, a uno con cupo
+  const isFirst = !!schedule?.isFirst;
+  const optionOf = (time: string): { text: string; unavailable: boolean } => {
+    if (isFirst) {
+      const f = firstSessionBlock(ctx, form.branchId, form.date, time, schedule?.registrationId, schedule?.id);
+      return { text: firstBlockText(f), unavailable: f.kind === 'taken' || f.kind === 'blocked' };
+    }
+    const b = blockState(ctx, form.branchId, form.date, time, schedule?.id);
+    return { text: blockText(b), unavailable: b.kind === 'full' || b.kind === 'blocked' || b.kind === 'first' };
+  };
+  const chosen = form.time && form.branchId ? optionOf(form.time).text : undefined;
 
   const handleSave = () => {
     const slotChanged = !schedule || schedule.date !== form.date || schedule.time !== form.time;
-    const cand = { ...form, status: 'Reservado' };
+    // Regla de 24 horas: una asesoría activa solo se reprograma con anticipación
+    if (schedule && changeBlockedByNotice(schedule, new Date())) { setError(noticeMessage(schedule.date, schedule.time)); return; }
+    // No se programan asesorías después del fin de la vigencia del alumno (la primera asesoría es la que la inicia)
+    if (!isFirst && slotChanged && limit && form.date > limit) {
+      setError(`La vigencia del alumno termina el ${longDayLabel(limit)}; no se puede programar una asesoría posterior.`);
+      return;
+    }
+    const cand = { ...form, status: 'Reservado', isFirst, registrationId: schedule?.registrationId };
     // Si solo cambian observaciones o responsable, el horario (que ya ocupaba) no se vuelve a evaluar contra el cupo
     const problem = slotChanged
       ? validateReservation(ctx, { ...cand, checkPast: true }, today, schedule?.id)
@@ -250,6 +277,12 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
                     <input className={`${nativeFieldCls} disabled:bg-surface-muted disabled:text-text-muted`} value={form.level} disabled placeholder="Autocompletado" readOnly />
                   </div>
                 </div>
+                {picked && limit && (
+                  <p className={`text-xs ${expiring ? 'text-warning-text font-medium' : 'text-text-muted'}`}>
+                    Vigencia hasta el {longDayLabel(limit)}
+                    {expiring ? ` · por vencer (quedan ${expiring.daysToBaseEnd} ${expiring.daysToBaseEnd === 1 ? 'día' : 'días'}; extensión +${expiring.extensionMonths} meses)` : ''}
+                  </p>
+                )}
                 {form.student && !form.branchId && (
                   <p className="text-xs text-danger-text">El alumno no tiene una matrícula con sede; no se puede reservar su horario.</p>
                 )}
@@ -301,19 +334,20 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
                     {!form.student ? 'Elija primero al alumno' : !form.date ? 'Elija primero la fecha' : closedDay ? 'Sin atención' : 'Seleccionar horario...'}
                   </option>
                   {(form.branchId ? slots : []).map(t => {
-                    const st = stateOf(t);
-                    const unavailable = (st.kind === 'full' || st.kind === 'blocked') && t !== form.time;
+                    const o = optionOf(t);
                     return (
-                      <option key={t} value={t} disabled={unavailable}>
-                        {slotLabel(t)} — {blockText(st)}
+                      <option key={t} value={t} disabled={o.unavailable && t !== form.time}>
+                        {slotLabel(t)} — {o.text}
                       </option>
                     );
                   })}
                 </select>
                 <p className="text-xs text-text-muted mt-1">
-                  {chosen
-                    ? `Cada horario es un salón con cupo. Este: ${blockText(chosen)}.`
-                    : 'Cada asesoría dura 1 hora. Lun–Vie 3 a 8 p. m.; sábados 9 a 1 p. m. y 4 a 8 p. m.'}
+                  {isFirst
+                    ? 'Primera asesoría: solo horarios vacíos o del mismo registro; no tiene cupo.'
+                    : chosen
+                      ? `Cada horario es un salón con cupo. Este: ${chosen}.`
+                      : 'Cada asesoría dura 1 hora. Lun–Vie 3 a 8 p. m.; sábados 9 a 1 p. m. y 4 a 8 p. m.'}
                 </p>
               </div>
 

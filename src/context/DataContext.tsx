@@ -2,7 +2,9 @@ import React, { createContext, useContext, useRef, useState, ReactNode } from 'r
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { nextNumericId, nextSequentialId } from '../utils/ids';
-import { allActivities, MONTHS } from '../utils/schedule';
+import { addDaysISO, allActivities, MONTHS, todayLocalISO, weekdayIndex } from '../utils/schedule';
+import { addMonths, canEnableExtension, enrollmentValidity, programOf } from '../utils/validity';
+import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 
 // Types
 export interface Guardian {
@@ -100,6 +102,20 @@ export interface Enrollment {
   promotionGroupId?: string;
   createdAt?: string;
   createdBy?: string;
+  /** Extensión (garantía) habilitada: el alumno sigue apareciendo hasta el fin de la extensión. */
+  extensionEnabledAt?: string;
+  extensionEnabledBy?: string;
+}
+
+/** Datos para cobrar una cuota (los mismos que pide el asistente al cobrar la matrícula). */
+export interface RegisterPaymentInput {
+  /** Fecha del pago (YYYY-MM-DD). */
+  date: string;
+  /** Una parte por medio de pago usado. */
+  parts: PaymentPart[];
+  /** Comprobante que se entrega por el pago. */
+  document: PaymentDocument;
+  note?: string;
 }
 
 /** Grupo promocional: alumnos que comparten una promoción y UN único pago. */
@@ -150,7 +166,9 @@ export interface Payment {
   method: string;
   receipt: string;
   status: string;
-  parts?: PaymentPart[]; // Estructura para la integración del asistente (etapa 5)
+  /** Comprobante que la empresa entrega (boleta / factura). `receipt` es su texto: «B001-000123». */
+  document?: PaymentDocument;
+  parts?: PaymentPart[]; // Una parte por medio de pago usado (lo que recibe la empresa)
   currency?: 'PEN' | 'USD'; // Moneda de la obligación que cubre el pago
   promotionGroupId?: string; // Pago grupal: un único pago para todas las matrículas del grupo
   enrollmentIds?: string[]; // Matrículas cubiertas por este pago
@@ -462,6 +480,10 @@ export interface Schedule {
   branchId?: string;
   observations?: string;
   isFirst?: boolean; // Primera asesoría del alumno (la crea la matrícula)
+  /** Primera asesoría: registro de matrícula (lote) al que pertenece. Los alumnos de un mismo registro comparten horario. */
+  registrationId?: string;
+  /** Primera asesoría: matrícula a la que pertenece (de aquí se deriva el inicio de la vigencia). */
+  enrollmentId?: string;
 }
 
 /** Cierre de la primera asesoría (checklist). */
@@ -823,9 +845,12 @@ interface DataContextType {
   deleteGuardian: (id: string) => void;
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
+  /** Habilita el período de extensión (garantía) de una matrícula por vencer o con la duración base terminada. */
+  enableExtension: (enrollmentId: string) => StockResult;
   addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
   updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
-  registerPayment: (planId: string, installmentId: string, paymentData: any) => StockResult;
+  /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
+  registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => StockResult;
   refinanceInstallment: (planId: string, installmentId: string, refinanceData: any) => void;
   addLeadSource: (name: string) => void;
   updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => void;
@@ -1233,12 +1258,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     while (d.getDay() === 0) d.setDate(d.getDate() + 1); // domingo: sin atención
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
+  // Diego Torres: su primera asesoría fue hace casi 3 meses, así que su duración base está por vencer (ejemplo de la alerta)
+  const expiringStart = (() => {
+    const d = addMonths(addDaysISO(todayLocalISO(), 10), -3);
+    return weekdayIndex(d) === 6 ? addDaysISO(d, 1) : d;
+  })();
   const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true },
+    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-1', enrollmentId: 'MAT-2024-001' },
     { id: '2', student: 'Sofia Castro', studentId: 'ALU-002', branchId: 'FIL-CHI', program: 'Kids', level: 'Nivel 2', date: seedDay(0), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado' },
     { id: '3', student: 'Lucas Vega', studentId: 'ALU-003', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 3', date: seedDay(1), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Cancelado' },
-    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', branchId: 'FIL-CHI', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true },
+    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', branchId: 'FIL-CHI', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true, registrationId: 'REG-SEED-2', enrollmentId: 'MAT-2024-004' },
     { id: '5', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(3), time: '18:00', duration: 60, responsible: 'Lic. María Torres', status: 'Reservado' },
+    { id: '6', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: expiringStart, time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-3', enrollmentId: 'MAT-2024-005' },
   ]);
 
   const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
@@ -1256,6 +1287,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: '2', studentId: 'ALU-001', date: '2026-03-17', status: 'Asistió', metrics: { modulo: 'Módulo 3', velocidad: 220, comprension: 80 }, observations: 'Se recomienda repasar ejercicios de fijación.' },
     { id: '3', studentId: 'ALU-001', date: '2026-03-10', status: 'Faltó', metrics: null, observations: 'Avisó con anticipación por motivos de salud.' },
     { id: '4', studentId: 'ALU-002', date: '2026-03-25', status: 'Asistió', metrics: { modulo: 'Módulo 5', velocidad: 300, comprension: 90 }, observations: 'Excelente comprensión.' },
+    { id: '6', studentId: 'ALU-005', scheduleId: '6', date: expiringStart, status: 'Asistió', metrics: { nivel: 'Nivel 1', sesion: 'Sesión 1', velocidad: 110, comprension: 75 }, observations: 'Primera asesoría: diagnóstico inicial.', checklist: { guardianAttended: true, methodologyExplained: true, itemsExplained: true } },
     { id: '5', studentId: 'ALU-004', date: '2026-03-26', status: 'Asistió', metrics: { nivel: 'Nivel 1', sesion: 'Sesión 2', velocidad: 100, comprension: 70 }, observations: 'Mejorando la pronunciación.' },
   ]);
 
@@ -1998,24 +2030,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
    * Cobra una cuota. `amount` es el monto aplicado en USD (la deuda siempre es en USD). Si se cobró en soles,
    * `currency: 'PEN'` + `exchangeRate` + `originalAmount` registran el dinero real en la caja de soles.
    */
-  const registerPayment = (planId: string, installmentId: string, rawPayment: any): StockResult => {
-    // El cobro no puede ser NaN, ≤ 0 ni exceder lo adeudado (cuota; en cronogramas variables, el saldo del plan).
+  const registerPayment = (planId: string, installmentId: string, input: RegisterPaymentInput): StockResult => {
     const planNow = plans.find(pl => pl.id === planId);
     const instNow = planNow?.installments.find((i: any) => i.id === installmentId);
     if (!planNow || !instNow) return { ok: false, error: 'No se encontró la cuota.' };
+    const todayISO = new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || input.date > todayISO) return { ok: false, error: 'La fecha de pago es obligatoria y no puede ser futura.' };
+    // Partes (monto, TC, medio, banco, operación, evidencia), comprobante y repeticiones frente a los pagos ya registrados
+    const problems = validatePaymentInput({ parts: input.parts, document: input.document }, payments, 'Pago');
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    // En cronogramas variables (Contado en 2 partes) lo adeudado al cobrar es el saldo del plan
     const owed = instNow.variable ? planNow.balance : instNow.balance;
-    const amountToApply = Math.min(Number(rawPayment.amount) || 0, owed);
-    if (!(amountToApply > 0)) return { ok: false, error: 'La cuota no tiene saldo pendiente o el monto no es válido.' };
-    const paymentData = { ...rawPayment, amount: Math.round(amountToApply * 100) / 100 };
-    const payCurrency: 'PEN' | 'USD' = rawPayment.currency === 'PEN' ? 'PEN' : 'USD';
-    const tc = Number(rawPayment.exchangeRate) || undefined;
-    if (payCurrency === 'PEN' && !tc) return { ok: false, error: 'Indique el tipo de cambio para cobrar en soles.' };
-    // Dinero real recibido en su moneda (si el monto se limitó al saldo, se recalcula con el mismo TC)
-    const requested = Number(rawPayment.amount) || 0;
-    const exactPen = Number(rawPayment.originalAmount);
-    const realAmount = payCurrency === 'PEN'
-      ? (exactPen > 0 && Math.abs(requested - paymentData.amount) < 0.005 ? exactPen : Math.round(paymentData.amount * tc! * 100) / 100)
-      : paymentData.amount;
+    const received = totalUSD(input.parts) ?? 0;
+    if (!(received > 0) || !(owed > 0)) return { ok: false, error: 'La cuota no tiene saldo pendiente o el monto no es válido.' };
+    if (received > owed + 0.01) return { ok: false, error: `El monto equivale a USD ${received.toFixed(2)} y supera el saldo de USD ${owed.toFixed(2)}.` };
+    const paymentData = { date: input.date, amount: Math.round(Math.min(received, owed) * 100) / 100, receipt: documentLabel(input.document) };
 
     setPlans(prevPlans => prevPlans.map(plan => {
       if (plan.id !== planId) return plan;
@@ -2083,50 +2112,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
       };
     }));
 
-    // Add to global payments
+    // Pago global (una parte por medio usado, un comprobante) y un movimiento de caja por parte
     const planRef = plans.find(pl => pl.id === planId);
     const enrollmentRef = enrollments.find(e => e.id === planRef?.mat);
+    const studentName = enrollmentRef?.student || planRef?.titular || 'Alumno';
     const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
-    const newPayment: Payment = {
+    const built = buildPaymentRecord({
       id: paymentId,
-      date: /^\d{4}-\d{2}-\d{2}$/.test(paymentData.date || '') ? formatDisplayDate(paymentData.date) : paymentData.date,
-      student: enrollmentRef?.student || planRef?.titular || 'Alumno',
+      date: formatDisplayDate(paymentData.date),
+      student: studentName,
       concept: `Pago de ${instNow.name}`,
-      amount: paymentData.amount,
-      method: paymentData.method,
-      receipt: paymentData.receipt,
-      status: 'Aprobado',
-      currency: 'USD',
-      enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
-      user: currentUser.name,
-      comment: rawPayment.note || undefined,
-      parts: [{
-        id: `PT-${Date.now()}`,
-        currency: payCurrency,
-        amount: realAmount,
-        exchangeRate: payCurrency === 'PEN' ? tc : undefined,
-        method: paymentData.method || 'Efectivo',
-        operationNumber: rawPayment.operationNumber || undefined,
-        evidence: rawPayment.evidence || undefined,
-        note: rawPayment.note || undefined,
-      }],
-    };
-    setPayments(prev => [newPayment, ...prev]);
-    // El cobro de una cuota ingresa a la caja de la moneda en que se recibió (USD o PEN con su TC).
-    addCashMovement({
-      kind: 'Ingreso',
-      concept: 'Ingreso cuota',
-      reference: `${planId} / ${enrollmentRef?.student || planRef?.titular || ''}`,
-      currency: payCurrency,
-      amount: realAmount,
-      exchangeRate: payCurrency === 'PEN' ? tc : undefined,
       amountUSD: paymentData.amount,
-      method: paymentData.method || 'Efectivo',
-      operationNumber: rawPayment.operationNumber || undefined,
+      parts: input.parts,
+      document: input.document,
+      cashConcept: 'Ingreso cuota',
+      cashReference: `${planId} / ${studentName}`,
       branchId: enrollmentRef?.branchId,
-      paymentId,
       enrollmentIds: enrollmentRef ? [enrollmentRef.id] : undefined,
+      note: input.note?.trim(),
+      user: currentUser.name,
     });
+    setPayments(prev => [built.payment, ...prev]);
+    built.cashMovements.forEach(m => addCashMovement(m));
     return { ok: true };
   };
 
@@ -2256,6 +2263,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     ]);
 
     return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
+  };
+
+  const enableExtension = (enrollmentId: string): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const v = enrollmentValidity(enrollment, programOf(enrollment, programs), schedules, todayLocalISO());
+    if (!canEnableExtension(v)) {
+      return {
+        ok: false,
+        error: v.extensionEnabled
+          ? 'La extensión ya está habilitada.'
+          : v.extensionMonths === 0
+            ? 'El programa no tiene período de extensión.'
+            : 'La extensión se habilita cuando la matrícula está por vencer o ya terminó la duración base.',
+      };
+    }
+    setEnrollments(prev => prev.map(e => (e.id === enrollmentId
+      ? { ...e, extensionEnabledAt: new Date().toISOString(), extensionEnabledBy: currentUser.name }
+      : e)));
+    return { ok: true };
   };
 
   const addTracking = (trackingData: Omit<Tracking, 'id'>): Tracking => {
@@ -2555,6 +2582,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateGuardian,
       deleteGuardian,
       registerEnrollments,
+      enableExtension,
       addTracking, 
       updateTracking,
       registerPayment, 

@@ -7,7 +7,7 @@ import type {
 } from '../src/context/DataContext';
 import {
   buildEnrollmentBatch, emptyDraft, emptyPerson, emptyStudent, getInterviewerOptions, quoteEnrollment,
-  validateContext, validatePayments, validateProgram,
+  validateContext, validatePayments, validateProgram, validateHolders,
   type DraftPerson, type EnrollmentCatalogs, type EnrollmentDraft, type ExistingState,
 } from '../src/utils/enrollment';
 import { generateBreakdown, resolveScheduleMode, sumBreakdown } from '../src/utils/tariffs';
@@ -106,7 +106,14 @@ function draftWith(students: { program: string; level?: string; type: string; du
 }
 const usdPart = (amount: number, method = 'Efectivo', extra: Partial<PaymentPart> = {}): PaymentPart =>
   ({ id: `p${Math.random()}`, currency: 'USD', amount, method, ...extra });
-const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollmentBatch(d, c, s, { now: NOW, userName: 'Tester' });
+/** Completa un comprobante distinto para cada unidad de pago que no tenga (los casos que no hablan de comprobantes). */
+const withDocs = (d: EnrollmentDraft, c = catalogs()) => {
+  quoteEnrollment(d, c).units.forEach((u, i) => {
+    if (!d.paymentDocs[u.key]) d.paymentDocs[u.key] = { type: 'Boleta', serie: 'B001', number: String(100 + i) };
+  });
+  return d;
+};
+const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollmentBatch(withDocs(d, c), c, s, { now: NOW, userName: 'Tester' });
 
 // ---------- Caso 1: 1 alumno Kids, Contado
 {
@@ -138,9 +145,9 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   check('Caso 2: costo asignado 350 + 350', q.students.every(s => s.assignedPrice === 350));
   check('Caso 2: un solo pago grupal de 700', q.units.length === 1 && q.units[0].kind === 'group' && q.units[0].required === 700);
   d.payments[q.units[0].key] = [
-    { id: 'a', currency: 'PEN', amount: 1140, exchangeRate: 3.8, method: 'Yape', operationNumber: '123' }, // 300 USD
+    { id: 'a', currency: 'PEN', amount: 1140, exchangeRate: 3.8, method: 'Yape', operationNumber: '123', evidence: 'yape.png' }, // 300 USD
     usdPart(200, 'Efectivo'),
-    usdPart(200, 'Transferencia', { bank: 'BCP', operationNumber: '999' }),
+    usdPart(200, 'Transferencia', { bank: 'BCP', operationNumber: '999', evidence: 'voucher.png' }),
   ];
   const r = build(d);
   check('Caso 2: se guarda', r.ok, r.error);
@@ -183,12 +190,12 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
 {
   const d = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
   const key = quoteEnrollment(d, catalogs()).units[0].key;
-  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, method: 'Yape', operationNumber: '1' }, usdPart(400)];
+  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, method: 'Yape', operationNumber: '1', evidence: 'yape.png' }, usdPart(400)];
   check('Caso 6: parte en PEN sin TC → rechazada', validatePayments(d, quoteEnrollment(d, catalogs())).some(m => /TC/.test(m)));
-  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, exchangeRate: 3.8, method: 'Yape', operationNumber: '1' }, usdPart(300)];
+  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, exchangeRate: 3.8, method: 'Yape', operationNumber: '1', evidence: 'yape.png' }, usdPart(300)];
   check('Caso 6: 100 + 300 ≠ 500 → rechazado', validatePayments(d, quoteEnrollment(d, catalogs())).some(m => /exactamente/.test(m)));
-  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, exchangeRate: 3.8, method: 'Yape', operationNumber: '1' }, usdPart(400)];
-  check('Caso 6: 100 + 400 = 500 → válido', validatePayments(d, quoteEnrollment(d, catalogs())).length === 0);
+  d.payments[key] = [{ id: 'a', currency: 'PEN', amount: 380, exchangeRate: 3.8, method: 'Yape', operationNumber: '1', evidence: 'yape.png' }, usdPart(400)];
+  check('Caso 6: 100 + 400 = 500 → válido', validatePayments(withDocs(d), quoteEnrollment(d, catalogs())).length === 0);
   d.payments[key] = [{ id: 'a', currency: 'USD', amount: 500, method: 'Transferencia' }];
   check('Caso 6: transferencia sin banco ni operación → rechazada', validatePayments(d, quoteEnrollment(d, catalogs())).length >= 2);
 }
@@ -369,29 +376,31 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const lun9 = base(); lun9.students[0].counselingTime = '09:00';
   check('Lunes–viernes a las 9:00 → rechazado (solo sábado)', probe(lun9).some(m => /no está disponible para esa fecha/.test(m)));
 
-  // Cupo y actividades de la agenda de la sede
+  // Horarios de primera asesoría: VACÍOS, sin cupo, sin actividades encima; el registro comparte su horario
   const sch = (id: string, over: Record<string, unknown> = {}) => ({
     id, student: `Otro ${id}`, studentId: `X${id}`, branchId: 'FIL-AYA', program: 'Kids', level: 'K1', date: '2026-10-14', time: '16:00',
     duration: 60, responsible: 'Ana', status: 'Reservado', ...over,
   }) as any;
-  const sched = (schedules: any[], activities: any[] = [], defaultCapacity: number | null = 2) =>
-    catalogs({ scheduling: { schedules, capacity: { defaultCapacity, byBranch: {}, overrides: [] }, activities } });
+  const sched = (schedules: any[], activities: any[] = []) =>
+    catalogs({ scheduling: { schedules, capacity: { defaultCapacity: 2, byBranch: {}, overrides: [] }, activities } });
   const probeIn = (c: EnrollmentCatalogs, d: EnrollmentDraft) => validateProgram(d, c, quoteEnrollment(d, c));
+  const noSession = (c: EnrollmentCatalogs, d: EnrollmentDraft) => !probeIn(c, d).some(m => /asesoría/.test(m));
 
-  check('Horario con lugar → válido', !probeIn(sched([sch('1')]), base()).some(m => /asesoría/.test(m)));
-  check('Horario completo (2 de 2) → rechazado', probeIn(sched([sch('1'), sch('2')]), base()).some(m => /completo: 2 de 2/.test(m)));
-  check('Una asesoría cancelada no ocupa cupo', !probeIn(sched([sch('1'), sch('2', { status: 'Cancelado' })]), base()).some(m => /asesoría/.test(m)));
-  check('Sin límite → siempre hay lugar', !probeIn(sched([sch('1'), sch('2'), sch('3'), sch('4')], [], null), base()).some(m => /asesoría/.test(m)));
-  check('Cupo de otra sede no cuenta', !probeIn(sched([sch('1', { branchId: 'FIL-PIU' }), sch('2', { branchId: 'FIL-PIU' })]), base()).some(m => /asesoría/.test(m)));
+  check('Horario vacío → válido', noSession(sched([]), base()));
+  check('Horario con una asesoría normal → rechazado (necesita un horario vacío)', probeIn(sched([sch('1')]), base()).some(m => /ya tiene asesorías/.test(m)));
+  check('Horario con asesorías canceladas → vacío, válido', noSession(sched([sch('1', { status: 'Cancelado' })]), base()));
+  check('Una asesoría con falta mantiene el horario ocupado', probeIn(sched([sch('1', { status: 'Faltó' })]), base()).some(m => /ya tiene asesorías/.test(m)));
+  check('Primera asesoría de otro registro → rechazado', probeIn(sched([sch('1', { isFirst: true, registrationId: 'MAT-2026-050' })]), base()).some(m => /otro registro/.test(m)));
+  check('Asesorías de otra sede no cuentan', noSession(sched([sch('1', { branchId: 'FIL-PIU' })]), base()));
   const marathon = { id: 'm:1', monthlyId: 'm', activityId: '1', branchId: 'FIL-AYA', sede: 'Ayacucho', name: 'Maratón', date: '2026-10-14', start: '15:30', end: '17:00', responsible: '', capacity: null, enrolled: [] };
   check('Actividad de la sede encima del horario → rechazado', probeIn(sched([], [marathon]), base()).some(m => /ocupado por la actividad «Maratón»/.test(m)));
-  check('Actividad de otra sede no bloquea', !probeIn(sched([], [{ ...marathon, branchId: 'FIL-PIU' }]), base()).some(m => /asesoría/.test(m)));
-  check('Actividad que termina antes del bloque no bloquea', !probeIn(sched([], [{ ...marathon, start: '14:00', end: '16:00' }]), base()).some(m => /asesoría/.test(m)));
-  const dup = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }, { program: 'KIDS', level: 'K1', type: 'CONT' }]);
-  check('Los alumnos del mismo registro también ocupan cupo (3.º con cupo 2 → rechazado)',
-    probeIn(sched([]), dup).filter(m => /completo/.test(m)).length === 1 && /Alumno 3/.test(probeIn(sched([]), dup).find(m => /completo/.test(m)) ?? ''));
+  check('Actividad de otra sede no bloquea', noSession(sched([], [{ ...marathon, branchId: 'FIL-PIU' }]), base()));
+  check('Actividad que termina antes del bloque no bloquea', noSession(sched([], [{ ...marathon, start: '14:00', end: '16:00' }]), base()));
+  // Un mismo registro: 3 alumnos en el mismo horario, sin cupo (el cupo de las asesorías es 2 y no aplica)
+  const trio = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }, { program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  check('Los alumnos del mismo registro pueden compartir horario, sin cupo', noSession(sched([]), trio));
   const same = base(); same.students[0].person = { ...same.students[0].person, existingId: 'ALU-9' };
-  check('Alumno existente con otra asesoría a la misma hora → rechazado', probeIn(sched([sch('1', { studentId: 'ALU-9' })]), same).some(m => /ya tiene una asesoría/.test(m)));
+  check('Alumno existente con otra asesoría a la misma hora → rechazado', probeIn(sched([sch('1', { studentId: 'ALU-9' })]), same).some(m => /ya tiene/.test(m)));
 
   // Se crea una asesoría real de la agenda por alumno (Reservado, primera asesoría, sede de la matrícula)
   const two = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }]);
@@ -411,8 +420,58 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
     b.batch!.schedules.every(x => x.branchId === 'FIL-AYA') &&
     b.batch!.schedules[0].studentId === b.batch!.newStudents[0].id && b.batch!.schedules[1].studentId === b.batch!.newStudents[1].id &&
     b.batch!.schedules.every(x => x.responsible.length > 0 && x.responsible !== 'Por asignar'));
-  const blocked = build(two, sched([sch('1', { date: '2026-10-12', time: '15:00' }), sch('2', { date: '2026-10-12', time: '15:00' })]), empty);
-  check('Si el horario se llenó, no se guarda nada', !blocked.ok && /completo/.test(blocked.error ?? ''), blocked.error);
+  check('Todos los alumnos del lote comparten el mismo registro (primera matrícula del lote) y su propia matrícula',
+    b.batch!.schedules.every(x => x.registrationId === b.batch!.enrollments[0].id) &&
+    b.batch!.schedules[0].enrollmentId === b.batch!.enrollments[0].id && b.batch!.schedules[1].enrollmentId === b.batch!.enrollments[1].id);
+  const blocked = build(two, sched([sch('1', { date: '2026-10-12', time: '15:00' })]), empty);
+  check('Si el horario ya tiene asesorías, no se guarda nada', !blocked.ok && /ya tiene asesorías/.test(blocked.error ?? ''), blocked.error);
+  const together = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }]);
+  together.students.forEach(st => { st.counselingDate = '2026-10-12'; st.counselingTime = '15:00'; });
+  together.promotion = { promotionId: 'PR1', groups: [['k0', 'k1']] };
+  together.payments[quoteEnrollment(together, cat).units[0].key] = [usdPart(700)];
+  const tg = build(together, cat, empty);
+  check('Dos alumnos del mismo registro en el mismo horario → se guarda', tg.ok && tg.batch!.schedules.length === 2 && tg.batch!.schedules[0].time === tg.batch!.schedules[1].time, tg.error);
+}
+
+// ---------- Comprobante del pago de matrícula
+{
+  const d = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  const key = quoteEnrollment(d, catalogs()).units[0].key;
+  d.payments[key] = [usdPart(500)];
+  check('Sin comprobante → rechazado', validatePayments(d, quoteEnrollment(d, catalogs())).some(m => /comprobante/.test(m)));
+  d.paymentDocs[key] = { type: 'Boleta', serie: 'B001', number: '4567' };
+  check('Con comprobante → válido', validatePayments(d, quoteEnrollment(d, catalogs())).length === 0);
+  const r = build(d);
+  check('El pago guarda el comprobante (no la operación) en `receipt`', r.ok && r.batch!.payments[0].receipt === 'B001-4567' && r.batch!.payments[0].document?.number === '4567', r.error);
+  const used = [{ id: 'PAG-009', date: '', student: '', concept: '', amount: 1, method: 'Efectivo', receipt: 'B001-004567', status: 'Aprobado' }];
+  check('Comprobante ya usado por otro pago → rechazado', validatePayments(d, quoteEnrollment(d, catalogs()), used).some(m => /ya fue usado en el pago PAG-009/.test(m)));
+  d.paymentDocs[key] = { type: 'Factura', serie: 'B001', number: '1' };
+  check('Factura con serie B → rechazada', validatePayments(d, quoteEnrollment(d, catalogs())).some(m => /debe comenzar con «F»/.test(m)));
+  // Dos unidades de pago no pueden compartir el comprobante
+  const two = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }]);
+  const units = quoteEnrollment(two, catalogs()).units;
+  units.forEach(u => { two.payments[u.key] = [usdPart(u.required)]; two.paymentDocs[u.key] = { type: 'Boleta', serie: 'B001', number: '10' }; });
+  check('El mismo comprobante en dos pagos del registro → rechazado', validatePayments(two, quoteEnrollment(two, catalogs())).some(m => /ya se usó en/.test(m)));
+  two.paymentDocs[units[1].key] = { type: 'Boleta', serie: 'B001', number: '11' };
+  check('Comprobantes distintos → válido', validatePayments(two, quoteEnrollment(two, catalogs())).length === 0);
+}
+
+// ---------- Alumnos dependientes: sin teléfono propio
+{
+  const d = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  d.students[0].person.phone = '';
+  const q = quoteEnrollment(d, catalogs());
+  d.payments[q.units[0].key] = [usdPart(500)];
+  const r = build(d);
+  check('Dependiente sin teléfono → se guarda', r.ok, r.error);
+  check('El teléfono del dependiente queda vacío', r.batch!.newStudents[0].phone === '');
+  const d2 = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
+  d2.students[0].person.phone = '987654321';
+  d2.payments[quoteEnrollment(d2, catalogs()).units[0].key] = [usdPart(500)];
+  check('Aunque venga un teléfono, el dependiente no lo guarda', build(d2).batch!.newStudents[0].phone === '');
+  const indep = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }], 'independiente');
+  indep.holders[0] = { ...holder(5), phone: '' };
+  check('Independiente: el teléfono sigue siendo obligatorio (paso Titulares)', validateHolders(indep, catalogs(), TODAY).some(m => /teléfono/.test(m)));
 }
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

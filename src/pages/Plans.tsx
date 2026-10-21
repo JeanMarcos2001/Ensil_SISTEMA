@@ -7,9 +7,10 @@ import { ActionMenu } from '../components/ui/ActionMenu';
 import { Search, Filter, Download, FileText, AlertTriangle, Calendar, DollarSign, History, ArrowRight } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData } from '../context/DataContext';
+import { RegisterPaymentModal } from '../components/payments/RegisterPaymentModal';
 
 export function Plans() {
-  const { plans, registerPayment, refinanceInstallment } = useData();
+  const { plans, refinanceInstallment } = useData();
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [selectedInstallment, setSelectedInstallment] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,13 +41,6 @@ export function Plans() {
   }, [searchTerm]);
 
   // Form States
-  const [paymentForm, setPaymentForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    amount: 0,
-    method: '',
-    receipt: ''
-  });
-
   const [refinanceForm, setRefinanceForm] = useState({
     name: '',
     amount: 0,
@@ -66,10 +60,6 @@ export function Plans() {
 
   const handleOpenPayment = (installment: any) => {
     setSelectedInstallment(installment);
-    setPaymentForm({
-      ...paymentForm,
-      amount: installment.balance
-    });
     setIsPaymentOpen(true);
   };
 
@@ -80,14 +70,6 @@ export function Plans() {
       amount: installment.balance
     });
     setIsRefinanceOpen(true);
-  };
-
-  const handleRegisterPayment = () => {
-    if (selectedPlan && selectedInstallment) {
-      registerPayment(selectedPlan.id, selectedInstallment.id, paymentForm);
-      setIsPaymentOpen(false);
-      setIsPlanDetailOpen(false); // Close to refresh or we can update local state, but context update will re-render
-    }
   };
 
   const handleRefinance = () => {
@@ -403,81 +385,14 @@ export function Plans() {
         )}
       </Modal>
 
-      {/* Modal: Registrar Pago (Completo o Parcial) */}
-      <Modal
+      {/* Modal: Registrar Pago (el mismo formulario que en Pagos y que en la matrícula) */}
+      <RegisterPaymentModal
         isOpen={isPaymentOpen}
         onClose={() => setIsPaymentOpen(false)}
-        title="Registrar Pago de Cuota"
-        size="md"
-        footer={
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setIsPaymentOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleRegisterPayment}>Guardar y aplicar</Button>
-          </div>
-        }
-      >
-        {selectedInstallment && (
-          <div className="space-y-4">
-            <div className="bg-surface-muted border border-border-soft rounded-xl p-4 mb-2">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-text-secondary">Cuota destino</span>
-                <span className="text-sm font-medium text-text-primary">{selectedInstallment.name}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-text-secondary">Saldo pendiente</span>
-                <span className="text-lg font-bold text-danger-text">$ {selectedInstallment.balance.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">Fecha de pago *</label>
-                <input type="date" value={paymentForm.date} onChange={e => setPaymentForm({...paymentForm, date: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">Moneda *</label>
-                <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
-                  <option value="PEN">PEN (Soles)</option>
-                  <option value="USD">USD (Dólares)</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-text-secondary">Monto a pagar *</label>
-              <input type="number" value={paymentForm.amount} onChange={e => setPaymentForm({...paymentForm, amount: parseFloat(e.target.value)})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder={selectedInstallment.balance.toFixed(2)} />
-              <p className="text-xs text-text-muted">Si el monto es menor al saldo, se registrará como pago parcial.</p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-text-secondary">Medio de pago *</label>
-              <select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
-                <option value="">Seleccionar medio</option>
-                <option value="transferencia">Transferencia</option>
-                <option value="yape">Yape / Plin</option>
-                <option value="efectivo">Efectivo</option>
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">Tipo Comprobante *</label>
-                <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none">
-                  <option value="boleta">Boleta</option>
-                  <option value="factura">Factura</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">N° Comprobante *</label>
-                <input type="text" value={paymentForm.receipt} onChange={e => setPaymentForm({...paymentForm, receipt: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="B001-000123" />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-text-secondary">Foto / Evidencia *</label>
-              <div className="w-full h-24 border-2 border-dashed border-border-soft rounded-xl flex items-center justify-center text-sm text-text-muted hover:bg-surface-muted transition-colors cursor-pointer">
-                Click para subir voucher
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+        onSaved={() => setIsPlanDetailOpen(false)}
+        initialPlanId={selectedPlan?.id}
+        initialInstallmentId={selectedInstallment?.id}
+      />
 
       {/* Modal: Refinanciación / Nueva versión de plan */}
       <Modal

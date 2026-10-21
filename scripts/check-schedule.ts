@@ -7,6 +7,7 @@ import type { CapacityConfig, Enrollment, MonthlySchedule, Schedule, Student } f
 import {
   ACTIVE_STATUSES,
   SLOT_DURATION,
+  MIN_NOTICE_HOURS,
   addDaysISO,
   affectedSchedules,
   allActivities,
@@ -15,16 +16,24 @@ import {
   blockText,
   blockingActivity,
   branchOfStudent,
+  canChangeWithNotice,
   capacityFor,
+  changeBlockedByNotice,
   checkBlock,
+  checkFirstSessionBlock,
   endTime,
   findScheduleConflict,
+  firstBlockText,
+  firstSessionBlock,
   groupByBlock,
+  hoursUntil,
   isValidCapacity,
   monthGrid,
   monthTitle,
   nextOpenDay,
+  noticeMessage,
   occupancy,
+  OCCUPYING_STATUSES,
   rangeLabel,
   removeOverride,
   seatsLeft,
@@ -88,16 +97,26 @@ check('Ya no existe el estado Confirmado', !ACTIVE_STATUSES.includes('Confirmado
 check('Faltó y Cancelado liberan el horario', !ACTIVE_STATUSES.includes('Faltó') && !ACTIVE_STATUSES.includes('Cancelado'));
 check('Tonos de estado', statusTone('Asistió') === 'success' && statusTone('Reprogramado') === 'warning' && statusTone('Faltó') === 'danger' && statusTone('Reservado') === 'info');
 
-// ---------------------------------------------------------------- Acciones según estado y fecha
+// ---------------------------------------------------------------- Acciones según estado y fecha (+ regla de 24 horas)
 const hoy = '2026-10-16';
-const acts = (status: string, date: string) => availableActions({ status, date }, hoy).join();
-check('Reserva futura: solo reprogramar y cancelar', acts('Reservado', '2026-10-20') === 'reprogramar,cancelar');
+const ahora = new Date(2026, 9, 16, 10, 0); // viernes 16-oct-2026, 10:00
+const acts = (status: string, date: string, time = '16:00') => availableActions({ status, date, time }, hoy, ahora).join();
+check('Reserva futura (más de 24 h): reprogramar y cancelar', acts('Reservado', '2026-10-20') === 'reprogramar,cancelar');
 check('Reprogramada futura: igual que una reserva', acts('Reprogramado', '2026-10-20') === 'reprogramar,cancelar');
-check('Reserva de hoy: puede marcarse asistencia, sesión o falta', acts('Reservado', hoy) === 'reprogramar,asistio,sesion,falta,cancelar');
-check('Reserva vencida sin marcar: igual que la de hoy', acts('Reservado', '2026-10-10') === 'reprogramar,asistio,sesion,falta,cancelar');
-check('Con asistencia: solo registrar/ver sesión (no se reprograma ni se cancela)', acts('Asistió', '2026-10-14') === 'sesion');
-check('Faltó o cancelada: solo reprogramar', acts('Faltó', '2026-10-14') === 'reprogramar' && acts('Cancelado', '2026-10-20') === 'reprogramar');
-check('No se puede registrar sesión antes de la asesoría', !availableActions({ status: 'Reservado', date: '2026-10-20' }, hoy).includes('sesion'));
+check('Mañana a las 15:00 (29 h) → todavía se puede cambiar', acts('Reservado', '2026-10-17', '15:00') === 'reprogramar,cancelar');
+check('Mañana a las 9:00 (23 h) → ya no se puede cambiar', acts('Reservado', '2026-10-17', '09:00') === '');
+check('Justo 24 h antes (mañana a las 10:00) → se puede', acts('Reservado', '2026-10-17', '10:00') === 'reprogramar,cancelar');
+check('Reserva de hoy: solo asistencia, sesión o falta (sin cambios)', acts('Reservado', hoy) === 'asistio,sesion,falta');
+check('Reserva vencida sin marcar: igual que la de hoy (primero se marca la falta)', acts('Reservado', '2026-10-10') === 'asistio,sesion,falta');
+check('Con asistencia: solo registrar/ver sesión', acts('Asistió', '2026-10-14') === 'sesion');
+check('Faltó o cancelada: se puede reprogramar a una fecha nueva (sin la regla de 24 h)', acts('Faltó', '2026-10-14') === 'reprogramar' && acts('Cancelado', '2026-10-20') === 'reprogramar' && acts('Cancelado', '2026-10-17', '09:00') === 'reprogramar');
+check('No se puede registrar sesión antes de la asesoría', !availableActions({ status: 'Reservado', date: '2026-10-20', time: '16:00' }, hoy, ahora).includes('sesion'));
+check('Horas hasta una sesión', hoursUntil('2026-10-17', '10:00', ahora) === 24 && hoursUntil('2026-10-16', '09:00', ahora) === -1);
+check('Regla de 24 horas', MIN_NOTICE_HOURS === 24 && canChangeWithNotice('2026-10-17', '10:00', ahora) && !canChangeWithNotice('2026-10-17', '09:59', ahora));
+check('Se avisa con el motivo y la fecha', /24 horas de anticipación \(es el 17 de octubre a las 9:00 a\. m\.\)/.test(noticeMessage('2026-10-17', '09:00')));
+check('Sesión activa a menos de 24 h queda bloqueada para cambios; una con asistencia o cancelada no cuenta',
+  changeBlockedByNotice({ status: 'Reservado', date: '2026-10-17', time: '09:00' }, ahora) && !changeBlockedByNotice({ status: 'Reservado', date: '2026-10-20', time: '16:00' }, ahora) &&
+  !changeBlockedByNotice({ status: 'Asistió', date: hoy, time: '09:00' }, ahora) && !changeBlockedByNotice({ status: 'Cancelado', date: hoy, time: '09:00' }, ahora));
 
 // ---------------------------------------------------------------- Conflictos del alumno
 const base: Schedule = {
@@ -153,8 +172,9 @@ const mk = (id: string, over: Partial<Schedule> = {}): Schedule => ({
   duration: 60, responsible: 'María Torres', status: 'Reservado', branchId: 'FIL-PIU', ...over,
 });
 const five = ['1', '2', '3', '4', '5'].map(i => mk(i));
-check('Ocupación: cuenta solo asesorías activas de esa sede y horario',
-  occupancy([...five, mk('6', { status: 'Cancelado' }), mk('7', { status: 'Faltó' }), mk('8', { branchId: 'FIL-CHI' }), mk('9', { time: '17:00' })], 'FIL-PIU', '2026-10-20', '16:00') === 5);
+check('Ocupación: cuenta activas y faltas (el horario ya pasó); Cancelado libera; otra sede u horario no cuenta',
+  occupancy([...five, mk('6', { status: 'Cancelado' }), mk('7', { status: 'Faltó' }), mk('8', { branchId: 'FIL-CHI' }), mk('9', { time: '17:00' })], 'FIL-PIU', '2026-10-20', '16:00') === 6);
+check('Faltó ocupa el horario; Cancelado no; Faltó no cuenta como asistencia', OCCUPYING_STATUSES.includes('Faltó') && !OCCUPYING_STATUSES.includes('Cancelado') && !ACTIVE_STATUSES.includes('Faltó'));
 check('Ocupación: ignora la asesoría que se edita', occupancy(five, 'FIL-PIU', '2026-10-20', '16:00', '1') === 4);
 
 const ctx = (schedules: Schedule[], capacity: CapacityConfig = cfg, monthly: MonthlySchedule[] = []) => ({ schedules, capacity, activities: allActivities(monthly) });
@@ -238,6 +258,50 @@ check('Sábado: 12:00 y 16:00 no son consecutivas (la tarde empieza una selecci�
 check('Una hora que no existe ese día se ignora (9:00 en lunes)', toggleActivitySlot(martes, ['16:00'], '09:00').join() === '16:00');
 check('Rango de las horas elegidas', JSON.stringify(slotsToRange(['17:00', '15:00', '16:00'])) === JSON.stringify({ horaInicio: '15:00', horaFin: '18:00' }) && slotsToRange([]) === null);
 check('Rango → horas (ida y vuelta)', rangeToSlots(martes, '16:00', '18:00').join() === '16:00,17:00' && rangeToSlots(martes, '15:30', '17:00').length === 0 && rangeToSlots(sab14, '12:00', '14:00').length === 0);
+
+// ---------------------------------------------------------------- Tipos de sesión: primera asesoría, asesoría y actividad no se mezclan
+const first = (id: string, reg: string, over: Partial<Schedule> = {}) => mk(id, { isFirst: true, registrationId: reg, enrollmentId: `MAT-${id}`, ...over });
+const f1 = [first('11', 'REG-A'), first('12', 'REG-A')];
+const FB = (schedules: Schedule[], reg?: string, time = '16:00', branch = 'FIL-PIU', date = '2026-10-20', list: MonthlySchedule[] = []) =>
+  firstSessionBlock(ctx(schedules, cfg, list), branch, date, time, reg);
+check('Horario vacío → libre para primera asesoría', FB([]).kind === 'free' && firstBlockText(FB([])) === 'Libre' && checkFirstSessionBlock(ctx([]), 'FIL-PIU', '2026-10-20', '16:00') === null);
+check('Horario con asesorías → ocupado (la primera necesita un horario vacío)', FB(five).kind === 'taken' && FB(five).takenBy === 'asesorias' && /ya tiene asesorías/.test(checkFirstSessionBlock(ctx(five), 'FIL-PIU', '2026-10-20', '16:00') ?? ''));
+check('Una sola asesoría normal ya lo ocupa', FB([mk('1')]).kind === 'taken');
+check('Primeras asesorías de otro registro → ocupado', FB(f1, 'REG-B').kind === 'taken' && FB(f1, 'REG-B').takenBy === 'otro-registro' && /otro registro/.test(checkFirstSessionBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00', 'REG-B') ?? ''));
+check('Con un registro nuevo (asistente), las primeras ya registradas no se comparten', FB(f1).kind === 'taken');
+check('Los alumnos del mismo registro comparten el horario', FB(f1, 'REG-A').kind === 'own' && firstBlockText(FB(f1, 'REG-A')) === 'Con alumnos de este registro' && checkFirstSessionBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00', 'REG-A') === null);
+check('Un horario mixto (primera + asesoría normal) no es «propio»', FB([...f1, mk('1')], 'REG-A').kind === 'taken');
+check('La primera asesoría no tiene cupo: 10 alumnos del mismo registro caben', FB(Array.from({ length: 10 }, (_, i) => first(`2${i}`, 'REG-A')), 'REG-A').kind === 'own');
+check('Cancelar libera el horario de primera asesoría', FB([first('11', 'REG-A', { status: 'Cancelado' })], 'REG-B').kind === 'free');
+check('Faltó NO lo libera (el horario ya pasó)', FB([first('11', 'REG-A', { status: 'Faltó' })], 'REG-B').kind === 'taken');
+check('Es por sede: otra sede lo tiene libre', FB(f1, 'REG-B', '16:00', 'FIL-CHI').kind === 'free');
+check('Es por fecha y horario', FB(f1, 'REG-B', '17:00').kind === 'free' && FB(f1, 'REG-B', '16:00', 'FIL-PIU', '2026-10-21').kind === 'free');
+check('Al reprogramar, su propia asesoría no cuenta', firstSessionBlock(ctx([first('11', 'REG-A')]), 'FIL-PIU', '2026-10-20', '16:00', 'REG-A', '11').kind === 'free');
+check('Fuera de la agenda → no disponible', FB([], undefined, '09:00').kind === 'closed' && FB([], undefined, '16:00', 'FIL-PIU', '2026-10-18').kind === 'closed');
+check('Con una actividad encima → bloqueado',
+  FB([], undefined, '16:00', 'FIL-PIU', '2026-11-10', monthly).kind === 'blocked' &&
+  /Maratón/.test(checkFirstSessionBlock(ctx([], cfg, monthly), 'FIL-PIU', '2026-11-10', '17:00') ?? ''));
+
+// Para una asesoría normal, el horario con primeras asesorías está cerrado (y no cuenta cupo)
+check('Horario de primera asesoría → cerrado para asesorías normales',
+  blockState(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00').kind === 'first' && blockText(blockState(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00')) === 'Reservado para primera asesoría');
+check('La asesoría normal se rechaza ahí con el motivo', /reservado para primeras asesorías/.test(checkBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00') ?? ''));
+check('Una primera asesoría cancelada devuelve el horario a las asesorías normales', checkBlock(ctx([first('11', 'REG-A', { status: 'Cancelado' })]), 'FIL-PIU', '2026-10-20', '16:00') === null);
+check('Una primera con falta mantiene el horario cerrado', blockState(ctx([first('11', 'REG-A', { status: 'Faltó' })]), 'FIL-PIU', '2026-10-20', '16:00').kind === 'first');
+check('Otra sede no se ve afectada', checkBlock(ctx(f1), 'FIL-CHI', '2026-10-20', '16:00') === null);
+check('Una actividad gana sobre cualquier otro tipo', blockState(ctx(f1, cfg, monthly), 'FIL-PIU', '2026-11-10', '16:00').kind === 'blocked');
+
+// Reprogramar una primera asesoría: mismo horario del registro o uno vacío; nunca uno con asesorías
+const vr = (over: Record<string, unknown>, schedules: Schedule[]) =>
+  validateReservation(
+    ctx(schedules),
+    { student: 'Alumno 11', studentId: 'ALU-11', responsible: 'María Torres', date: '2026-10-20', time: '16:00', status: 'Reprogramado', branchId: 'FIL-PIU', checkPast: true, isFirst: true, registrationId: 'REG-A', ...over },
+    '2026-10-16', '11'
+  );
+check('Primera asesoría → horario vacío → permitido', vr({ time: '17:00' }, f1) === null);
+check('Primera asesoría → horario con hermanos del registro → permitido', vr({ time: '16:00' }, [first('13', 'REG-A', { studentId: 'ALU-13', student: 'Hermano' })]) === null);
+check('Primera asesoría → horario con asesorías → rechazado', /necesita un horario vacío/.test(vr({ time: '16:00' }, [mk('1')]) ?? ''));
+check('Primera asesoría → horario de otro registro → rechazado', /otro registro/.test(vr({ time: '16:00' }, [first('30', 'REG-B')]) ?? ''));
 
 // ---------------------------------------------------------------- Inscripción en actividades
 const act = acti[0];

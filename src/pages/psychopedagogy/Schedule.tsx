@@ -6,12 +6,14 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useData, type Schedule as ScheduleItem } from '../../context/DataContext';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { isStudentWorkable } from '../../utils/validity';
 import {
   MONTHS,
   STATUS_OPTIONS,
   addDaysISO,
   allActivities,
   availableActions,
+  changeBlockedByNotice,
   endTime,
   longDayLabel,
   nextOpenDay,
@@ -30,7 +32,7 @@ import { ActivityEnrollModal } from './ActivityEnrollModal';
 import { nativeFieldCls } from './formStyles';
 
 export function Schedule() {
-  const { schedules, updateSchedule, branches, trackings, students, enrollments, monthlySchedules, capacityConfig } = useData();
+  const { schedules, updateSchedule, branches, trackings, students, enrollments, programs, monthlySchedules, capacityConfig } = useData();
   const today = todayLocalISO();
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list');
   const [searchTerm, setSearchTerm] = useState('');
@@ -81,8 +83,12 @@ export function Schedule() {
   // Cada alumno debe asistir al menos una vez por semana (lunes a sábado)
   const week = useMemo(() => weekOf(nextOpenDay(today)).slice(0, 6), [today]);
   const withoutSession = useMemo(
-    () => studentsWithoutSession({ students, schedules, enrollments }, week, branchFilter || undefined),
-    [students, schedules, enrollments, week, branchFilter]
+    // Solo alumnos con matrícula vigente: al terminar la duración base sin extensión dejan de aparecer
+    () => studentsWithoutSession(
+      { students: students.filter(s => isStudentWorkable(s, { enrollments, programs, schedules }, today)), schedules, enrollments },
+      week, branchFilter || undefined
+    ),
+    [students, schedules, enrollments, programs, week, branchFilter, today]
   );
 
   useEffect(() => {
@@ -111,12 +117,23 @@ export function Schedule() {
     else if (action === 'cancelar') setToCancel(s);
   };
 
-  const rowActions = (s: ScheduleItem) =>
-    availableActions(s, today).map(a => ({
+  const rowActions = (s: ScheduleItem) => {
+    const now = new Date();
+    const items = availableActions(s, today, now).map(a => ({
       label: a === 'sesion' && trackings.some(t => t.scheduleId === s.id) ? 'Ver sesión' : ACTION_LABEL[a],
       onClick: () => runAction(a, s),
       danger: a === 'falta' || a === 'cancelar',
+      disabled: false,
     }));
+    // Regla de 24 horas: se muestran, pero no se pueden usar
+    if (changeBlockedByNotice(s, now)) {
+      items.push(
+        { label: 'Reprogramar (requiere 24 h de anticipación)', onClick: () => {}, danger: false, disabled: true },
+        { label: 'Cancelar (requiere 24 h de anticipación)', onClick: () => {}, danger: true, disabled: true },
+      );
+    }
+    return items;
+  };
 
   // Navegación del calendario (mes o semana según la vista)
   const navigateCalendar = (dir: -1 | 0 | 1) => {

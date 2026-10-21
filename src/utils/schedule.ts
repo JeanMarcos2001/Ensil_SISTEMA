@@ -75,6 +75,12 @@ export const endTime = (time: string, duration: number): string => {
  */
 export const ACTIVE_STATUSES = ['Reservado', 'Reprogramado', 'Asistió'];
 
+/**
+ * Estados que ocupan el horario (cupo y tipo de bloque): los activos y Faltó. Una falta se marca el día de la asesoría
+ * o después, así que su horario ya pasó y queda ocupado como registro. Solo Cancelado libera el horario.
+ */
+export const OCCUPYING_STATUSES = [...ACTIVE_STATUSES, 'Faltó'];
+
 /** Todas las asesorías duran exactamente 1 hora. */
 export const SLOT_DURATION = 60;
 
@@ -131,22 +137,46 @@ export const statusTone = (status: string): StatusTone => {
 
 export type ScheduleAction = 'reprogramar' | 'asistio' | 'sesion' | 'falta' | 'cancelar';
 
+/** Anticipación mínima (en horas) para cancelar o reprogramar una sesión: rige para primeras asesorías, asesorías y actividades. */
+export const MIN_NOTICE_HOURS = 24;
+
+/** Horas que faltan para una fecha y hora de inicio (negativo si ya pasó). */
+export function hoursUntil(date: string, time: string, now: Date): number {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  return (new Date(y, m - 1, d, hh || 0, mm || 0).getTime() - now.getTime()) / 3600000;
+}
+
+/** ¿Se puede cancelar / reprogramar con la anticipación mínima? */
+export const canChangeWithNotice = (date: string, time: string, now: Date) => hoursUntil(date, time, now) >= MIN_NOTICE_HOURS;
+
+/** «Solo se puede cancelar o reprogramar con 24 horas de anticipación (es el 21 de octubre a las 4:00 p. m.).» */
+export function noticeMessage(date: string, time: string): string {
+  return `Solo se puede cancelar o reprogramar con ${MIN_NOTICE_HOURS} horas de anticipación (es el ${longDayLabel(date)} a las ${to12h(time)}).`;
+}
+
+/** Sesión activa que ya no admite cambios por quedar a menos de 24 horas (o haber pasado). */
+export const changeBlockedByNotice = (s: Pick<Schedule, 'status' | 'date' | 'time'>, now: Date) =>
+  ACTIVE_STATUSES.includes(s.status) && s.status !== 'Asistió' && !canChangeWithNotice(s.date, s.time, now);
+
 /**
- * Qué se puede hacer con una asesoría según su estado y fecha:
- *  - Reprogramar: mientras no haya ocurrido (o si el alumno faltó / se canceló, para darle otra fecha).
+ * Qué se puede hacer con una asesoría según su estado, su fecha y la hora actual:
+ *  - Reprogramar y Cancelar: solo con 24 horas de anticipación (ver MIN_NOTICE_HOURS). Si el alumno faltó o la asesoría
+ *    se canceló, se puede reprogramar a una fecha nueva (su horario original ya pasó).
  *  - Asistió y Registrar sesión: desde el día de la asesoría (la sesión solo existe si hubo asesoría).
- *  - Faltó: desde el día de la asesoría. Cancelar: mientras esté activa y no haya asistido.
+ *  - Faltó: desde el día de la asesoría.
  */
-export function availableActions(s: Pick<Schedule, 'status' | 'date'>, today: string): ScheduleAction[] {
+export function availableActions(s: Pick<Schedule, 'status' | 'date' | 'time'>, today: string, now: Date = new Date()): ScheduleAction[] {
   const active = ACTIVE_STATUSES.includes(s.status);
   const attended = s.status === 'Asistió';
   const due = s.date <= today;
+  const withNotice = canChangeWithNotice(s.date, s.time, now);
   const out: ScheduleAction[] = [];
-  if (!attended) out.push('reprogramar');
+  if ((active && !attended && withNotice) || !active) out.push('reprogramar');
   if (active && !attended && due) out.push('asistio');
   if (active && due) out.push('sesion');
   if (active && !attended && due) out.push('falta');
-  if (active && !attended) out.push('cancelar');
+  if (active && !attended && withNotice) out.push('cancelar');
   return out;
 }
 
@@ -237,7 +267,7 @@ export const isValidCapacity = (c: number | null) => c === null || (Number.isInt
 /** Alumnos que ocupan un horario de una sede (asesorías activas). */
 export function occupancy(schedules: Schedule[], branchId: string, date: string, time: string, ignoreId?: string): number {
   return schedules.filter(s =>
-    s.id !== ignoreId && s.branchId === branchId && s.date === date && s.time === time && ACTIVE_STATUSES.includes(s.status)
+    s.id !== ignoreId && s.branchId === branchId && s.date === date && s.time === time && OCCUPYING_STATUSES.includes(s.status)
   ).length;
 }
 
@@ -400,7 +430,11 @@ export interface SchedulingContext {
   activities: FlatActivity[];
 }
 
-export type BlockKind = 'closed' | 'blocked' | 'full' | 'open';
+/**
+ * Un horario es de UN solo tipo de sesión: actividad especial (blocked), primera asesoría (first) o asesoría (open / full).
+ * Nunca se mezclan.
+ */
+export type BlockKind = 'closed' | 'blocked' | 'first' | 'full' | 'open';
 
 export interface BlockState {
   kind: BlockKind;
@@ -410,12 +444,17 @@ export interface BlockState {
   activity?: FlatActivity;
 }
 
+const inBlock = (schedules: Schedule[], branchId: string, date: string, time: string, ignoreId?: string) =>
+  schedules.filter(s => s.id !== ignoreId && s.branchId === branchId && s.date === date && s.time === time && OCCUPYING_STATUSES.includes(s.status));
+
 export function blockState(ctx: SchedulingContext, branchId: string, date: string, time: string, ignoreId?: string): BlockState {
   if (!slotsForDate(date).includes(time)) return { kind: 'closed', used: 0, capacity: null };
   const used = occupancy(ctx.schedules, branchId, date, time, ignoreId);
   const capacity = capacityFor(ctx.capacity, branchId, date, time);
   const activity = blockingActivity(ctx.activities, branchId, date, time);
   if (activity) return { kind: 'blocked', used, capacity, activity };
+  // Un horario con primeras asesorías es solo de primeras asesorías (y no tiene cupo)
+  if (inBlock(ctx.schedules, branchId, date, time, ignoreId).some(s => s.isFirst)) return { kind: 'first', used, capacity: null };
   if (capacity !== null && used >= capacity) return { kind: 'full', used, capacity };
   return { kind: 'open', used, capacity };
 }
@@ -424,6 +463,7 @@ export function blockState(ctx: SchedulingContext, branchId: string, date: strin
 export function blockText(b: BlockState): string {
   if (b.kind === 'closed') return 'No disponible';
   if (b.kind === 'blocked') return `Bloqueado: ${b.activity!.name}`;
+  if (b.kind === 'first') return 'Reservado para primera asesoría';
   if (b.kind === 'full') return `Completo (${b.used} de ${b.capacity})`;
   return b.capacity === null ? `${b.used} ${b.used === 1 ? 'alumno' : 'alumnos'} · sin límite` : `${b.used} de ${b.capacity} ${b.capacity === 1 ? 'cupo' : 'cupos'}`;
 }
@@ -433,14 +473,72 @@ export function checkBlock(ctx: SchedulingContext, branchId: string, date: strin
   const b = blockState(ctx, branchId, date, time, ignoreId);
   if (b.kind === 'closed') return 'El horario elegido no está disponible para esa fecha.';
   if (b.kind === 'blocked') return `Ese horario está ocupado por la actividad «${b.activity!.name}» (${rangeLabel(b.activity!.start, b.activity!.end)}).`;
+  if (b.kind === 'first') return 'Ese horario está reservado para primeras asesorías; no admite asesorías normales.';
   if (b.kind === 'full') return `El horario está completo: ${b.used} de ${b.capacity} cupos. Elija otro horario o amplíe el cupo.`;
+  return null;
+}
+
+// ---------------------------------------------------------------- Horarios de primera asesoría
+
+/**
+ * Estado de un horario para una PRIMERA asesoría:
+ *  - free: totalmente vacío (la única forma de elegirlo por primera vez).
+ *  - own: ya tiene primeras asesorías del mismo registro de matrícula (hermanos), que pueden compartirlo.
+ *  - taken: tiene asesorías normales o primeras asesorías de otro registro.
+ *  - blocked: una actividad especial lo ocupa. closed: fuera de la agenda.
+ * La primera asesoría no tiene cupo.
+ */
+export type FirstBlockKind = 'closed' | 'blocked' | 'taken' | 'own' | 'free';
+
+export interface FirstBlockState {
+  kind: FirstBlockKind;
+  used: number;
+  activity?: FlatActivity;
+  /** Para `taken`: qué lo ocupa. */
+  takenBy?: 'asesorias' | 'otro-registro';
+}
+
+export function firstSessionBlock(
+  ctx: SchedulingContext, branchId: string, date: string, time: string, registrationId?: string, ignoreId?: string
+): FirstBlockState {
+  if (!slotsForDate(date).includes(time)) return { kind: 'closed', used: 0 };
+  const activity = blockingActivity(ctx.activities, branchId, date, time);
+  const here = inBlock(ctx.schedules, branchId, date, time, ignoreId);
+  if (activity) return { kind: 'blocked', used: here.length, activity };
+  if (here.length === 0) return { kind: 'free', used: 0 };
+  if (registrationId && here.every(s => s.isFirst && s.registrationId === registrationId)) return { kind: 'own', used: here.length };
+  return { kind: 'taken', used: here.length, takenBy: here.some(s => !s.isFirst) ? 'asesorias' : 'otro-registro' };
+}
+
+export function firstBlockText(b: FirstBlockState): string {
+  switch (b.kind) {
+    case 'free': return 'Libre';
+    case 'own': return 'Con alumnos de este registro';
+    case 'blocked': return `Bloqueado: ${b.activity!.name}`;
+    case 'taken': return b.takenBy === 'otro-registro' ? 'Primera asesoría de otro registro' : 'Ocupado por asesorías';
+    default: return 'No disponible';
+  }
+}
+
+/** Mensaje de error si el horario no puede ser de primera asesoría; null si está libre o es del mismo registro. */
+export function checkFirstSessionBlock(
+  ctx: SchedulingContext, branchId: string, date: string, time: string, registrationId?: string, ignoreId?: string
+): string | null {
+  const b = firstSessionBlock(ctx, branchId, date, time, registrationId, ignoreId);
+  if (b.kind === 'closed') return 'El horario elegido no está disponible para esa fecha.';
+  if (b.kind === 'blocked') return `Ese horario está ocupado por la actividad «${b.activity!.name}» (${rangeLabel(b.activity!.start, b.activity!.end)}).`;
+  if (b.kind === 'taken') {
+    return b.takenBy === 'otro-registro'
+      ? 'Ese horario ya es de la primera asesoría de otro registro. Elija un horario libre.'
+      : 'Ese horario ya tiene asesorías. La primera asesoría necesita un horario vacío.';
+  }
   return null;
 }
 
 /** Reserva completa: datos válidos, horario con cupo y sin cruce del alumno. */
 export function validateReservation(
   ctx: SchedulingContext,
-  cand: ScheduleCandidate & { branchId: string; checkPast: boolean },
+  cand: ScheduleCandidate & { branchId: string; checkPast: boolean; isFirst?: boolean; registrationId?: string },
   today: string,
   ignoreId?: string
 ): string | null {
@@ -449,7 +547,9 @@ export function validateReservation(
   if (!cand.branchId) return 'El alumno no tiene una sede asignada (no se encontró su matrícula).';
   const clash = findScheduleConflict(ctx.schedules, cand, ignoreId);
   if (clash) return `${clash.schedule.student} ya tiene una asesoría ese día de ${slotLabel(clash.schedule.time)}.`;
-  return checkBlock(ctx, cand.branchId, cand.date, cand.time, ignoreId);
+  return cand.isFirst
+    ? checkFirstSessionBlock(ctx, cand.branchId, cand.date, cand.time, cand.registrationId, ignoreId)
+    : checkBlock(ctx, cand.branchId, cand.date, cand.time, ignoreId);
 }
 
 /** Responsable que ya atiende ese horario (el más frecuente), para proponerlo al reservar. */

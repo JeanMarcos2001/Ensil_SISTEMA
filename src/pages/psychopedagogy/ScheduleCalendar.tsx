@@ -44,12 +44,16 @@ interface Block {
   /** null = sin límite o sin sede elegida. */
   capacity: number | null;
   full: boolean;
+  /** Horario de primera asesoría (sin cupo; no se mezcla con asesorías). */
+  first: boolean;
   names: string[];
 }
 
 const ACTIVITY_CHIP = 'bg-active-tint text-primary-accent border-primary-accent/30';
 const OPEN_CHIP = 'bg-info-tint text-info-text border-info-text/30';
 const FULL_CHIP = 'bg-warning-tint text-warning-text border-warning-text/30';
+const FIRST_CHIP = 'bg-success-tint text-success-text border-success-text/30';
+const chipOf = (b: { first: boolean; full: boolean }) => (b.first ? FIRST_CHIP : b.full ? FULL_CHIP : OPEN_CHIP);
 
 export function ScheduleCalendar({
   schedules, activities, capacity, branchId, mode, onModeChange, cursor, onNavigate, today, onCreate, onShowDay, onShowActivity,
@@ -62,8 +66,9 @@ export function ScheduleCalendar({
   /** Horarios del día con alumnos (solo asesorías que ocupan horario), con su cupo si hay una sede elegida. */
   const blocksOf = (date: string): Block[] =>
     groupByBlock(schedules.filter(s => s.date === date && ACTIVE_STATUSES.includes(s.status))).map(g => {
-      const cap = branchId ? capacityFor(capacity, branchId, date, g.time) : null;
-      return { time: g.time, count: g.items.length, capacity: cap, full: cap !== null && g.items.length >= cap, names: g.items.map(i => i.student) };
+      const first = g.items.some(i => i.isFirst);
+      const cap = branchId && !first ? capacityFor(capacity, branchId, date, g.time) : null;
+      return { time: g.time, count: g.items.length, capacity: cap, full: cap !== null && g.items.length >= cap, first, names: g.items.map(i => i.student) };
     });
 
   const blockText = (b: Block) => (b.capacity === null ? `${b.count}` : `${b.count}/${b.capacity}`);
@@ -99,9 +104,10 @@ export function ScheduleCalendar({
       type="button"
       onClick={e => { e.stopPropagation(); onShowDay(date); }}
       title={`${slotLabel(b.time)} · ${b.names.join(', ')}`}
-      className={`w-full text-left px-2 py-1 rounded-lg border text-xs font-medium truncate transition-shadow hover:shadow-sm ${b.full ? FULL_CHIP : OPEN_CHIP}`}
+      className={`w-full text-left px-2 py-1 rounded-lg border text-xs font-medium truncate transition-shadow hover:shadow-sm ${chipOf(b)}`}
     >
       <span className="font-semibold">{b.time}</span> · {blockText(b)} {b.count === 1 ? 'alumno' : 'alumnos'}
+      {b.first && <span className="ml-1 text-[10px] font-semibold uppercase">1.ª asesoría</span>}
       {b.full && <span className="ml-1 text-[10px] font-semibold uppercase">Lleno</span>}
     </button>
   );
@@ -243,9 +249,9 @@ export function ScheduleCalendar({
                       key={b.time}
                       type="button"
                       onClick={() => onShowDay(date)}
-                      className={`w-full text-left p-2.5 rounded-xl border space-y-0.5 transition-shadow hover:shadow-sm ${b.full ? FULL_CHIP : OPEN_CHIP}`}
+                      className={`w-full text-left p-2.5 rounded-xl border space-y-0.5 transition-shadow hover:shadow-sm ${chipOf(b)}`}
                     >
-                      <p className="text-xs font-semibold">{slotLabel(b.time)}</p>
+                      <p className="text-xs font-semibold">{slotLabel(b.time)}{b.first ? ' · Primera asesoría' : ''}</p>
                       <p className="text-sm font-semibold text-text-primary">{blockText(b)} {b.count === 1 ? 'alumno' : 'alumnos'}{b.full ? ' · Lleno' : ''}</p>
                       <p className="text-xs">{b.names.slice(0, 3).join(', ')}{b.names.length > 3 ? ` y ${b.names.length - 3} más` : ''}</p>
                     </button>
@@ -261,6 +267,7 @@ export function ScheduleCalendar({
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
         <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-info-text" />Horario con lugar</span>
         <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-warning-text" />Horario lleno</span>
+        <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-success-text" />Primera asesoría (sin cupo)</span>
         <span className="flex items-center gap-2 text-sm text-text-secondary"><span className="w-2.5 h-2.5 rounded-full bg-primary-accent" />Actividad especial (bloquea horarios)</span>
         {!branchId && <span className="text-xs text-text-muted">Elija una sede para ver el cupo de cada horario.</span>}
       </div>
