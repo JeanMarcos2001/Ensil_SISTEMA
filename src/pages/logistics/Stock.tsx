@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Search, Filter, Plus, Download, Package, AlertTriangle, History, ArrowRight, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Stock() {
   const { stockItems, items, branches, unpackPackage, packPackage, updateStock, addAdjustment, updateMinStock, currentBranchId } = useData();
@@ -514,7 +515,7 @@ export function Stock() {
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha del movimiento *</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" defaultValue={new Date().toISOString().split('T')[0]} />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" defaultValue={new Date().toISOString().split('T')[0]} />
             </div>
           </div>
 

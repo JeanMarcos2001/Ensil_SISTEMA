@@ -18,7 +18,9 @@ import {
   type ValidityState,
 } from '../utils/validity';
 import { useTablePagination } from '../hooks/useTablePagination';
-import { Modal } from '../components/ui/Modal';
+import { EnrollmentFichaModal } from '../components/enrollment/EnrollmentFichaModal';
+import { DropRequestModal } from '../components/enrollment/DropRequestModal';
+import { EditEnrollmentModal } from '../components/enrollment/EditEnrollmentModal';
 
 const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
   'sin-inicio': 'neutral',
@@ -31,14 +33,19 @@ const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' |
 };
 
 export function Enrollments() {
-  const { enrollments, students, guardians, branches, programs, schedules, enableExtension, isEnrollmentWizardOpen, setIsEnrollmentWizardOpen } = useData();
+  const { enrollments, students, branches, programs, schedules, dropRequests, enableExtension, setIsEnrollmentWizardOpen, plans } = useData();
   const today = todayLocalISO();
   const [searchParams, setSearchParams] = useSearchParams();
   const vigenciaFilter = (searchParams.get('vigencia') ?? '') as ValidityState | '';
   const [toExtend, setToExtend] = useState<{ id: string; student: string; validity: Validity } | null>(null);
   const [extendError, setExtendError] = useState<string | null>(null);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [selectedEnrollment, setSelectedEnrollment] = useState<string | null>(null);
+  // Ficha de la matrícula (también se abre desde otras pantallas con ?ficha=MAT-…) y acciones de la fila
+  const [fichaId, setFichaId] = useState<string | null>(searchParams.get('ficha'));
+  const [dropFor, setDropFor] = useState<string | null>(null);
+  const [editFor, setEditFor] = useState<string | null>(null);
+  // Filtro por alumno (desde Alumnos → Ver matrículas)
+  const studentFilter = searchParams.get('alumno') ?? '';
+  const filteredStudent = students.find(s => s.id === studentFilter);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -56,7 +63,8 @@ export function Enrollments() {
       e.student.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBranch = !selectedBranch || e.sede === selectedBranch;
     const matchesValidity = !vigenciaFilter || validityOf(e)?.state === vigenciaFilter;
-    return matchesSearch && matchesBranch && matchesValidity;
+    const matchesStudent = !studentFilter || e.studentId === studentFilter || (!!filteredStudent && e.student === filteredStudent.name);
+    return matchesSearch && matchesBranch && matchesValidity && matchesStudent;
   });
 
   const totalPages = Math.ceil(filteredEnrollments.length / itemsPerPage);
@@ -66,7 +74,12 @@ export function Enrollments() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, vigenciaFilter]);
+  }, [searchTerm, vigenciaFilter, studentFilter]);
+
+  useEffect(() => {
+    const f = searchParams.get('ficha');
+    if (f) setFichaId(f);
+  }, [searchParams]);
 
   const setVigencia = (v: string) => {
     const next = new URLSearchParams(searchParams);
@@ -74,9 +87,19 @@ export function Enrollments() {
     setSearchParams(next, { replace: true });
   };
 
-  const handleOpenDetail = (id: string) => {
-    setSelectedEnrollment(id);
-    setIsDetailOpen(true);
+  const handleOpenDetail = (id: string) => setFichaId(id);
+  const closeFicha = () => {
+    setFichaId(null);
+    if (searchParams.get('ficha')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('ficha');
+      setSearchParams(next, { replace: true });
+    }
+  };
+  const clearStudentFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('alumno');
+    setSearchParams(next, { replace: true });
   };
   return (
     <div className="flex flex-col h-full">
@@ -138,6 +161,13 @@ export function Enrollments() {
           </div>
         </div>
 
+        {filteredStudent && (
+          <div className="px-4 py-2.5 border-b border-border-soft bg-info-tint/40 flex items-center justify-between text-sm">
+            <span className="text-text-primary">Matrículas de <strong>{filteredStudent.name}</strong> ({filteredEnrollments.length})</span>
+            <button type="button" onClick={clearStudentFilter} className="inline-flex items-center gap-1 text-primary-accent hover:underline"><X size={14} /> Quitar filtro</button>
+          </div>
+        )}
+
         {/* Vigencia: alertas de matrículas por vencer */}
         <div className="px-4 py-3 border-b border-border-soft flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider mr-1">Vigencia</span>
@@ -191,6 +221,7 @@ export function Enrollments() {
                   </td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activa' ? 'success' : 'danger'}>{row.status}</Badge>
+                    {dropRequests.some(r => r.enrollmentId === row.id && r.status === 'Pendiente') && <div className="mt-1"><Badge variant="warning">Caída solicitada</Badge></div>}
                   </td>
                   <td className="px-6 py-3">
                     {(() => {
@@ -229,9 +260,13 @@ export function Enrollments() {
                             ? [{ label: 'Habilitar extensión', onClick: () => { setExtendError(null); setToExtend({ id: row.id, student: row.student, validity: v }); } }]
                             : [];
                         })(),
-                        { label: 'Editar datos', onClick: () => {} },
-                        { label: 'Ver plan', onClick: () => {} },
-                        { label: 'Solicitar caída', onClick: () => {}, danger: true },
+                        ...(row.status === 'Activa' ? [{ label: 'Corregir datos', onClick: () => setEditFor(row.id) }] : []),
+                        { label: 'Ver plan', onClick: () => navigate(`/operacion/planes-y-cartera?plan=${plans.find(p => p.mat === row.id)?.id ?? ''}`) },
+                        ...(row.status === 'Activa'
+                          ? [dropRequests.some(r => r.enrollmentId === row.id && r.status === 'Pendiente')
+                            ? { label: 'Resolver caída solicitada', onClick: () => setFichaId(row.id), danger: true }
+                            : { label: 'Solicitar caída', onClick: () => setDropFor(row.id), danger: true }]
+                          : []),
                       ]} 
                     />
                   </td>
@@ -303,103 +338,10 @@ export function Enrollments() {
         </div>
       )}
 
-      {/* Detail Modal */}
-      <Modal 
-        isOpen={isDetailOpen} 
-        onClose={() => setIsDetailOpen(false)} 
-        title={`Detalle de Matrícula`}
-        size="4xl"
-      >
-        {selectedEnrollment && (
-          <div className="space-y-6 pb-4">
-            {(() => {
-              const enrollment = enrollments.find(e => e.id === selectedEnrollment);
-              const student = students.find(s => s.name === enrollment?.student);
-              const guardian = guardians.find(g => g.name === student?.titular);
-              
-              return (
-                <>
-                  <div className="flex items-center justify-between bg-surface-muted p-4 rounded-xl border border-border-soft">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-primary-accent/10 rounded-full flex items-center justify-center text-primary-accent font-bold">
-                        {enrollment?.id.substring(0, 2)}
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-text-primary">{enrollment?.id}</h3>
-                        <p className="text-sm text-text-secondary">{enrollment?.student}</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <Badge variant={enrollment?.status === 'Activa' ? 'success' : 'danger'}>{enrollment?.status}</Badge>
-                      {(() => {
-                        const v = enrollment ? validityOf(enrollment) : undefined;
-                        return v ? <Badge variant={VALIDITY_VARIANT[v.state]}>{VALIDITY_LABEL[v.state]}</Badge> : null;
-                      })()}
-                      <span className="text-xs text-text-muted">Inscrito: {enrollment?.date}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div className="space-y-6">
-                      <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-soft pb-2">Información Académica</h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Alumno</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{enrollment?.student}</p>
-                          <p className="text-xs text-text-secondary">{student?.age} años - {student?.grado || 'Sin grado'}</p>
-                        </div>
-                        <div>
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Programa</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{enrollment?.program} - {enrollment?.level}</p>
-                          <p className="text-xs text-text-secondary">Horario: {student?.horario || 'No asignado'}</p>
-                        </div>
-                        <div>
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Sede</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{enrollment?.sede || 'Sede Central'}</p>
-                        </div>
-                        <div>
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Asesor</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{enrollment?.asesor || 'No asignado'}</p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-6">
-                      <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-soft pb-2">Titular y Contacto</h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2">
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Titular ({guardian?.parentesco || 'Responsable'})</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{student?.titular}</p>
-                          <p className="text-xs text-text-secondary">{guardian?.phone}</p>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Dirección</label>
-                          <p className="text-sm font-medium text-text-primary mt-1">{guardian?.direccion || 'No registrada'}</p>
-                        </div>
-                        <div>
-                          <label className="text-xs text-text-muted uppercase tracking-wider">Origen</label>
-                          <p className="text-sm font-medium text-text-primary mt-1 uppercase">{enrollment?.origen || '-'}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-6 border-t border-border-soft flex gap-4">
-                    <Button variant="secondary" className="flex-1 justify-center">Ver Plan Financiero</Button>
-                    <Button 
-                      variant="primary" 
-                      className="flex-1 justify-center"
-                      onClick={() => navigate('/verification')}
-                    >
-                      Ir a Verificación
-                    </Button>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        )}
-      </Modal>
+      {/* Ficha de la matrícula */}
+      <EnrollmentFichaModal enrollmentId={fichaId} onClose={() => closeFicha()} />
+      <DropRequestModal enrollmentId={dropFor} onClose={() => setDropFor(null)} />
+      <EditEnrollmentModal enrollmentId={editFor} onClose={() => setEditFor(null)} />
     </div>
   );
 }

@@ -44,6 +44,7 @@ import {
   slotsToRange,
   rangeToSlots,
   toggleActivitySlot,
+  studentProgramLabel,
   studentsWithoutSession,
   suggestedResponsible,
   upsertOverride,
@@ -371,6 +372,12 @@ check('Filtrar por sede',
     { students: [stu('ALU-2'), stu('ALU-3')], schedules: [], enrollments: [enrol('2', 'ALU-2', 'FIL-PIU', ''), enrol('3', 'ALU-3', 'FIL-CHI', '')] },
     week, 'FIL-CHI'
   ).map(x => x.student.id).join() === 'ALU-3');
+
+// ---------------------------------------------------------------- Programa mostrado del alumno
+const fichaTeens: Student = { id: 'ALU-7', doc: '7', name: 'Diego', age: 15, program: 'Teens - Avanzado', titular: 'T', status: 'Activo' };
+check('El programa mostrado sale de la matrícula más reciente, no de la ficha (Teens se retiró)', studentProgramLabel(fichaTeens, [enrol('1', 'ALU-7', 'FIL-PIU', '2026-01-01')]) === 'Kids - N1');
+check('Sin matrícula se usa la ficha', studentProgramLabel(fichaTeens, []) === 'Teens - Avanzado');
+check('Sin nivel se muestra solo el programa', studentProgramLabel(fichaTeens, [{ ...enrol('1', 'ALU-7', 'FIL-PIU', ''), level: 'Sin nivel' }]) === 'Kids');
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);
 process.exit(failed === 0 ? 0 : 1);

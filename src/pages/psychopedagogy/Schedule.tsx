@@ -18,6 +18,7 @@ import {
   longDayLabel,
   nextOpenDay,
   statusTone,
+  studentProgramLabel,
   studentsWithoutSession,
   todayLocalISO,
   weekOf,
@@ -201,7 +202,7 @@ export function Schedule() {
               {withoutSession.slice(0, 12).map(({ student, branchId }) => (
                 <span key={student.id} className="inline-flex items-center gap-2 bg-surface border border-border-soft rounded-xl pl-3 pr-1.5 py-1 text-sm">
                   <span className="text-text-primary font-medium">{student.name}</span>
-                  <span className="text-xs text-text-muted">{student.program}{!branchFilter ? ` · ${branchName(branchId)}` : ''}</span>
+                  <span className="text-xs text-text-muted">{studentProgramLabel(student, enrollments)}{!branchFilter ? ` · ${branchName(branchId)}` : ''}</span>
                   <button
                     type="button"
                     onClick={() => openForm(null, nextOpenDay(today), student.id)}

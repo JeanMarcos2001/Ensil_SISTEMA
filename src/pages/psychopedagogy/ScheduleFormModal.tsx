@@ -20,6 +20,7 @@ import {
   longDayLabel,
   slotLabel,
   slotsForDate,
+  studentProgramLabel,
   suggestedResponsible,
   todayLocalISO,
   validateReservation,
@@ -27,6 +28,7 @@ import {
   weekdayIndex,
 } from '../../utils/schedule';
 import { labelCls, nativeFieldCls, textareaCls } from './formStyles';
+import { DateInput } from '../../components/ui/DateInput';
 
 interface Props {
   isOpen: boolean;
@@ -252,7 +254,7 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
                               className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0"
                             >
                               <span className="font-medium text-text-primary">{s.name}</span>
-                              <span className="text-text-muted"> · {s.doc} · {s.program}</span>
+                              <span className="text-text-muted"> · {s.doc} · {studentProgramLabel(s, enrollments)}</span>
                             </button>
                           ))}
                         </div>
@@ -311,10 +313,9 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className={labelCls}>Fecha <span className="text-error">*</span></label>
-                <input
-                  type="date"
+                <DateInput
                   min={today}
-                  className={nativeFieldCls}
+                  isDateDisabled={d => weekdayIndex(d) === 6}
                   value={form.date}
                   onChange={e => set({ date: e.target.value, time: '' })}
                 />

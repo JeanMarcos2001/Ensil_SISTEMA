@@ -6,6 +6,7 @@ import { Modal } from '../components/ui/Modal';
 import { ActionMenu } from '../components/ui/ActionMenu';
 import { Search, Filter, Plus, ArrowUpRight, ArrowDownRight, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
+import { DateInput } from '../components/ui/DateInput';
 
 export function PettyCash() {
   const [isNewMovementOpen, setIsNewMovementOpen] = useState(false);
@@ -216,7 +217,7 @@ export function PettyCash() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha *</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Categoría *</label>

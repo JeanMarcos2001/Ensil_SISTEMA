@@ -7,9 +7,13 @@ import { Search, Filter, Download, Plus, UserPlus, X } from 'lucide-react';
 import { useData, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
+import { StaffFormModal } from './people/StaffFormModal';
+import { contractStatus } from '../utils/payroll';
+import { todayLocalISO } from '../utils/schedule';
+import { DateInput } from '../components/ui/DateInput';
 
 export function StaffPage() {
-  const { staff, contracts, assignments, branches, addStaff, updateStaff } = useData();
+  const { staff, contracts, assignments, branches } = useData();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -50,40 +54,6 @@ export function StaffPage() {
   const handleOpenForm = (member?: Staff) => {
     setEditingStaff(member || null);
     setIsFormOpen(true);
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    
-    const staffData = {
-      docType: formData.get('docType') as string,
-      docNumber: formData.get('docNumber') as string,
-      names: formData.get('names') as string,
-      lastNameP: formData.get('lastNameP') as string,
-      lastNameM: formData.get('lastNameM') as string,
-      birthDate: formData.get('birthDate') as string,
-      gender: formData.get('gender') as string,
-      civilStatus: formData.get('civilStatus') as string,
-      phone: formData.get('phone') as string,
-      institutionalEmail: formData.get('institutionalEmail') as string,
-      personalEmail: formData.get('personalEmail') as string,
-      address: formData.get('address') as string,
-      educationLevel: formData.get('educationLevel') as string,
-      profession: formData.get('profession') as string,
-      specialty: formData.get('specialty') as string,
-      status: editingStaff?.status || 'Activo',
-      code: editingStaff?.code || `STF-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-      age: editingStaff?.age || 25,
-    };
-
-    if (editingStaff) {
-      updateStaff(editingStaff.id, staffData);
-    } else {
-      addStaff(staffData);
-    }
-
-    setIsFormOpen(false);
   };
 
   return (
@@ -170,7 +140,7 @@ export function StaffPage() {
                     <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{member.code}</td>
                     <td className="px-6 py-4">
                       <div className="font-medium text-text-primary">{member.names} {member.lastNameP} {member.lastNameM}</div>
-                      <div className="text-xs text-text-muted">{member.institutionalEmail}</div>
+                      <div className="text-xs text-text-muted">{member.personalEmail || member.phone}</div>
                     </td>
                     <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{member.docType}: {member.docNumber}</td>
                     <td className="px-6 py-4">
@@ -295,10 +265,6 @@ export function StaffPage() {
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedStaff.phone}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-text-muted uppercase tracking-wider">Correo Institucional</label>
-                  <p className="text-sm font-medium text-text-primary mt-1">{selectedStaff.institutionalEmail}</p>
-                </div>
-                <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Correo Personal</label>
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedStaff.personalEmail || '-'}</p>
                 </div>
@@ -343,7 +309,7 @@ export function StaffPage() {
             <section>
               <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Contrato Vigente</h3>
               {(() => {
-                const activeContract = contracts.find(c => c.staffId === selectedStaff.id && c.status === 'Vigente');
+                const activeContract = contracts.find(c => c.staffId === selectedStaff.id && contractStatus(c, todayLocalISO()) === 'Vigente');
                 if (!activeContract) return <p className="text-sm text-text-muted italic">No hay contrato vigente registrado.</p>;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 bg-surface-muted p-4 rounded-xl border border-border-soft">
@@ -371,115 +337,7 @@ export function StaffPage() {
         )}
       </Modal>
 
-      {/* Form Modal */}
-      <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title={editingStaff ? "Editar Trabajador" : "Nuevo Trabajador"}
-        size="4xl"
-        footer={
-          <div className="flex justify-end gap-3 w-full">
-            <Button type="button" variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button type="submit" form="staff-form" variant="primary">Guardar Trabajador</Button>
-          </div>
-        }
-      >
-        <form id="staff-form" onSubmit={handleSubmit} className="space-y-6 pb-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Tipo de Documento</label>
-              <select name="docType" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingStaff?.docType}>
-                <option value="DNI">DNI</option>
-                <option value="CE">CE</option>
-                <option value="Pasaporte">Pasaporte</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Número de Documento</label>
-              <input name="docNumber" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: 12345678" defaultValue={editingStaff?.docNumber} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Género</label>
-              <select name="gender" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingStaff?.gender}>
-                <option value="Masculino">Masculino</option>
-                <option value="Femenino">Femenino</option>
-                <option value="Otro">Otro</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Nombres</label>
-              <input name="names" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Juan" defaultValue={editingStaff?.names} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Apellido Paterno</label>
-              <input name="lastNameP" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Pérez" defaultValue={editingStaff?.lastNameP} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Apellido Materno</label>
-              <input name="lastNameM" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: García" defaultValue={editingStaff?.lastNameM} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Fecha de Nacimiento</label>
-              <input name="birthDate" type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingStaff?.birthDate} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Estado Civil</label>
-              <select name="civilStatus" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingStaff?.civilStatus}>
-                <option value="Soltero">Soltero/a</option>
-                <option value="Casado">Casado/a</option>
-                <option value="Divorciado">Divorciado/a</option>
-                <option value="Viudo">Viudo/a</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="border-t border-border-soft pt-6">
-            <h4 className="text-sm font-bold text-text-primary mb-4 uppercase tracking-wider">Contacto</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Celular</label>
-                <input name="phone" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: 987654321" defaultValue={editingStaff?.phone} required />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Correo Institucional</label>
-                <input name="institutionalEmail" type="email" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: juan.perez@ensil.com" defaultValue={editingStaff?.institutionalEmail} required />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Correo Personal</label>
-                <input name="personalEmail" type="email" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: juan@gmail.com" defaultValue={editingStaff?.personalEmail} />
-              </div>
-              <div className="col-span-full space-y-2">
-                <label className="text-sm font-medium text-text-primary">Dirección Completa</label>
-                <input name="address" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Av. Las Flores 123, Lima" defaultValue={editingStaff?.address} />
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-border-soft pt-6">
-            <h4 className="text-sm font-bold text-text-primary mb-4 uppercase tracking-wider">Formación Académica</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Grado de Instrucción</label>
-                <select name="educationLevel" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingStaff?.educationLevel}>
-                  <option value="Técnico">Técnico</option>
-                  <option value="Universitario">Universitario</option>
-                  <option value="Licenciado">Licenciado</option>
-                  <option value="Magister">Magister</option>
-                  <option value="Doctor">Doctor</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Profesión</label>
-                <input name="profession" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Psicólogo" defaultValue={editingStaff?.profession} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Especialidad</label>
-                <input name="specialty" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Psicología Educativa" defaultValue={editingStaff?.specialty} />
-              </div>
-            </div>
-          </div>
-        </form>
-      </Modal>
+      <StaffFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editingStaff} />
     </div>
   );
 }

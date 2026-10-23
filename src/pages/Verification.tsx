@@ -8,6 +8,8 @@ import { Search, Filter, CheckCircle, Package, AlertCircle, ArrowRight, Layers, 
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData, Enrollment, Recipe } from '../context/DataContext';
 import { availableStock } from '../utils/inventory';
+import { todayLocalISO } from '../utils/schedule';
+import { DateInput } from '../components/ui/DateInput';
 import {
   availableComponents,
   canSplitKit,
@@ -29,7 +31,7 @@ export function Verification() {
   const [alreadyDelivered, setAlreadyDelivered] = useState<string[]>([]);
   const [verifierId, setVerifierId] = useState('');
   const [observation, setObservation] = useState('');
-  const [verificationDate, setVerificationDate] = useState(new Date().toISOString().slice(0, 16));
+  const [verificationDate, setVerificationDate] = useState(todayLocalISO());
   const [formError, setFormError] = useState<string | null>(null);
   const [paymentWarning, setPaymentWarning] = useState<string | null>(null);
 
@@ -70,6 +72,14 @@ export function Verification() {
     if (!gate.ok) {
       setIsVerifyOpen(false);
       setPaymentWarning(gate.reason ?? 'Realice el primer pago antes de realizar la verificación.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(verificationDate)) {
+      setFormError('Indique la fecha de verificación.');
+      return;
+    }
+    if (verificationDate > todayLocalISO()) {
+      setFormError('La fecha de verificación no puede ser futura.');
       return;
     }
     if (!verifierStaff) {
@@ -156,7 +166,8 @@ export function Verification() {
     setAlreadyDelivered(delivered);
     setModes(recipe ? initialModes(recipe, items, delivered) : {});
     setObservation(enrollment.verificationObservation || '');
-    setVerificationDate(enrollment.verificationDate || new Date().toISOString().slice(0, 16));
+    // La verificación guarda solo la fecha (los registros antiguos traían fecha y hora)
+    setVerificationDate(enrollment.verificationDate ? enrollment.verificationDate.slice(0, 10) : todayLocalISO());
     setFormError(null);
     // Verificador previo, si aún pertenece al personal de la sede
     const branchNameOf = branches.find(b => b.id === enrollment.branchId)?.name ?? enrollment.sede ?? '';
@@ -407,9 +418,8 @@ export function Verification() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-secondary">Fecha de verificación *</label>
-                    <input
-                      type="datetime-local"
-                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+                    <DateInput
+                      max={todayLocalISO()}
                       value={verificationDate}
                       onChange={(e) => setVerificationDate(e.target.value)}
                     />

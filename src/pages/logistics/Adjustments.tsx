@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { Search, Filter, Plus, AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, Package, FileText, Info, Calendar, MapPin, User, Hash } from 'lucide-react';
 import { useData, Adjustment } from '../../context/DataContext';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Adjustments() {
   const { adjustments, stockItems, items, branches, addAdjustment } = useData();
@@ -158,8 +159,8 @@ export function Adjustments() {
                 <option value="Merma">Merma</option>
                 <option value="Regularización Administrativa">Regularización Administrativa</option>
               </select>
-              <input 
-                type="date" 
+              <DateInput 
+                
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" 
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}

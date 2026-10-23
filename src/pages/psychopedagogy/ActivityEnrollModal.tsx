@@ -3,6 +3,7 @@ import { AlertCircle, Calendar as CalendarIcon, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useData } from '../../context/DataContext';
 import { isStudentWorkable } from '../../utils/validity';
 import {
@@ -13,6 +14,7 @@ import {
   noticeMessage,
   rangeLabel,
   seatsLeft,
+  studentProgramLabel,
   todayLocalISO,
   validateActivityEnrollment,
   withEnrollment,
@@ -39,6 +41,8 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
+  // Quitar una inscripción pide confirmación (id del alumno a quitar)
+  const [toRemove, setToRemove] = useState<string | null>(null);
 
   const activities = useMemo(
     () => allActivities(monthlySchedules)
@@ -52,6 +56,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
     setQuery('');
     setError(null);
     setShowPast(false);
+    setToRemove(null);
     setSelectedId(activityId ?? '');
   }, [isOpen, activityId]);
 
@@ -89,6 +94,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   const canRemove = !!selected && canChangeWithNotice(selected.date, selected.start, new Date());
 
   return (
+    <>
     <Modal
       isOpen={isOpen}
       onClose={onClose}
@@ -180,7 +186,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                           className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0"
                         >
                           <span className="font-medium text-text-primary">{s.name}</span>
-                          <span className="text-text-muted"> · {s.doc} · {s.program}</span>
+                          <span className="text-text-muted"> · {s.doc} · {studentProgramLabel(s, enrollments)}</span>
                         </button>
                       ))}
                     </div>
@@ -203,7 +209,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                         <button
                           type="button"
                           disabled={!canRemove}
-                          onClick={() => patchActivity(a => withoutEnrollment(a, id))}
+                          onClick={() => setToRemove(id)}
                           className="p-1.5 text-text-muted hover:text-danger-text hover:bg-danger-tint rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted disabled:cursor-not-allowed"
                           title={canRemove ? 'Quitar inscripción' : noticeMessage(selected.date, selected.start)}
                         >
@@ -219,5 +225,17 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      isOpen={!!toRemove}
+      onClose={() => setToRemove(null)}
+      onConfirm={() => { if (toRemove) patchActivity(a => withoutEnrollment(a, toRemove)); setToRemove(null); }}
+      title="Quitar inscripción"
+      description={toRemove && selected ? `¿Quitar a ${nameOf(toRemove)} de «${selected.name}» (${longDayLabel(selected.date)})? Dejará de contar en el cupo de la actividad y para volver a inscribirlo habrá que hacerlo de nuevo.` : ''}
+      variant="danger"
+      confirmLabel="SÍ, QUITAR"
+      cancelLabel="NO, MANTENER"
+    />
+    </>
   );
 }

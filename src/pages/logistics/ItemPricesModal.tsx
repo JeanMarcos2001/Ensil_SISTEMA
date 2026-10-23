@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { AlertTriangle } from 'lucide-react';
 import { useData, Item } from '../../context/DataContext';
 import { getCurrentPrice, getPriceHistory, todayISO } from '../../utils/inventory';
+import { DateInput } from '../../components/ui/DateInput';
 
 interface ItemPricesModalProps {
   item: Item | null;
@@ -100,8 +101,7 @@ export function ItemPricesModal({ item, onClose }: ItemPricesModalProps) {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Vigente desde</label>
-              <input
-                type="date"
+              <DateInput
                 value={validFrom}
                 onChange={e => setValidFrom(e.target.value)}
                 className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"

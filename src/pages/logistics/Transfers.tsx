@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2 } from 'lucide-react';
 import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, TransferBoxItem } from '../../context/DataContext';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Transfers() {
   const { 
@@ -472,8 +473,8 @@ export function Transfers() {
                 <option value="rechazada">Rechazada</option>
                 <option value="cancelada">Cancelada</option>
               </select>
-              <input 
-                type="date" 
+              <DateInput 
+                
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
@@ -631,8 +632,8 @@ export function Transfers() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha Solicitud</label>
-                  <input 
-                    type="date" 
+                  <DateInput 
+                    
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
                     value={date}
                     disabled
@@ -775,8 +776,8 @@ export function Transfers() {
                 </div>
                 <div className="col-span-2 space-y-1.5">
                   <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">ETA Estimada <span className="text-error">*</span></label>
-                  <input 
-                    type="date" 
+                  <DateInput 
+                    
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={eta}
                     onChange={(e) => setEta(e.target.value)}

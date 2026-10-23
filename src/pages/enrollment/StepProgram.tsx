@@ -13,6 +13,7 @@ import { buildPromotionGroups, suggestGroups } from '../../utils/promotions';
 import { firstBlockText, firstSessionBlock, longDayLabel, slotLabel, slotsForDate, weekdayIndex } from '../../utils/schedule';
 import { Field, StepHeader, inputCls } from './fields';
 import { STEPS, type StepProps } from './types';
+import { DateInput } from '../../components/ui/DateInput';
 
 const usd = (n: number) => `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -178,8 +179,7 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
                 <div className="grid grid-cols-2 gap-4">
                   {variableLines.map((l, k) => (
                     <Field key={k} label={l.concept} hint="Solo la fecha; el monto se registra al cobrar en Planes.">
-                      <input
-                        type="date"
+                      <DateInput
                         min={draft.context.date}
                         className={inputCls}
                         value={s.dueDates[k] ?? ''}
@@ -207,10 +207,9 @@ export function StepProgram({ draft, update, catalogs, quote, today }: StepProps
                       : s.counselingDate ? longDayLabel(s.counselingDate) : 'No puede ser anterior a la fecha de matrícula.'
                   }
                 >
-                  <input
-                    type="date"
+                  <DateInput
                     min={draft.context.date}
-                    className={inputCls}
+                    isDateDisabled={d => weekdayIndex(d) === 6}
                     value={s.counselingDate}
                     onChange={e => setStudent(idx, { counselingDate: e.target.value, counselingTime: '' })}
                   />

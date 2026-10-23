@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2, ArrowRight, Calendar, Clock, MapPin, Save } from 'lucide-react';
 import { useData, ShippingMethod, Courier, ShipmentItem, Shipment, ShipmentBox, ShipmentBoxItem } from '../../context/DataContext';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Shipments() {
   const { 
@@ -529,8 +530,8 @@ export function Shipments() {
                 <option value="recibido con diferencias">Recibido con diferencias</option>
                 <option value="cancelado">Cancelado</option>
               </select>
-              <input 
-                type="date" 
+              <DateInput 
+                
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
@@ -719,8 +720,8 @@ export function Shipments() {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha Creación</label>
-                  <input 
-                    type="date" 
+                  <DateInput 
+                    
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
                     value={date}
                     disabled
@@ -729,8 +730,8 @@ export function Shipments() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">ETA Estimada <span className="text-error">*</span></label>
                   <div className="flex gap-2">
-                    <input 
-                      type="date" 
+                    <DateInput 
+                      
                       className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                       value={eta}
                       onChange={(e) => setEta(e.target.value)}

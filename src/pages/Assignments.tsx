@@ -8,6 +8,7 @@ import { Search, Filter, Download, MapPin, UserCheck, X } from 'lucide-react';
 import { useData, Assignment, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
+import { DateInput } from '../components/ui/DateInput';
 
 export function AssignmentsPage() {
   const { assignments, staff, branches } = useData();
@@ -310,11 +311,11 @@ export function AssignmentsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-text-primary">Fecha de Inicio</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-text-primary">Fecha de Fin (Opcional)</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
             </div>
           </div>
 

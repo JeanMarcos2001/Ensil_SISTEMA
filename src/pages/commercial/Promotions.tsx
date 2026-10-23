@@ -10,6 +10,7 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Promotion } from '../../context/DataContext';
 import { eligibleProgramIds } from '../../utils/promotions';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { DateInput } from '../../components/ui/DateInput';
 
 const initialFormData: Omit<Promotion, 'id'> = {
   code: '',
@@ -725,8 +726,8 @@ export function Promotions() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-text-primary">Fecha Inicio <span className="text-error">*</span></label>
-                      <input 
-                        type="date" 
+                      <DateInput 
+                        
                         required
                         value={formData.startDate}
                         onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
@@ -735,8 +736,8 @@ export function Promotions() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-text-primary">Fecha Fin</label>
-                      <input 
-                        type="date" 
+                      <DateInput 
+                        
                         value={formData.endDate}
                         onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
                         className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 

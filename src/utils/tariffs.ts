@@ -40,6 +40,15 @@ export function formatDisplayDate(isoDate: string): string {
   return `${String(d).padStart(2, '0')} ${MONTHS[m - 1]} ${y}`;
 }
 
+/** `15 Abr 2026` → `2026-04-15`; null si no tiene ese formato (los planes antiguos solo guardan la fecha en texto). */
+export function parseDisplayDate(text: string | undefined): string | null {
+  const m = /^(\d{1,2}) ([A-Za-zñ]{3}) (\d{4})$/.exec((text ?? '').trim());
+  if (!m) return null;
+  const i = MONTHS.findIndex(x => x.toLowerCase() === m[2].toLowerCase());
+  if (i < 0) return null;
+  return `${m[3]}-${String(i + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
 export function resolveScheduleMode(paymentType: Pick<PaymentType, 'scheduleMode' | 'installments'>): ScheduleMode {
   if (paymentType.scheduleMode) return paymentType.scheduleMode;
   return paymentType.installments <= 1 ? 'inmediato' : 'intervalo_fijo';

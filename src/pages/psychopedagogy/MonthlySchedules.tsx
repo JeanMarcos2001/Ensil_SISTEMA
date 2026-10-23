@@ -19,11 +19,12 @@ import {
   slotsToRange,
   todayLocalISO,
   toggleActivitySlot,
+  weekdayIndex,
   validateActivity,
 } from '../../utils/schedule';
 import { CapacityInput } from './CapacityInput';
 import { ActivityEnrollModal } from './ActivityEnrollModal';
-import { ActivityDatePicker } from './ActivityDatePicker';
+import { DateInput } from '../../components/ui/DateInput';
 
 interface FormState {
   branchId: string;
@@ -383,12 +384,12 @@ export function MonthlySchedules() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                 <label className={labelCls}>Fecha</label>
-                                <ActivityDatePicker
+                                <DateInput
                                   value={act.fecha}
-                                  mes={formState.mes}
-                                  anio={formState.anio}
-                                  minDate={today}
-                                  onChange={(fecha) => {
+                                  lockMonth={{ year: formState.anio, month: Math.max(1, MONTHS.indexOf(formState.mes) + 1) }}
+                                  min={today}
+                                  isDateDisabled={d => weekdayIndex(d) === 6}
+                                  onChange={({ target: { value: fecha } }) => {
                                     // Al cambiar de día, se conservan las horas solo si ese día también las tiene
                                     const keep = rangeToSlots(fecha, act.horaInicio, act.horaFin).length > 0;
                                     handleActivityChange(act.id, { fecha, ...(keep ? {} : { horaInicio: '', horaFin: '' }) });

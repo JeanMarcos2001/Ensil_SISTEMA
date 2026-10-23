@@ -9,6 +9,7 @@ import { Search, Plus, ClipboardList, Calendar, Trash2, AlertCircle } from 'luci
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Recipe, RecipeItem } from '../../context/DataContext';
 import { getRecipeSelectableItems } from '../../utils/inventory';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Recipes() {
   const { recipes, setRecipes, programs, levels, branches, items } = useData();
@@ -598,8 +599,8 @@ export function Recipes() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-text-primary">Fecha Inicio <span className="text-error">*</span></label>
-                <input 
-                  type="date" 
+                <DateInput 
+                  
                   className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
                   value={formData.startDate}
                   onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
@@ -607,8 +608,8 @@ export function Recipes() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-text-primary">Fecha Fin</label>
-                <input 
-                  type="date" 
+                <DateInput 
+                  
                   className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
                   value={formData.endDate}
                   onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}

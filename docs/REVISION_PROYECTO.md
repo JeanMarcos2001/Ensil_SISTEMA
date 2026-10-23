@@ -514,3 +514,34 @@ Ejecuta `docs/PLAN_AJUSTES_MATRICULA.md`.
 
 Verificación: `tsc` 0 errores · `vite build` · `check-schedule` 158 · `check-enrollment` 104 · `check-payments` 47 (nuevo) · `check-validity` 51 (nuevo) · tarifas, promociones, inventario y verificación sin cambios. En navegador: cobro de cuota con Yape en soles + efectivo y un solo comprobante (y rechazo del comprobante repetido); Planes abre el mismo formulario con la matrícula elegida; asistente completo (interruptor a la derecha, sin teléfono, horario ocupado por la primera asesoría de otro registro, paso de pago con comprobante, guardado: la matrícula, el pago «Boleta B001-7001» y la primera asesoría aparecen en Matrículas, Pagos y Programación); regla de 24 h en acciones; horario de primera asesoría cerrado para reservas normales; alerta «Por vencer» y habilitación de extensión.
 Pendiente (no incluido): datos fiscales del cliente (RUC / razón social) para facturas, la pantalla «Alertas del sistema» (hoy vacía) y las anulaciones de pago (siguen siendo una pantalla sin lógica).
+
+
+# Personas, contratos, calendario y verificación (2026-10-22)
+
+| Tema | Cambio |
+|---|---|
+| **Calendario del sistema** | Nuevo `components/ui/DateInput.tsx` reemplaza al `<input type="date">` del navegador en las **35** fechas del sistema (misma API: `value`, `onChange`, `min`, `max`, `name`, `required`). Mes y año elegibles, días no disponibles tachados (`isDateDisabled`), mes fijo (`lockMonth`), «Hoy» y «Borrar»; sigue al campo al desplazarse y se abre hacia arriba si no cabe. Cuadrícula de celdas uniformes con números centrados. En Programación y asistente, los domingos salen tachados. |
+| **Actividades especiales** | Quitar a un alumno de una actividad pide confirmación. |
+| **Personas → Nuevo Alumno / Nuevo Titular** | `utils/people.ts` (puro, `check-people.ts`) + `StudentFormModal` y `GuardianFormModal`, con las mismas reglas del asistente (`PersonForm`, `StudentSituation`, `validatePerson`, ahora `validateStudentSituation` compartido). Alumno con apoderado (titulares registrados; el primero es el principal; parentesco; sin teléfono propio) o independiente (es su propio titular; teléfono obligatorio). Titular: mayor de 18 años, celular, dirección y estado civil obligatorios. Un alumno nuevo queda «Sin matrícula» (no aparece en Programación) hasta matricularse. `addStudent` / `addGuardian` / `addStaff` usan correlativos y devuelven lo creado; vincular o desvincular un alumno ajusta el contador de sus titulares. Perfil del titular: dirección real y alumnos por vínculo. |
+| **Nuevo Trabajador** | `utils/staff.ts` + `StaffFormModal`: sin correo institucional (el modelo ya no lo tiene), asterisco en los obligatorios y error en cada campo; edad calculada; hijos; código correlativo. |
+| **Nuevo Contrato** | `utils/payroll.ts` + `ContractFormModal`: guarda de verdad; sin Part time (jornada Full time); sin tipo de comisión; **sueldo neto estimado** = bruto − aportes (ONP 13 %; AFP 10 % + seguro 1.37 % + comisión de cada AFP; locación de servicios sin aportes); fin obligatorio en plazo fijo y locación; mínimo S/ 1,130 en contratos dependientes; vacaciones coherentes con el contrato; un solo contrato vigente por trabajador. **Cerrar contrato** (fecha y motivo) y estado real derivado (un vigente con fecha de fin pasada se muestra «Vencido»). |
+| **Verificación** | La fecha de verificación es solo fecha (calendario, máximo hoy); los registros antiguos con hora se muestran solo con la fecha. |
+| **Pendientes** | `docs/PENDIENTES_SISTEMA.md`: qué partes del sistema siguen inconclusas o sin lógica. |
+
+Verificación: `tsc` 0 errores · `vite build` · `check-people` 57 (nuevo) y el resto de scripts sin cambios · en navegador: formulario de trabajador con errores por campo, calendario (mes/año, límites), contrato (neto AFP Integra sobre 3,500 = S/ 3,047.80), alta de titular y de alumno vinculado, confirmación al quitar una inscripción y fecha de verificación.
+
+
+# Acciones con menú sin función: caída, ficha de matrícula, plan y reversa de pagos (2026-10-22)
+
+Análisis y decisiones en `docs/PLAN_CICLO_MATRICULA.md`.
+
+| Tema | Cambio |
+|---|---|
+| **Solicitar caída** | `utils/enrollmentDrop.ts` (puro) + `DropRequestModal`, `ResolveDropModal` y la pantalla **Sistema → Solicitudes pendientes**. Se solicita (motivo, detalle, desde cuándo dejó de asistir, con vista previa de los efectos) y se aprueba o rechaza. Al aprobar: matrícula «Caída», cuotas futuras anuladas, deuda vencida conservada (o condonada), asesorías futuras canceladas, inscripciones en actividades quitadas, alumno «Inactivo» si no tiene otra matrícula activa; lo pagado y lo entregado se conservan. |
+| **Ficha de la matrícula** | `EnrollmentFichaModal` + `utils/enrollmentFicha.ts`: Resumen, Plan y pagos, Asesorías y vigencia, Verificación y entrega, Historial. Se usa desde Matrículas (Ver detalle), Planes y cartera (Ver detalles de matrícula), Pagos (Ir a la matrícula) y Solicitudes pendientes. |
+| **Ver plan / Corregir datos** | «Ver plan» abre el cronograma en Planes y cartera. «Editar datos» pasó a **Corregir datos** (`utils/enrollmentEdit.ts`): solo los datos administrativos (observación, origen, responsable de la entrevista, horario de clases), con motivo obligatorio y constancia (`EnrollmentChange`); lo demás se muestra bloqueado con el porqué. |
+| **Reversar pago** | `utils/paymentReversal.ts` + `ReversePaymentModal`: el pago queda «Anulado» con constancia, repone la cuota exacta (cada cobro guarda su `paymentId`), recalcula el plan (en contado crea un «Pago único»; en pagos grupales repone la parte de cada matrícula), ajusta caja (egreso por devolución o ingresos «Reversados») y libera comprobante y operación. Contado en 2 partes: del más reciente al más antiguo. Demás botones de la fila: Ver detalle (con la reversa y las evidencias), Ver evidencias, Ir a la matrícula, Ver plan. |
+| **Alumnos → Ver matrículas** | Abre Matrículas filtrada por el alumno (con el aviso «Quitar filtro»). |
+| **Otros** | Cobrado de una matrícula = lo cobrado en sus cuotas; fechas de instantes mostradas en hora local; el Dashboard muestra las solicitudes pendientes reales. |
+
+Verificación: `tsc` 0 errores · `vite build` · `check-lifecycle` 57 (nuevo) y el resto de scripts sin cambios · en navegador: ficha con sus pestañas, solicitud de caída (validaciones y vista previa), resolución en Solicitudes pendientes (matrícula «Caída», alumno «Inactivo», asesorías canceladas), cobro y reversa de un pago (el plan vuelve de USD 600 a 800, el pago queda «Anulado»).

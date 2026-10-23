@@ -4,12 +4,14 @@ import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { useData, type PaymentPart } from '../../context/DataContext';
 import { emptyDocument, type PaymentDocument } from '../../utils/payments';
+import { todayLocalISO } from '../../utils/schedule';
 import { PaymentPartsEditor, newPart } from './PaymentPartsEditor';
 import { ReceiptFields } from './ReceiptFields';
+import { DateInput } from '../ui/DateInput';
 
 const norm = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const usd = (n: number) => `$ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = todayLocalISO;
 const fieldCls = 'w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none disabled:bg-surface-muted disabled:text-text-muted';
 
 interface Props {
@@ -187,7 +189,7 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-text-secondary">Fecha de pago *</label>
-            <input type="date" max={todayISO()} value={payDate} onChange={e => setPayDate(e.target.value)} className={fieldCls} />
+            <DateInput max={todayISO()} value={payDate} onChange={e => setPayDate(e.target.value)} className={fieldCls} />
           </div>
         </div>
 

@@ -8,15 +8,25 @@ import { Search, Filter, Download, FilePlus, History, X } from 'lucide-react';
 import { useData, Contract, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
+import { ContractFormModal } from './people/ContractFormModal';
+import { DateInput } from '../components/ui/DateInput';
+import { contractStatus } from '../utils/payroll';
+import { todayLocalISO } from '../utils/schedule';
 
 export function ContractsPage() {
-  const { contracts, staff } = useData();
+  const { contracts, staff, updateContract } = useData();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  // Cierre de contrato (cese): fecha y motivo obligatorios
+  const [toClose, setToClose] = useState<Contract | null>(null);
+  const [closeDate, setCloseDate] = useState('');
+  const [closeReason, setCloseReason] = useState('');
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
+  const today = todayLocalISO();
 
   const filteredContracts = contracts.filter(contract => {
     const staffName = `${staff.find(s => s.id === contract.staffId)?.names || ''} ${staff.find(s => s.id === contract.staffId)?.lastNameP || ''}`.toLowerCase();
@@ -119,14 +129,16 @@ export function ContractsPage() {
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.endDate || '-'}</td>
                   <td className="px-6 py-4 text-text-primary">S/ {contract.netSalary?.toLocaleString()}</td>
                   <td className="px-6 py-4">
-                    <Badge variant={contract.status === 'Vigente' ? 'success' : contract.status === 'Cesado' ? 'danger' : 'warning'}>{contract.status}</Badge>
+                    <Badge variant={contractStatus(contract, today) === 'Vigente' ? 'success' : contractStatus(contract, today) === 'Cesado' ? 'danger' : 'warning'}>{contractStatus(contract, today)}</Badge>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(contract) },
                         { label: 'Editar contrato', onClick: () => {} },
-                        { label: 'Cerrar contrato', onClick: () => {}, danger: true },
+                        ...(contractStatus(contract, today) === 'Vigente'
+                          ? [{ label: 'Cerrar contrato', onClick: () => { setToClose(contract); setCloseDate(today); setCloseReason(''); setCloseError(null); }, danger: true }]
+                          : []),
                       ]} 
                     />
                   </td>
@@ -200,7 +212,7 @@ export function ContractsPage() {
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Estado</label>
-                  <p className="text-sm font-medium text-text-primary mt-1">{selectedContract.status}</p>
+                  <p className="text-sm font-medium text-text-primary mt-1">{contractStatus(selectedContract, today)}</p>
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Fecha de Inicio</label>
@@ -265,114 +277,53 @@ export function ContractsPage() {
         )}
       </Modal>
 
-      {/* Form Modal */}
+      <ContractFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} />
+
       <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title="Nuevo Contrato"
-        size="3xl"
+        isOpen={!!toClose}
+        onClose={() => setToClose(null)}
+        title="Cerrar Contrato"
+        size="md"
         footer={
           <div className="flex justify-end gap-3 w-full">
-            <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => setIsFormOpen(false)}>Guardar Contrato</Button>
+            <Button variant="ghost" onClick={() => setToClose(null)}>Cancelar</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (!toClose) return;
+                if (!closeDate) { setCloseError('Indique la fecha de cese.'); return; }
+                if (closeDate < toClose.startDate) { setCloseError('La fecha de cese no puede ser anterior al inicio del contrato.'); return; }
+                if (closeReason.trim().length < 5) { setCloseError('Indique el motivo del cese.'); return; }
+                updateContract(toClose.id, { status: 'Cesado', endDate: closeDate, terminationReason: closeReason.trim() });
+                setToClose(null);
+              }}
+            >
+              Cerrar contrato
+            </Button>
           </div>
         }
       >
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="col-span-1 md:col-span-2 space-y-2">
-              <label className="text-sm font-medium text-text-primary">Trabajador</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                <option value="">Seleccionar trabajador...</option>
-                {staff.map(s => (
-                  <option key={s.id} value={s.id}>{s.names} {s.lastNameP} {s.lastNameM}</option>
-                ))}
-              </select>
+        {toClose && (
+          <div className="space-y-4 pb-2">
+            <p className="text-sm text-text-secondary">
+              Se cerrará el contrato {toClose.type.toLowerCase()} de <span className="font-medium text-text-primary">{getStaffName(toClose.staffId)}</span>. Después se podrá registrar uno nuevo.
+            </p>
+            {closeError && <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">{closeError}</div>}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Fecha de cese <span className="text-error">*</span></label>
+              <DateInput min={toClose.startDate} value={closeDate} onChange={e => { setCloseDate(e.target.value); setCloseError(null); }} />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Tipo de Contrato</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                <option value="Indeterminado">Indeterminado</option>
-                <option value="Plazo Fijo">Plazo Fijo</option>
-                <option value="Locación de servicios">Locación de servicios</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Jornada</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                <option value="Full time">Full time</option>
-                <option value="Part time">Part time</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Fecha de Inicio</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Fecha de Fin (Opcional)</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Motivo del cese <span className="text-error">*</span></label>
+              <textarea
+                className="w-full h-24 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none"
+                value={closeReason}
+                onChange={e => { setCloseReason(e.target.value); setCloseError(null); }}
+                placeholder="Ej: Renuncia voluntaria, fin de contrato..."
+              />
             </div>
           </div>
-
-          <div className="border-t border-border-soft pt-6">
-            <h4 className="text-sm font-bold text-text-primary mb-4 uppercase tracking-wider">Remuneración y Pensiones</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Sueldo Bruto (S/)</label>
-                <input type="number" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: 3500" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Sueldo Neto Estimado (S/)</label>
-                <input type="number" disabled className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm text-text-muted cursor-not-allowed" placeholder="Se calcula automáticamente" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Sistema de Pensiones</label>
-                <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                  <option value="AFP">AFP</option>
-                  <option value="ONP">ONP</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">AFP / ONP</label>
-                <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                  <option value="Integra">Integra</option>
-                  <option value="Prima">Prima</option>
-                  <option value="Habitat">Habitat</option>
-                  <option value="Profuturo">Profuturo</option>
-                  <option value="ONP">ONP</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Tipo de Comisión</label>
-                <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                  <option value="Flujo">Flujo</option>
-                  <option value="Mixta">Mixta</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-border-soft pt-6">
-            <h4 className="text-sm font-bold text-text-primary mb-4 uppercase tracking-wider">Vacaciones Programadas</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Fecha Inicio</label>
-                <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-text-primary">Fecha Retorno</label>
-                <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-border-soft pt-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Observaciones</label>
-              <textarea className="w-full h-24 bg-surface border border-border-soft rounded-xl p-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent resize-none" placeholder="Detalles adicionales del contrato..."></textarea>
-            </div>
-          </div>
-        </div>
+        )}
       </Modal>
     </div>
   );

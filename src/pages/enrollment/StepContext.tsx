@@ -2,6 +2,7 @@ import React from 'react';
 import { getInterviewerOptions } from '../../utils/enrollment';
 import { Field, StepHeader, inputCls } from './fields';
 import { STEPS, type StepProps } from './types';
+import { DateInput } from '../../components/ui/DateInput';
 
 interface Props extends StepProps {
   /** Si la sesión pertenece a una sede, no se puede cambiar. */
@@ -34,7 +35,7 @@ export function StepContext({ draft, catalogs, today, lockedBranchId, onContextC
           </select>
         </Field>
         <Field label="Fecha de matrícula" required hint="No puede ser futura. La fecha y hora de registro se guardan automáticamente.">
-          <input type="date" max={today} className={inputCls} value={x.date} onChange={e => onContextChange({ date: e.target.value })} />
+          <DateInput max={today} className={inputCls} value={x.date} onChange={e => onContextChange({ date: e.target.value })} />
         </Field>
         <Field label="Origen del contacto" required className="col-span-2">
           <select className={inputCls} value={x.leadSourceId} onChange={e => onContextChange({ leadSourceId: e.target.value })}>

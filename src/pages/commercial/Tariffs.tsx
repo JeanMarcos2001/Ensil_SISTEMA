@@ -9,6 +9,7 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Tariff, TariffInstallment } from '../../context/DataContext';
 import { generateBreakdown, countObligations, resolveScheduleMode, sumBreakdown, roundMoney } from '../../utils/tariffs';
 import { Search, Plus, DollarSign, Calendar, AlertCircle } from 'lucide-react';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Tariffs() {
   const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff } = useData();
@@ -538,8 +539,8 @@ export function Tariffs() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Fecha Inicio <span className="text-error">*</span></label>
-                    <input 
-                      type="date" 
+                    <DateInput 
+                      
                       required
                       value={formData.startDate}
                       onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
@@ -548,8 +549,8 @@ export function Tariffs() {
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Fecha Fin</label>
-                    <input 
-                      type="date" 
+                    <DateInput 
+                      
                       value={formData.endDate}
                       onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
                       className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 

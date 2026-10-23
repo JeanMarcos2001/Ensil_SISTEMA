@@ -7,9 +7,14 @@ import { Search, Filter, Download, Plus, X, User, GraduationCap, Calendar, FileT
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
+import { useNavigate } from 'react-router-dom';
+import { StudentFormModal } from './people/StudentFormModal';
+import { ACTIVE_STATUSES, studentProgramLabel, todayLocalISO } from '../utils/schedule';
 
 export function Students() {
-  const { students, enrollments, schedules, trackings, branches, addStudent, updateStudent } = useData();
+  const { students, enrollments, schedules, trackings, branches } = useData();
+  const today = todayLocalISO();
+  const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,7 +34,7 @@ export function Students() {
       s.doc.toLowerCase().includes(searchTerm.toLowerCase());
     
     // Check student's enrollment sede if available
-    const studentEnrollment = enrollments.find(e => e.student === s.name);
+    const studentEnrollment = enrollments.find(e => e.studentId === s.id || e.student === s.name);
     const matchesBranch = !selectedBranch || (studentEnrollment && studentEnrollment.sede === selectedBranch);
 
     return matchesSearch && matchesBranch;
@@ -54,32 +59,11 @@ export function Students() {
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    
-    const studentData = {
-      doc: formData.get('doc') as string,
-      name: `${formData.get('names')} ${formData.get('lastNameP')} ${formData.get('lastNameM')}`,
-      age: parseInt(formData.get('age') as string) || 0,
-      grado: formData.get('grado') as string,
-      colegio: formData.get('colegio') as string,
-      program: formData.get('program') as string,
-      titular: formData.get('titular') as string,
-      status: editingStudent?.status || 'Activo',
-    };
-
-    if (editingStudent) {
-      updateStudent(editingStudent.id, studentData);
-    } else {
-      addStudent(studentData);
-    }
-
-    setIsFormOpen(false);
-  };
-
-  const studentEnrollments = enrollments.filter(e => e.student === selectedStudent?.name);
-  const nextSchedule = schedules.find(s => s.student === selectedStudent?.name && s.status === 'Confirmado');
+  const studentEnrollments = enrollments.filter(e => e.studentId === selectedStudent?.id || e.student === selectedStudent?.name);
+  // Próxima asesoría: la más cercana que sigue activa (reservada o reprogramada) desde hoy
+  const nextSchedule = schedules
+    .filter(s => (s.studentId === selectedStudent?.id || s.student === selectedStudent?.name) && s.date >= today && ['Reservado', 'Reprogramado'].includes(s.status))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   const latestTracking = trackings.filter(t => t.studentId === selectedStudent?.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
   return (
@@ -162,7 +146,7 @@ export function Students() {
                   </td>
                   <td className="px-6 py-4 font-medium text-text-primary">{row.name}</td>
                   <td className="px-6 py-4 text-text-secondary">{row.age} años</td>
-                  <td className="px-6 py-4 text-text-secondary">{row.program}</td>
+                  <td className="px-6 py-4 text-text-secondary">{studentProgramLabel(row, enrollments) || 'Sin matrícula'}</td>
                   <td className="px-6 py-4 text-text-secondary">{row.titular}</td>
                   <td className="px-6 py-4">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
@@ -171,7 +155,7 @@ export function Students() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Ver matrículas', onClick: () => {} },
+                        { label: 'Ver matrículas', onClick: () => navigate(`/operacion/matriculas?alumno=${row.id}`) },
                         { label: 'Editar datos', onClick: () => handleOpenForm(row) },
                       ]} 
                     />
@@ -265,7 +249,7 @@ export function Students() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-[10px] text-text-muted uppercase tracking-wider">Programa Principal</p>
-                      <p className="text-sm font-medium text-primary-accent">{selectedStudent.program}</p>
+                      <p className="text-sm font-medium text-primary-accent">{studentProgramLabel(selectedStudent, enrollments) || 'Sin matrícula'}</p>
                     </div>
                   </div>
                 </div>
@@ -365,108 +349,7 @@ export function Students() {
         )}
       </Modal>
 
-      {/* Form Modal */}
-      <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title={editingStudent ? "Editar Alumno" : "Nueva Inscripción de Alumno"}
-        size="2xl"
-        footer={
-          <div className="flex justify-end gap-3 w-full">
-            <Button type="button" variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button type="submit" form="student-form" variant="primary">Guardar Información</Button>
-          </div>
-        }
-      >
-        <form id="student-form" onSubmit={handleSubmit} className="space-y-6 pb-4">
-          <section className="space-y-4">
-            <h3 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-soft pb-2">Datos Personales</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Documento de Identidad</label>
-                <input name="doc" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent focus:ring-1 focus:ring-primary-accent/10 transition-all font-mono" defaultValue={editingStudent?.doc} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Nombres</label>
-                <input name="names" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.name?.split(' ')[0]} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Apellido Paterno</label>
-                <input name="lastNameP" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.name?.split(' ')[1]} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Apellido Materno</label>
-                <input name="lastNameM" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.name?.split(' ')[2]} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Edad</label>
-                <input name="age" type="number" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.age} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Grado Escolar</label>
-                <select name="grado" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.grado}>
-                  <option value="">Seleccionar...</option>
-                  <option value="1p">1ero Primaria</option>
-                  <option value="2p">2do Primaria</option>
-                  <option value="3p">3ero Primaria</option>
-                  <option value="4p">4to Primaria</option>
-                  <option value="5p">5to Primaria</option>
-                  <option value="6p">6to Primaria</option>
-                  <option value="1s">1ero Secundaria</option>
-                  <option value="2s">2do Secundaria</option>
-                  <option value="3s">3ero Secundaria</option>
-                  <option value="4s">4to Secundaria</option>
-                  <option value="5s">5to Secundaria</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-text-secondary uppercase">Centro Educativo (Colegio)</label>
-              <input name="colegio" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.colegio} />
-            </div>
-          </section>
-
-          <section className="space-y-4">
-            <h3 className="text-xs font-bold text-text-primary uppercase tracking-widest border-b border-border-soft pb-2">Asignación y Estado</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Titular Responsable</label>
-                <select name="titular" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.titular}>
-                  <option value="">Seleccionar titular...</option>
-                  <option value="Juan Ruiz">Juan Ruiz</option>
-                  <option value="María Castro">María Castro</option>
-                  <option value="Pedro Vega">Pedro Vega</option>
-                  <option value="Ana Silva">Ana Silva</option>
-                  <option value="Carlos Torres">Carlos Torres</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Sede</label>
-                <select name="branch" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.branch}>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.name}>{b.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Programa</label>
-                <select name="program" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.program}>
-                  <option value="Lectura Veloz">Lectura Veloz</option>
-                  <option value="Matemáticas">Matemáticas</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary uppercase">Estado</label>
-                <select name="status" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent" defaultValue={editingStudent?.status}>
-                  <option value="Activo">Activo</option>
-                  <option value="Inactivo">Inactivo</option>
-                  <option value="Egresado">Egresado</option>
-                </select>
-              </div>
-            </div>
-          </section>
-        </form>
-      </Modal>
+      <StudentFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editingStudent} />
     </div>
   );
 }

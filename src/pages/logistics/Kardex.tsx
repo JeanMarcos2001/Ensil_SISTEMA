@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { Search, Filter, Download, ArrowUpRight, ArrowDownRight, RefreshCw, Package, FileText, ArrowRightLeft, User, Calendar, MapPin, Hash, Info } from 'lucide-react';
 import { useData, KardexEntry } from '../../context/DataContext';
+import { DateInput } from '../../components/ui/DateInput';
 
 export function Kardex() {
   const { kardex, branches, currentBranchId } = useData();
@@ -148,15 +149,15 @@ export function Kardex() {
                 <option value="Desempaquetado">Desempaquetado</option>
               </select>
               <div className="flex items-center gap-2">
-                <input 
-                  type="date" 
+                <DateInput 
+                  
                   className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" 
                   value={filterDateStart}
                   onChange={(e) => setFilterDateStart(e.target.value)}
                 />
                 <span className="text-text-muted">-</span>
-                <input 
-                  type="date" 
+                <DateInput 
+                  
                   className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" 
                   value={filterDateEnd}
                   onChange={(e) => setFilterDateEnd(e.target.value)}

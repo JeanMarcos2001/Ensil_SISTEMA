@@ -9,6 +9,13 @@ export const WEEKDAYS_LONG = ['lunes', 'martes', 'miércoles', 'jueves', 'vierne
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+/** Fecha local (YYYY-MM-DD) de un instante ISO (p. ej. `2026-10-23T00:30:00Z` → el 22 en Perú). */
+export function localDateOf(isoInstant: string): string {
+  const d = new Date(isoInstant);
+  if (Number.isNaN(d.getTime())) return isoInstant.slice(0, 10);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Fecha local de hoy (YYYY-MM-DD), sin desfase por zona horaria. */
 export function todayLocalISO(): string {
   const d = new Date();
@@ -188,6 +195,13 @@ export function latestEnrollment(student: Pick<Student, 'id' | 'name'>, enrollme
     .filter(e => e.studentId === student.id || e.student === student.name)
     .sort((a, b) => (a.dateISO ?? '').localeCompare(b.dateISO ?? ''))
     .pop();
+}
+
+/** Programa y nivel vigentes del alumno según su matrícula más reciente («Kids - Nivel 1»); si no tiene, el de su ficha. */
+export function studentProgramLabel(student: Pick<Student, 'id' | 'name' | 'program'>, enrollments: Enrollment[]): string {
+  const latest = latestEnrollment(student, enrollments);
+  if (!latest) return student.program;
+  return latest.level && latest.level !== 'Sin nivel' ? `${latest.program} - ${latest.level}` : latest.program;
 }
 
 /** Sede del alumno = sede de su matrícula más reciente. */

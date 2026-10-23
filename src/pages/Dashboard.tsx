@@ -32,7 +32,8 @@ function KPICard({ title, value, trend, trendValue, icon: Icon, alert = false }:
 }
 
 export function Dashboard() {
-  const { enrollments, programs, schedules } = useData();
+  const { enrollments, programs, schedules, dropRequests } = useData();
+  const pendingRequests = dropRequests.filter(r => r.status === 'Pendiente').length;
   const navigate = useNavigate();
   const expiring = validityCounts({ enrollments, programs, schedules }, todayLocalISO())['por-vencer'];
   return (
@@ -47,7 +48,9 @@ export function Dashboard() {
           <KPICard title="Matrículas por vencer" value={String(expiring)} icon={CalendarClock} alert={expiring > 0} />
         </div>
         <KPICard title="Alertas de Stock" value="7" icon={AlertCircle} alert />
-        <KPICard title="Solicitudes" value="12" icon={Clock} />
+        <div role="link" tabIndex={0} className="cursor-pointer rounded-xl hover:shadow-md transition-shadow" onClick={() => navigate('/sistema/solicitudes-pendientes')} onKeyDown={e => e.key === 'Enter' && navigate('/sistema/solicitudes-pendientes')}>
+          <KPICard title="Solicitudes" value={String(pendingRequests)} icon={Clock} alert={pendingRequests > 0} />
+        </div>
       </div>
 
       {/* Row 2: Main Panels */}

@@ -2,8 +2,12 @@ import React, { createContext, useContext, useRef, useState, ReactNode } from 'r
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { nextNumericId, nextSequentialId } from '../utils/ids';
-import { addDaysISO, allActivities, MONTHS, todayLocalISO, weekdayIndex } from '../utils/schedule';
+import { addDaysISO, allActivities, MONTHS, todayLocalISO, weekdayIndex, withoutEnrollment } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, programOf } from '../utils/validity';
+import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
+import { applyReversalToPlan, reversalTargets, validateReversal, type ReversalInput } from '../utils/paymentReversal';
+import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEnrollmentEdit, type EnrollmentEditValues } from '../utils/enrollmentEdit';
+import { partsUSD } from '../utils/payments';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 
 // Types
@@ -105,6 +109,67 @@ export interface Enrollment {
   /** Extensión (garantía) habilitada: el alumno sigue apareciendo hasta el fin de la extensión. */
   extensionEnabledAt?: string;
   extensionEnabledBy?: string;
+  /** Caída aprobada: desde qué fecha el alumno dejó de asistir y la solicitud que la originó. */
+  dropDate?: string;
+  dropRequestId?: string;
+}
+
+export type DropStatus = 'Pendiente' | 'Aprobada' | 'Rechazada';
+
+/** Resumen de lo que se hizo al aprobar una caída (queda en el historial). */
+export interface DropEffects {
+  annulledInstallments: number;
+  annulledUSD: number;
+  overdueInstallments: number;
+  overdueUSD: number;
+  overdueForgiven: boolean;
+  paidUSD: number;
+  cancelledSchedules: number;
+  removedActivities: number;
+  studentDeactivated: boolean;
+}
+
+/** Solicitud de caída de una matrícula: la pide quien atiende y la resuelve quien tiene autoridad. */
+export interface DropRequest {
+  id: string;
+  enrollmentId: string;
+  studentId?: string;
+  requestedAt: string;
+  requestedBy: string;
+  reason: string;
+  detail: string;
+  /** Desde cuándo el alumno dejó de asistir (YYYY-MM-DD). */
+  effectiveDate: string;
+  status: DropStatus;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNote?: string;
+  effects?: DropEffects;
+}
+
+/** Corrección de un dato administrativo de una matrícula (con motivo, para auditar). */
+export interface EnrollmentChange {
+  id: string;
+  enrollmentId: string;
+  at: string;
+  by: string;
+  field: string;
+  label: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+/** Reversa (anulación) de un pago. */
+export interface PaymentReversal {
+  at: string;
+  by: string;
+  reason: string;
+  detail: string;
+  /** true = el dinero se devolvió al cliente (sale de caja); false = nunca ingresó o se registró por error. */
+  refunded: boolean;
+  /** N.º de la nota de crédito emitida (opcional). */
+  creditNote?: string;
 }
 
 /** Datos para cobrar una cuota (los mismos que pide el asistente al cobrar la matrícula). */
@@ -168,6 +233,8 @@ export interface Payment {
   status: string;
   /** Comprobante que la empresa entrega (boleta / factura). `receipt` es su texto: «B001-000123». */
   document?: PaymentDocument;
+  /** Si el pago se reversó: cuándo, quién, por qué y si se devolvió el dinero. */
+  reversal?: PaymentReversal;
   parts?: PaymentPart[]; // Una parte por medio de pago usado (lo que recibe la empresa)
   currency?: 'PEN' | 'USD'; // Moneda de la obligación que cubre el pago
   promotionGroupId?: string; // Pago grupal: un único pago para todas las matrículas del grupo
@@ -571,7 +638,6 @@ export interface Staff {
   profession?: string;
   specialty?: string;
   phone: string;
-  institutionalEmail: string;
   personalEmail?: string;
   address?: string;
   status: string;
@@ -588,7 +654,6 @@ export interface Contract {
   shift?: string;
   pensionSystem?: string;
   pensionFund?: string;
-  commissionType?: string;
   grossSalary?: number;
   contribution?: number;
   netSalary?: number;
@@ -800,6 +865,8 @@ interface DataContextType {
   setCapacityConfig: (config: CapacityConfig) => void;
   staff: Staff[];
   contracts: Contract[];
+  addContract: (contract: Omit<Contract, 'id'>) => Contract;
+  updateContract: (id: string, data: Partial<Omit<Contract, 'id'>>) => void;
   assignments: Assignment[];
   roles: Role[];
   setRoles: React.Dispatch<React.SetStateAction<Role[]>>;
@@ -834,19 +901,30 @@ interface DataContextType {
   updateTransferStatus: (id: string, status: Transfer['status']) => StockResult;
   updateTransfer: (id: string, transfer: Partial<Transfer>) => void;
   addTransfer: (transfer: Omit<Transfer, 'id'>) => void;
-  addStaff: (staff: Omit<Staff, 'id'>) => void;
+  addStaff: (staff: Omit<Staff, 'id'>) => Staff;
   updateStaff: (id: string, staff: Partial<Staff>) => void;
   deleteStaff: (id: string) => void;
-  addStudent: (student: Omit<Student, 'id'>) => void;
+  /** Crea el alumno (correlativo ALU-000) y suma uno al contador de alumnos de sus titulares. */
+  addStudent: (student: Omit<Student, 'id'>) => Student;
   updateStudent: (id: string, student: Partial<Student>) => void;
   deleteStudent: (id: string) => void;
-  addGuardian: (guardian: Omit<Guardian, 'id'>) => void;
+  addGuardian: (guardian: Omit<Guardian, 'id' | 'students' | 'enrollments' | 'balance'>) => Guardian;
   updateGuardian: (id: string, guardian: Partial<Guardian>) => void;
   deleteGuardian: (id: string) => void;
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
   /** Habilita el período de extensión (garantía) de una matrícula por vencer o con la duración base terminada. */
   enableExtension: (enrollmentId: string) => StockResult;
+  dropRequests: DropRequest[];
+  /** Solicita la caída de una matrícula: queda pendiente hasta que alguien con autoridad la resuelva. */
+  requestEnrollmentDrop: (enrollmentId: string, input: DropInput) => StockResult;
+  /** Aprueba (aplica los efectos en plan, asesorías, actividades y alumno) o rechaza una solicitud de caída. */
+  resolveEnrollmentDrop: (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }) => StockResult;
+  enrollmentChanges: EnrollmentChange[];
+  /** Corrige datos administrativos de una matrícula activa (con motivo y constancia). */
+  updateEnrollmentData: (enrollmentId: string, after: EnrollmentEditValues, reason: string) => StockResult;
+  /** Reversa un pago: queda anulado, repone la cuota, ajusta caja y libera su comprobante. */
+  reversePayment: (paymentId: string, input: ReversalInput) => StockResult;
   addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
   updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
   /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
@@ -914,11 +992,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   ]);
 
   const [students, setStudents] = useState<Student[]>([
-    { id: 'ALU-001', doc: '76543210', name: 'Mateo Ruiz', age: 8, program: 'Kids - Básico 1', titular: 'Juan Ruiz', status: 'Activo' },
-    { id: 'ALU-002', doc: '76543211', name: 'Sofia Castro', age: 14, program: 'Teens - Intermedio', titular: 'María Castro', status: 'Activo' },
-    { id: 'ALU-003', doc: '76543212', name: 'Lucas Vega', age: 9, program: 'Kids - Básico 2', titular: 'Pedro Vega', status: 'Inactivo' },
-    { id: 'ALU-004', doc: '76543213', name: 'Valentina Silva', age: 5, program: 'Pre-Kids - Inicial', titular: 'Ana Silva', status: 'Activo' },
-    { id: 'ALU-005', doc: '76543214', name: 'Diego Torres', age: 15, program: 'Teens - Avanzado', titular: 'Carlos Torres', status: 'Activo' },
+    { id: 'ALU-001', doc: '76543210', name: 'Mateo Ruiz', age: 8, program: 'Kids - Nivel 1', titular: 'Juan Ruiz', status: 'Activo' },
+    { id: 'ALU-002', doc: '76543211', name: 'Sofia Castro', age: 14, program: 'Kids - Nivel 2', titular: 'María Castro', status: 'Activo' },
+    { id: 'ALU-003', doc: '76543212', name: 'Lucas Vega', age: 9, program: 'Kids - Nivel 3', titular: 'Pedro Vega', status: 'Inactivo' },
+    { id: 'ALU-004', doc: '76543213', name: 'Valentina Silva', age: 5, program: 'Pre-Kids - Nivel 1', titular: 'Ana Silva', status: 'Activo' },
+    { id: 'ALU-005', doc: '76543214', name: 'Diego Torres', age: 15, program: 'Kids - Nivel 1', titular: 'Carlos Torres', status: 'Activo' },
   ]);
 
   const [enrollments, setEnrollments] = useState<Enrollment[]>([
@@ -1334,6 +1412,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
+  const [dropRequests, setDropRequests] = useState<DropRequest[]>([]);
+  const [enrollmentChanges, setEnrollmentChanges] = useState<EnrollmentChange[]>([]);
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
@@ -1444,8 +1524,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const [staff, setStaff] = useState<Staff[]>([
-    { id: '1', code: '000001', docType: 'DNI', docNumber: '12345678', names: 'Juan', lastNameP: 'Pérez', lastNameM: 'García', birthDate: '1985-05-15', age: 38, gender: 'Masculino', civilStatus: 'Casado', hasChildren: true, childrenCount: 2, educationLevel: 'Universitario', profession: 'Psicólogo', specialty: 'Psicopedagogía', phone: '987654321', institutionalEmail: 'juan.perez@ensil.com', personalEmail: 'juan.perez.personal@gmail.com', address: 'Av. Larco 123, Miraflores', status: 'Activo', observations: 'Docente principal' },
-    { id: '2', code: '000002', docType: 'DNI', docNumber: '87654321', names: 'María', lastNameP: 'Torres', lastNameM: 'López', birthDate: '1990-08-20', age: 33, gender: 'Femenino', civilStatus: 'Soltera', hasChildren: false, childrenCount: 0, educationLevel: 'Técnico', profession: 'Administradora', specialty: 'Gestión Educativa', phone: '912345678', institutionalEmail: 'maria.torres@ensil.com', personalEmail: 'maria.torres.personal@gmail.com', address: 'Calle Lima 456, San Isidro', status: 'Activo', observations: 'Coordinadora de filial' },
+    { id: '1', code: '000001', docType: 'DNI', docNumber: '12345678', names: 'Juan', lastNameP: 'Pérez', lastNameM: 'García', birthDate: '1985-05-15', age: 38, gender: 'Masculino', civilStatus: 'Casado(a)', hasChildren: true, childrenCount: 2, educationLevel: 'Universitario', profession: 'Psicólogo', specialty: 'Psicopedagogía', phone: '987654321', personalEmail: 'juan.perez.personal@gmail.com', address: 'Av. Larco 123, Miraflores', status: 'Activo', observations: 'Docente principal' },
+    { id: '2', code: '000002', docType: 'DNI', docNumber: '87654321', names: 'María', lastNameP: 'Torres', lastNameM: 'López', birthDate: '1990-08-20', age: 33, gender: 'Femenino', civilStatus: 'Soltero(a)', hasChildren: false, childrenCount: 0, educationLevel: 'Técnico', profession: 'Administradora', specialty: 'Gestión Educativa', phone: '912345678', personalEmail: 'maria.torres.personal@gmail.com', address: 'Calle Lima 456, San Isidro', status: 'Activo', observations: 'Coordinadora de filial' },
   ]);
 
   const [contracts, setContracts] = useState<Contract[]>([
@@ -2034,7 +2114,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const planNow = plans.find(pl => pl.id === planId);
     const instNow = planNow?.installments.find((i: any) => i.id === installmentId);
     if (!planNow || !instNow) return { ok: false, error: 'No se encontró la cuota.' };
-    const todayISO = new Date().toISOString().slice(0, 10);
+    const todayISO = todayLocalISO();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || input.date > todayISO) return { ok: false, error: 'La fecha de pago es obligatoria y no puede ser futura.' };
     // Partes (monto, TC, medio, banco, operación, evidencia), comprobante y repeticiones frente a los pagos ya registrados
     const problems = validatePaymentInput({ parts: input.parts, document: input.document }, payments, 'Pago');
@@ -2046,6 +2126,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (received > owed + 0.01) return { ok: false, error: `El monto equivale a USD ${received.toFixed(2)} y supera el saldo de USD ${owed.toFixed(2)}.` };
     const paymentData = { date: input.date, amount: Math.round(Math.min(received, owed) * 100) / 100, receipt: documentLabel(input.document) };
 
+    const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
     setPlans(prevPlans => prevPlans.map(plan => {
       if (plan.id !== planId) return plan;
 
@@ -2054,6 +2135,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const target = plan.installments[targetIdx];
       const newPayment = {
         id: `P-${Date.now()}`,
+        paymentId, // vínculo con el pago global: permite reversarlo y reponer exactamente esta cuota
         date: paymentData.date,
         amount: paymentData.amount,
         receipt: paymentData.receipt
@@ -2116,7 +2198,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const planRef = plans.find(pl => pl.id === planId);
     const enrollmentRef = enrollments.find(e => e.id === planRef?.mat);
     const studentName = enrollmentRef?.student || planRef?.titular || 'Alumno';
-    const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
     const built = buildPaymentRecord({
       id: paymentId,
       date: formatDisplayDate(paymentData.date),
@@ -2171,12 +2252,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const addStaff = (staffData: Omit<Staff, 'id'>) => {
-    const newStaff = {
-      ...staffData,
-      id: `STF-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-    };
+  const addStaff = (staffData: Omit<Staff, 'id'>): Staff => {
+    const newStaff: Staff = { ...staffData, id: nextNumericId(staff.map(s => s.id)) };
     setStaff(prev => [...prev, newStaff]);
+    return newStaff;
+  };
+
+  const updateContract = (id: string, data: Partial<Omit<Contract, 'id'>>) => {
+    setContracts(prev => prev.map(c => (c.id === id ? { ...c, ...data } : c)));
+  };
+
+  const addContract = (data: Omit<Contract, 'id'>): Contract => {
+    const created: Contract = { ...data, id: nextSequentialId('CON', contracts.map(c => c.id)) };
+    setContracts(prev => [...prev, created]);
+    return created;
   };
 
   const updateStaff = (id: string, staffData: Partial<Staff>) => {
@@ -2187,31 +2276,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setStaff(prev => prev.filter(s => s.id !== id));
   };
 
-  const addStudent = (studentData: Omit<Student, 'id'>) => {
-    const newStudent = {
-      ...studentData,
-      id: `ALU-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-    };
+  /** Ajusta el contador de alumnos de los titulares cuando un alumno se vincula o se desvincula. */
+  const shiftGuardianStudents = (ids: string[], delta: number) => {
+    if (ids.length === 0) return;
+    setGuardians(prev => prev.map(g => (ids.includes(g.id) ? { ...g, students: Math.max(0, g.students + delta) } : g)));
+  };
+
+  const addStudent = (studentData: Omit<Student, 'id'>): Student => {
+    const newStudent: Student = { ...studentData, id: nextSequentialId('ALU', students.map(s => s.id)) };
     setStudents(prev => [...prev, newStudent]);
+    shiftGuardianStudents(newStudent.guardianIds ?? [], 1);
+    return newStudent;
   };
 
   const updateStudent = (id: string, studentData: Partial<Student>) => {
+    const before = students.find(s => s.id === id)?.guardianIds ?? [];
+    if (studentData.guardianIds) {
+      shiftGuardianStudents(studentData.guardianIds.filter(g => !before.includes(g)), 1);
+      shiftGuardianStudents(before.filter(g => !studentData.guardianIds!.includes(g)), -1);
+    }
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...studentData } : s));
   };
 
   const deleteStudent = (id: string) => {
+    shiftGuardianStudents(students.find(s => s.id === id)?.guardianIds ?? [], -1);
     setStudents(prev => prev.filter(s => s.id !== id));
   };
 
-  const addGuardian = (guardianData: Omit<Guardian, 'id'>) => {
-    const newGuardian = {
+  const addGuardian = (guardianData: Omit<Guardian, 'id' | 'students' | 'enrollments' | 'balance'>): Guardian => {
+    const newGuardian: Guardian = {
       ...guardianData,
-      id: (guardians.length + 1).toString(),
+      id: nextNumericId(guardians.map(g => g.id)),
       students: 0,
       enrollments: 0,
       balance: '$0',
     };
     setGuardians(prev => [...prev, newGuardian]);
+    return newGuardian;
   };
 
   const updateGuardian = (id: string, guardianData: Partial<Guardian>) => {
@@ -2263,6 +2364,134 @@ export function DataProvider({ children }: { children: ReactNode }) {
     ]);
 
     return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
+  };
+
+  const requestEnrollmentDrop = (enrollmentId: string, input: DropInput): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const problems = validateDropRequest(enrollment, input, dropRequests, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const request: DropRequest = {
+      id: nextSequentialId('CAI', dropRequests.map(r => r.id)),
+      enrollmentId,
+      studentId: enrollment.studentId,
+      requestedAt: new Date().toISOString(),
+      requestedBy: currentUser.name,
+      reason: input.reason,
+      detail: input.detail.trim(),
+      effectiveDate: input.effectiveDate,
+      status: 'Pendiente',
+    };
+    setDropRequests(prev => [request, ...prev]);
+    return { ok: true };
+  };
+
+  const resolveEnrollmentDrop = (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }): StockResult => {
+    const request = dropRequests.find(r => r.id === requestId);
+    if (!request) return { ok: false, error: 'No se encontró la solicitud.' };
+    const problems = validateDropResolution(request, decision, opts.note);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const resolution = { status: decision, resolvedAt: new Date().toISOString(), resolvedBy: currentUser.name, resolutionNote: opts.note.trim() || undefined };
+
+    if (decision === 'Rechazada') {
+      setDropRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...resolution } : r)));
+      return { ok: true };
+    }
+
+    const enrollment = enrollments.find(e => e.id === request.enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    if (enrollment.status !== 'Activa') return { ok: false, error: `La matrícula ya no está activa (${enrollment.status}).` };
+    const plan = plans.find(p => p.mat === enrollment.id);
+    const preview = previewDrop(
+      { enrollment, plan, schedules, monthly: monthlySchedules, students, enrollments, payments, groups: promotionGroups },
+      request.effectiveDate
+    );
+    const forgive = opts.forgiveOverdue && preview.overdue.length > 0;
+    const effects = summarizeDrop(preview, forgive);
+
+    setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída', plan: 'Caída', dropDate: request.effectiveDate, dropRequestId: request.id } : e)));
+    if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive) : p)));
+    if (preview.scheduleIds.length > 0) {
+      setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
+    }
+    if (preview.activityRemovals.length > 0) {
+      setMonthlySchedules(prev => prev.map(m => ({
+        ...m,
+        actividades: m.actividades.map(a =>
+          preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)
+        ),
+      })));
+    }
+    if (preview.studentDeactivated) {
+      setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, status: 'Inactivo' } : st)));
+    }
+    setDropRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r)));
+    return { ok: true };
+  };
+
+  const updateEnrollmentData = (enrollmentId: string, after: EnrollmentEditValues, reason: string): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const student = students.find(s => s.id === enrollment.studentId) ?? students.find(s => s.name === enrollment.student);
+    const names = {
+      origin: (id: string) => leadSources.find(l => l.id === id)?.name ?? '',
+      advisor: (id: string) => { const m = staff.find(x => x.id === id); return m ? `${m.names} ${m.lastNameP}`.trim() : ''; },
+    };
+    const changes = diffEnrollmentEdit(currentEditValues(enrollment, student), after, names);
+    const problems = validateEnrollmentEdit(enrollment, after, changes, reason);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const at = new Date().toISOString();
+    setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e)));
+    if (student && changes.some(c => c.field === 'schedule')) setStudents(prev => prev.map(st => (st.id === student.id ? { ...st, horario: after.schedule.trim() || undefined } : st)));
+    setEnrollmentChanges(prev => [
+      ...changes.map((c, i) => ({ id: `COR-${Date.now()}-${i}`, enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
+      ...prev,
+    ]);
+    return { ok: true };
+  };
+
+  const reversePayment = (paymentId: string, input: ReversalInput): StockResult => {
+    const payment = payments.find(p => p.id === paymentId);
+    if (!payment) return { ok: false, error: 'No se encontró el pago.' };
+    const ctx = { payments, plans, enrollments, groups: promotionGroups };
+    const problems = validateReversal(payment, input, ctx);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const today = todayLocalISO();
+    const targets = reversalTargets(payment, ctx);
+
+    // 1) Cuotas y planes: se repone lo que cubrió el pago
+    setPlans(prev => prev.map(plan => {
+      const t = targets.find(x => x.planId === plan.id);
+      return t ? applyReversalToPlan(plan, payment, t.shareUSD, today).plan : plan;
+    }));
+    // 2) El pago queda anulado (con constancia); su comprobante y su operación quedan libres
+    setPayments(prev => prev.map(p => (p.id === paymentId
+      ? { ...p, status: 'Anulado', reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim(), refunded: input.refunded, creditNote: input.creditNote.trim() || undefined } }
+      : p)));
+    // 3) Caja: devolución (egreso) o ingresos reversados
+    if (input.refunded) {
+      const parts = payment.parts && payment.parts.length > 0 ? payment.parts : [{ id: 'x', currency: payment.currency ?? 'USD', amount: payment.amount, method: payment.method } as PaymentPart];
+      const usd = partsUSD(parts) ?? [payment.amount];
+      const branchId = enrollments.find(e => e.id === payment.enrollmentIds?.[0])?.branchId;
+      parts.forEach((part, i) => addCashMovement({
+        kind: 'Egreso',
+        concept: 'Devolución de pago',
+        reference: `${payment.id} / ${payment.student}`,
+        currency: part.currency,
+        amount: part.amount,
+        exchangeRate: part.currency === 'PEN' ? part.exchangeRate : undefined,
+        amountUSD: usd[i] ?? payment.amount,
+        method: part.method,
+        bank: part.bank,
+        operationNumber: part.operationNumber,
+        branchId,
+        paymentId,
+        enrollmentIds: payment.enrollmentIds,
+      }));
+    } else {
+      setCashMovements(prev => prev.map(m => (m.paymentId === paymentId && m.kind === 'Ingreso' ? { ...m, status: 'Reversado' } : m)));
+    }
+    return { ok: true };
   };
 
   const enableExtension = (enrollmentId: string): StockResult => {
@@ -2573,6 +2802,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateTransfer,
       addTransfer,
       addStaff,
+      addContract,
+      updateContract,
       updateStaff,
       deleteStaff,
       addStudent,
@@ -2583,6 +2814,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       deleteGuardian,
       registerEnrollments,
       enableExtension,
+      dropRequests,
+      requestEnrollmentDrop,
+      resolveEnrollmentDrop,
+      enrollmentChanges,
+      updateEnrollmentData,
+      reversePayment,
       addTracking, 
       updateTracking,
       registerPayment, 

@@ -7,9 +7,11 @@ import { Search, Filter, Download, Plus } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
+import { GuardianFormModal } from './people/GuardianFormModal';
+import { studentProgramLabel } from '../utils/schedule';
 
 export function Guardians() {
-  const { guardians, students, addGuardian, updateGuardian } = useData();
+  const { guardians, students, enrollments } = useData();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedGuardianId, setSelectedGuardianId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,7 +22,8 @@ export function Guardians() {
   const [editingGuardian, setEditingGuardian] = useState<any | null>(null);
 
   const selectedGuardian = guardians.find(g => g.id === selectedGuardianId);
-  const guardianStudents = students.filter(s => s.titular === selectedGuardian?.name);
+  // Alumnos a cargo: por vínculo (guardianIds); los registros antiguos se reconocen por el nombre del titular
+  const guardianStudents = students.filter(s => (s.guardianIds ? s.guardianIds.includes(selectedGuardian?.id ?? '') : s.titular === selectedGuardian?.name));
 
   const handleOpenDetail = (id: string) => {
     setSelectedGuardianId(id);
@@ -47,31 +50,6 @@ export function Guardians() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    
-    const guardianData = {
-      doc: formData.get('doc') as string,
-      name: `${formData.get('names')} ${formData.get('lastNameP')} ${formData.get('lastNameM')}`,
-      phone: formData.get('phone') as string,
-      email: formData.get('email') as string,
-      relationship: formData.get('relationship') as string,
-      address: formData.get('address') as string,
-      students: editingGuardian?.students || 0,
-      enrollments: editingGuardian?.enrollments || 0,
-      balance: editingGuardian?.balance || '$0',
-    };
-
-    if (editingGuardian) {
-      updateGuardian(editingGuardian.id, guardianData);
-    } else {
-      addGuardian(guardianData);
-    }
-
-    setIsFormOpen(false);
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -229,7 +207,7 @@ export function Guardians() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-text-primary">{selectedGuardian.name}</h3>
-                <p className="text-sm text-text-secondary">DNI: {selectedGuardian.doc}</p>
+                <p className="text-sm text-text-secondary">{selectedGuardian.docType || 'DNI'}: {selectedGuardian.doc}</p>
               </div>
             </div>
 
@@ -244,7 +222,7 @@ export function Guardians() {
               </div>
               <div className="space-y-1">
                 <span className="text-xs text-text-muted uppercase tracking-wider">Dirección</span>
-                <p className="text-sm font-medium text-text-primary">Av. Principal 123</p>
+                <p className="text-sm font-medium text-text-primary">{selectedGuardian.direccion || '—'}</p>
               </div>
               <div className="space-y-1">
                 <span className="text-xs text-text-muted uppercase tracking-wider">Estado de Cuenta</span>
@@ -266,7 +244,7 @@ export function Guardians() {
                   <div key={s.id} className="bg-surface-muted p-3 rounded-lg flex items-center justify-between border border-border-soft">
                     <div>
                       <p className="text-sm font-medium text-text-primary">{s.name}</p>
-                      <p className="text-xs text-text-secondary">{s.program} - {s.status}</p>
+                      <p className="text-xs text-text-secondary">{studentProgramLabel(s, enrollments) || 'Sin matrícula'} - {s.status}</p>
                     </div>
                   </div>
                 ))}
@@ -276,58 +254,7 @@ export function Guardians() {
         )}
       </Modal>
 
-      {/* Form Modal */}
-      <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title={editingGuardian ? "Editar Titular" : "Nuevo Titular"}
-        size="2xl"
-        footer={
-          <div className="flex justify-end gap-3 w-full">
-            <Button type="button" variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button type="submit" form="guardian-form" variant="primary">Guardar Titular</Button>
-          </div>
-        }
-      >
-        <form id="guardian-form" onSubmit={handleSubmit} className="space-y-6 pb-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Documento de Identidad</label>
-              <input name="doc" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.doc} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Parentesco</label>
-              <select name="relationship" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.relationship || "padre"}>
-                <option value="padre">Padre</option>
-                <option value="madre">Madre</option>
-                <option value="tio">Tío/a</option>
-                <option value="abuelo">Abuelo/a</option>
-                <option value="otro">Otro</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Nombres</label>
-              <input name="names" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.name?.split(' ')[0]} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Apellidos</label>
-              <input name="lastNameP" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.name?.split(' ').slice(1).join(' ')} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Teléfono</label>
-              <input name="phone" type="tel" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.phone} required />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Correo Electrónico</label>
-              <input name="email" type="email" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.email} required />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-text-primary">Dirección</label>
-            <input name="address" type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" defaultValue={editingGuardian?.address} />
-          </div>
-        </form>
-      </Modal>
+      <GuardianFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editingGuardian} />
     </div>
   );
 }

@@ -488,6 +488,22 @@ export function validateHolders(draft: EnrollmentDraft, c: EnrollmentCatalogs, t
   return e;
 }
 
+/** Reglas de «¿qué hace el alumno?»: estudia (institución y grado / ciclo), trabaja (ocupación), ambas o ninguna. */
+export function validateStudentSituation(ds: { situation: Situation | ''; institutionType: string; school: string; grade: string; occupation: string }, label: string): string[] {
+  const e: string[] = [];
+  if (!ds.situation) {
+    e.push(`${label}: indique si está estudiando, trabajando o ninguna.`);
+    return e;
+  }
+  if (studies(ds)) {
+    if (!ds.institutionType) e.push(`${label}: seleccione el tipo de institución.`);
+    if (!ds.school.trim()) e.push(`${label}: indique la institución donde estudia.`);
+    if (!ds.grade.trim()) e.push(`${label}: indique el ${ds.institutionType === 'Colegio' ? 'grado' : 'ciclo'}.`);
+  }
+  if (works(ds) && !ds.occupation.trim()) e.push(`${label}: indique la ocupación.`);
+  return e;
+}
+
 export function validateStudents(draft: EnrollmentDraft, c: EnrollmentCatalogs, today: string): string[] {
   const e: string[] = [];
   if (draft.students.length === 0) e.push('Agregue al menos un alumno.');
@@ -500,17 +516,7 @@ export function validateStudents(draft: EnrollmentDraft, c: EnrollmentCatalogs, 
     if (draft.mode === 'apoderado' && !draft.students[i].relationship) {
       e.push(`${label}: indique el parentesco con el titular.`);
     }
-    const ds = draft.students[i];
-    if (!ds.situation) {
-      e.push(`${label}: indique si está estudiando, trabajando o ninguna.`);
-    } else {
-      if (studies(ds)) {
-        if (!ds.institutionType) e.push(`${label}: seleccione el tipo de institución.`);
-        if (!ds.school.trim()) e.push(`${label}: indique la institución donde estudia.`);
-        if (!ds.grade.trim()) e.push(`${label}: indique el ${ds.institutionType === 'Colegio' ? 'grado' : 'ciclo'}.`);
-      }
-      if (works(ds) && !ds.occupation.trim()) e.push(`${label}: indique la ocupación.`);
-    }
+    e.push(...validateStudentSituation(draft.students[i], label));
     if (!p.existingId && p.docNumber.trim() && c.students.some(s => s.doc === p.docNumber.trim())) {
       e.push(`${label}: el documento ${p.docNumber} ya está registrado. Selecciónelo como alumno existente.`);
     }

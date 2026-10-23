@@ -15,9 +15,11 @@ import {
   slotsForDate,
   todayLocalISO,
   upsertOverride,
+  weekdayIndex,
 } from '../../utils/schedule';
 import { CapacityInput } from './CapacityInput';
 import { labelCls, nativeFieldCls } from './formStyles';
+import { DateInput } from '../../components/ui/DateInput';
 
 interface Props {
   isOpen: boolean;
@@ -153,7 +155,7 @@ export function CapacityModal({ isOpen, onClose }: Props) {
             </div>
             <div>
               <label className={labelCls}>Fecha</label>
-              <input type="date" min={today} className={nativeFieldCls} value={exc.date} onChange={e => setExc({ ...exc, date: e.target.value, time: '' })} />
+              <DateInput min={today} isDateDisabled={d => weekdayIndex(d) === 6} value={exc.date} onChange={e => setExc({ ...exc, date: e.target.value, time: '' })} />
             </div>
             <div>
               <label className={labelCls}>Horario</label>

@@ -8,6 +8,7 @@ import { Search, Filter, Download, Plus, ArrowUpRight, ArrowDownRight, Package, 
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { getCurrentPrice } from '../utils/inventory';
+import { DateInput } from '../components/ui/DateInput';
 
 export function Cash() {
   const { stockItems, items, branches, updateStock, payments, itemPrices, cashMovements, addCashMovement } = useData();
@@ -388,7 +389,7 @@ export function Cash() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha *</label>
-              <input type="date" value={egDate} onChange={e => setEgDate(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <DateInput value={egDate} onChange={e => setEgDate(e.target.value)} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Moneda *</label>
@@ -457,7 +458,7 @@ export function Cash() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha de depósito *</label>
-              <input type="date" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Banco / Cuenta destino *</label>

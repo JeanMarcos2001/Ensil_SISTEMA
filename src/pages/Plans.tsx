@@ -8,9 +8,15 @@ import { Search, Filter, Download, FileText, AlertTriangle, Calendar, DollarSign
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData } from '../context/DataContext';
 import { RegisterPaymentModal } from '../components/payments/RegisterPaymentModal';
+import { DateInput } from '../components/ui/DateInput';
+import { useSearchParams } from 'react-router-dom';
+import { EnrollmentFichaModal } from '../components/enrollment/EnrollmentFichaModal';
 
 export function Plans() {
   const { plans, refinanceInstallment } = useData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Ficha de la matrícula del plan (Ver detalles de matrícula)
+  const [fichaFor, setFichaFor] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [selectedInstallment, setSelectedInstallment] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,6 +53,17 @@ export function Plans() {
     dueDate: new Date().toISOString().split('T')[0],
     reason: ''
   });
+
+  // ?plan=PLN-… abre directamente el cronograma de ese plan (desde Matrículas → Ver plan)
+  useEffect(() => {
+    const id = searchParams.get('plan');
+    if (!id) return;
+    const target = plans.find(p => p.id === id);
+    if (target) { setSelectedPlan(target); setIsPlanDetailOpen(true); }
+    const next = new URLSearchParams(searchParams);
+    next.delete('plan');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, plans]);
 
   const handleOpenPlanDetail = (plan: any) => {
     setSelectedPlan(plan);
@@ -87,6 +104,7 @@ export function Plans() {
       case 'Parcial': return 'warning';
       case 'Vencida': return 'danger';
       case 'Refinanciada': return 'info';
+      case 'Anulada': return 'neutral';
       default: return 'neutral';
     }
   };
@@ -174,7 +192,7 @@ export function Plans() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver cronograma (Cuotas)', onClick: () => handleOpenPlanDetail(row) },
-                        { label: 'Ver detalles de matrícula', onClick: () => {} },
+                        { label: 'Ver detalles de matrícula', onClick: () => setFichaFor(row.mat) },
                       ]} 
                     />
                   </td>
@@ -222,6 +240,8 @@ export function Plans() {
           </div>
         </div>
       </div>
+
+      <EnrollmentFichaModal enrollmentId={fichaFor} onClose={() => setFichaFor(null)} />
 
       {/* Modal: Detalle del Plan y Cronograma */}
       <Modal
@@ -305,7 +325,7 @@ export function Plans() {
           <div className="flex justify-between items-center w-full">
             <Button variant="ghost" onClick={() => setIsInstallmentDetailOpen(false)}>Cerrar</Button>
             <div className="flex gap-2">
-              {selectedInstallment?.status !== 'Pagada' && selectedInstallment?.status !== 'Refinanciada' && (
+              {selectedInstallment?.status !== 'Pagada' && selectedInstallment?.status !== 'Refinanciada' && selectedInstallment?.status !== 'Anulada' && (
                 <>
                   <Button variant="secondary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenRefinance(selectedInstallment); }}>
                     Refinanciar
@@ -437,7 +457,7 @@ export function Plans() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Nueva fecha de vencimiento *</label>
-              <input type="date" value={refinanceForm.dueDate} onChange={e => setRefinanceForm({...refinanceForm, dueDate: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <DateInput value={refinanceForm.dueDate} onChange={e => setRefinanceForm({...refinanceForm, dueDate: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
 
             <div className="space-y-1.5">

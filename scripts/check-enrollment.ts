@@ -26,8 +26,8 @@ const branches: Branch[] = [
 ];
 const leadSources: LeadSource[] = [{ id: 'L1', name: 'Facebook', status: 'active' }];
 const staff: Staff[] = [
-  { id: 'E1', code: '1', docType: 'DNI', docNumber: '1', names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '', age: 30, phone: '', institutionalEmail: '', status: 'Activo' },
-  { id: 'E2', code: '2', docType: 'DNI', docNumber: '2', names: 'Luis', lastNameP: 'Mamani', lastNameM: 'Soto', birthDate: '', age: 30, phone: '', institutionalEmail: '', status: 'Activo' },
+  { id: 'E1', code: '1', docType: 'DNI', docNumber: '1', names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '', age: 30, phone: '', status: 'Activo' },
+  { id: 'E2', code: '2', docType: 'DNI', docNumber: '2', names: 'Luis', lastNameP: 'Mamani', lastNameM: 'Soto', birthDate: '', age: 30, phone: '', status: 'Activo' },
 ];
 const assignments: Assignment[] = [
   { id: 'A1', staffId: 'E1', branch: 'Ayacucho', area: 'Psicopedagogía', role: 'x', startDate: '2026-01-01', isMain: true, status: 'Activa' },

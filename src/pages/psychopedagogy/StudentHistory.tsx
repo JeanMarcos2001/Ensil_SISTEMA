@@ -5,7 +5,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Student } from '../../context/DataContext';
 import { useTablePagination } from '../../hooks/useTablePagination';
-import { branchOfStudent, longDayLabel, slotLabel, statusTone } from '../../utils/schedule';
+import { branchOfStudent, longDayLabel, slotLabel, statusTone, studentProgramLabel } from '../../utils/schedule';
 import { nativeFieldCls } from './formStyles';
 
 const METRIC_LABEL: Record<string, string> = {
@@ -34,11 +34,11 @@ export function StudentHistory() {
         const own = schedules.filter(s => s.studentId === student.id || s.student === student.name);
         const attended = own.filter(s => s.status === 'Asistió');
         const last = [...attended].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))[0];
-        return { student, branchId: branchOfStudent(student, enrollments), total: own.length, attended: attended.length, last };
+        return { student, program: studentProgramLabel(student, enrollments), branchId: branchOfStudent(student, enrollments), total: own.length, attended: attended.length, last };
       })
       .filter(r =>
         (!branchFilter || r.branchId === branchFilter) &&
-        (r.student.name.toLowerCase().includes(term) || r.student.program.toLowerCase().includes(term) || r.student.doc.includes(term))
+        (r.student.name.toLowerCase().includes(term) || r.program.toLowerCase().includes(term) || r.student.doc.includes(term))
       );
   }, [students, schedules, enrollments, searchTerm, branchFilter]);
 
@@ -120,7 +120,7 @@ export function StudentHistory() {
               {paginated.length === 0 && (
                 <tr><td colSpan={6} className="py-10 text-center text-sm text-text-muted">No se encontraron alumnos.</td></tr>
               )}
-              {paginated.map(({ student, branchId, total, attended, last }) => (
+              {paginated.map(({ student, program, branchId, total, attended, last }) => (
                 <tr key={student.id} className="hover:bg-surface-muted/50 transition-colors">
                   <td className="py-4 px-6">
                     <div className="flex items-center gap-3">
@@ -133,7 +133,7 @@ export function StudentHistory() {
                       </div>
                     </div>
                   </td>
-                  <td className="py-4 px-6 text-sm text-text-primary font-medium">{student.program}</td>
+                  <td className="py-4 px-6 text-sm text-text-primary font-medium">{program}</td>
                   <td className="py-4 px-6 text-sm text-text-secondary">{branchName(branchId)}</td>
                   <td className="py-4 px-6 text-sm text-text-secondary">{total} · <span className="text-text-primary font-medium">{attended}</span> asistidas</td>
                   <td className="py-4 px-6 text-sm text-text-secondary">{last ? longDayLabel(last.date) : '—'}</td>
@@ -173,7 +173,7 @@ export function StudentHistory() {
         {selected && (
           <div className="space-y-5 pb-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info">{selected.program}</Badge>
+              <Badge variant="info">{studentProgramLabel(selected, enrollments)}</Badge>
               <Badge variant="success">{detail.attended} {detail.attended === 1 ? 'asistencia' : 'asistencias'}</Badge>
               {detail.missed > 0 && <Badge variant="danger">{detail.missed} {detail.missed === 1 ? 'falta' : 'faltas'}</Badge>}
             </div>

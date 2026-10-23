@@ -32,6 +32,7 @@ import { Adjustments } from '../../pages/logistics/Adjustments';
 import { Messaging } from '../../pages/Messaging';
 import { Schedule } from '../../pages/psychopedagogy/Schedule';
 import { StudentHistory } from '../../pages/psychopedagogy/StudentHistory';
+import { PendingRequests } from '../../pages/system/PendingRequests';
 import { MonthlySchedules } from '../../pages/psychopedagogy/MonthlySchedules';
 import { StaffPage } from '../../pages/Staff';
 import { ContractsPage } from '../../pages/Contracts';
@@ -115,6 +116,9 @@ export function AppShell() {
     if (activeItem === 'Kardex') return <Kardex />;
     if (activeItem === 'Ajustes y mermas') return <Adjustments />;
     
+    // System Module
+    if (activeItem === 'Solicitudes pendientes') return <PendingRequests />;
+
     // Psychopedagogy Module
     if (activeItem === 'Programación') return <Schedule />;
     if (activeItem === 'Historial del alumno') return <StudentHistory />;

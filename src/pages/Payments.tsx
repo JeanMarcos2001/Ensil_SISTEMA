@@ -7,7 +7,10 @@ import { ActionMenu } from '../components/ui/ActionMenu';
 import { Search, Filter, Plus, FileText, Download, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData } from '../context/DataContext';
+import { localDateOf } from '../utils/schedule';
 import { RegisterPaymentModal } from '../components/payments/RegisterPaymentModal';
+import { ReversePaymentModal } from '../components/payments/ReversePaymentModal';
+import { useNavigate } from 'react-router-dom';
 import { documentLabel, parseReceipt } from '../utils/payments';
 
 const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -22,11 +25,12 @@ const METHOD_OPTIONS = [
 ];
 
 export function Payments() {
-  const { payments } = useData();
+  const { payments, plans, currentUser } = useData();
+  const navigate = useNavigate();
   const [isNewPaymentOpen, setIsNewPaymentOpen] = useState(false);
 
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isReverseOpen, setIsReverseOpen] = useState(false);
+  const [reverseId, setReverseId] = useState<string | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -37,10 +41,8 @@ export function Payments() {
     setIsDetailOpen(true);
   };
 
-  const handleOpenReverse = (payment: any) => {
-    setSelectedPayment(payment);
-    setIsReverseOpen(true);
-  };
+  // Solo el superusuario reversa pagos (aún no hay permisos por rol)
+  const canReverse = currentUser.role === 'Superusuario';
 
   // Pagos registrados en el sistema (matrículas y cobros de cuotas), con el formato de la tabla
   const allPayments = payments.map(p => {
@@ -58,6 +60,8 @@ export function Payments() {
       amount: p.amount.toFixed(2),
       currency: p.currency ?? 'USD',
       status: p.status === 'Aprobado' ? 'Aplicado' : p.status,
+      enrollmentIds: p.enrollmentIds ?? [],
+      reversal: p.reversal,
       user: p.user ?? '—',
       comment: p.comment ?? p.concept,
     };
@@ -163,15 +167,24 @@ export function Payments() {
                   <td className="px-6 py-3 text-text-secondary">{row.method}</td>
                   <td className="px-6 py-3 text-right font-medium text-text-primary">{row.currency === 'PEN' ? 'S/' : '$'} {row.amount}</td>
                   <td className="px-6 py-3">
-                    <Badge variant={row.status === 'Aplicado' ? 'success' : 'neutral'}>{row.status}</Badge>
+                    <Badge variant={row.status === 'Aplicado' ? 'success' : row.status === 'Anulado' ? 'danger' : 'neutral'}>{row.status}</Badge>
                   </td>
                   <td className="px-6 py-3 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(row) },
-                        { label: 'Ver comprobante (Foto)', onClick: () => {} },
-                        { label: 'Ir a matrícula', onClick: () => {} },
-                        ...(row.status === 'Aplicado' ? [{ label: 'Reversar pago', onClick: () => handleOpenReverse(row), danger: true }] : []),
+                        { label: 'Ver evidencias', onClick: () => handleOpenDetail(row) },
+                        ...(row.enrollmentIds.length > 0
+                          ? [{ label: 'Ir a la matrícula', onClick: () => navigate(`/operacion/matriculas?ficha=${row.enrollmentIds[0]}`) }]
+                          : []),
+                        ...(row.enrollmentIds.length > 0 && plans.some(pl => pl.mat === row.enrollmentIds[0])
+                          ? [{ label: 'Ver plan', onClick: () => navigate(`/operacion/planes-y-cartera?plan=${plans.find(pl => pl.mat === row.enrollmentIds[0])!.id}`) }]
+                          : []),
+                        ...(row.status === 'Aplicado'
+                          ? [canReverse
+                            ? { label: 'Reversar pago', onClick: () => setReverseId(row.id), danger: true }
+                            : { label: 'Reversar pago (requiere autorización)', onClick: () => {}, danger: true, disabled: true }]
+                          : []),
                       ]} 
                     />
                   </td>
@@ -242,7 +255,7 @@ export function Payments() {
                 <h3 className="text-xl font-semibold text-text-primary">{selectedPayment.currency === 'PEN' ? 'S/' : '$'} {selectedPayment.amount}</h3>
                 <p className="text-sm text-text-secondary">{selectedPayment.date}</p>
               </div>
-              <Badge variant={selectedPayment.status === 'Aplicado' ? 'success' : 'neutral'}>{selectedPayment.status}</Badge>
+              <Badge variant={selectedPayment.status === 'Aplicado' ? 'success' : selectedPayment.status === 'Anulado' ? 'danger' : 'neutral'}>{selectedPayment.status}</Badge>
             </div>
 
             <div className="grid grid-cols-2 gap-4 bg-surface-muted p-4 rounded-xl border border-border-soft">
@@ -265,6 +278,18 @@ export function Payments() {
                 <span className="text-sm font-medium text-text-primary">{selectedPayment.mat}</span>
               </div>
             </div>
+
+            {selectedPayment.reversal && (
+              <div className="bg-danger-tint/50 border border-danger-text/20 rounded-xl p-4 text-sm space-y-1">
+                <p className="font-semibold text-danger-text">Pago reversado</p>
+                <p className="text-text-primary">{selectedPayment.reversal.reason} · por {selectedPayment.reversal.by} el {localDateOf(selectedPayment.reversal.at)}</p>
+                <p className="text-text-secondary">{selectedPayment.reversal.detail}</p>
+                <p className="text-text-secondary">
+                  {selectedPayment.reversal.refunded ? 'Se devolvió el dinero al cliente (egreso en caja).' : 'El dinero no ingresó: ingresos de caja reversados.'}
+                  {selectedPayment.reversal.creditNote ? ` Nota de crédito: ${selectedPayment.reversal.creditNote}.` : ''}
+                </p>
+              </div>
+            )}
 
             {selectedPayment.parts.length > 0 && (
               <div>
@@ -295,10 +320,16 @@ export function Payments() {
 
             <div>
               <span className="block text-sm font-medium text-text-secondary mb-2">Evidencia adjunta</span>
-              <div className="w-full h-48 bg-surface-muted border border-border-soft rounded-xl flex items-center justify-center">
-                <ImageIcon size={32} className="text-text-muted opacity-30" />
-                <span className="ml-2 text-sm text-text-muted">Vista previa no disponible</span>
-              </div>
+              {selectedPayment.parts.some((pt: any) => pt.evidence) ? (
+                <ul className="border border-border-soft rounded-xl divide-y divide-border-soft text-sm">
+                  {selectedPayment.parts.filter((pt: any) => pt.evidence).map((pt: any, i: number) => (
+                    <li key={i} className="px-4 py-2 flex items-center gap-2"><ImageIcon size={16} className="text-text-muted" /> {pt.evidence} <span className="text-text-muted">· {pt.method}</span></li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-text-muted bg-surface-muted border border-border-soft rounded-xl px-4 py-3">Este pago no tiene evidencias adjuntas (por ejemplo, un pago en efectivo).</p>
+              )}
+              <p className="text-xs text-text-muted mt-1.5">El sistema aún no almacena los archivos: solo conserva su nombre.</p>
             </div>
 
             <div className="pt-4 border-t border-border-soft text-xs text-text-muted flex justify-between">
@@ -309,37 +340,8 @@ export function Payments() {
         )}
       </Modal>
 
-      {/* Reversar Pago Modal */}
-      <Modal
-        isOpen={isReverseOpen}
-        onClose={() => setIsReverseOpen(false)}
-        title="Reversar Pago"
-        size="md"
-        footer={
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setIsReverseOpen(false)}>Cancelar</Button>
-            <Button variant="primary" className="bg-danger-tint text-danger-text hover:bg-danger-tint/80 border-none">Confirmar reversa</Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="bg-danger-tint/50 border border-danger-text/20 rounded-xl p-4 flex gap-3">
-            <AlertTriangle size={20} className="text-danger-text shrink-0" />
-            <div className="text-sm text-danger-text">
-              <p className="font-semibold mb-1">¿Estás seguro de reversar este pago?</p>
-              <p>Esta acción anulará el pago, devolverá la cuota a estado pendiente y registrará un movimiento de salida en caja. Esta acción requiere permisos especiales y quedará auditada.</p>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-text-secondary">Motivo de la reversa *</label>
-            <textarea 
-              className="w-full h-24 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-danger-text outline-none resize-none" 
-              placeholder="Explica detalladamente por qué se está reversando este pago..."
-            ></textarea>
-          </div>
-        </div>
-      </Modal>
+      {/* Reversar pago: anula el pago, repone la cuota y ajusta la caja */}
+      <ReversePaymentModal paymentId={reverseId} onClose={() => setReverseId(null)} />
     </div>
   );
 }

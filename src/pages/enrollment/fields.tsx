@@ -1,23 +1,28 @@
 import React from 'react';
 import type { DocType, DraftPerson } from '../../utils/enrollment';
 import { ageOn, emptyPerson } from '../../utils/enrollment';
+import { DateInput } from '../../components/ui/DateInput';
 
 export const inputCls =
   'w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none disabled:bg-surface-muted disabled:text-text-muted';
 
+/** Campo con su etiqueta (asterisco si es obligatorio), una ayuda y, si hay, el error de ese campo. */
 export function Field({
-  label, required, hint, className = '', children,
-}: { label: string; required?: boolean; hint?: string; className?: string; children: React.ReactNode }) {
+  label, required, hint, error, className = '', children,
+}: { label: string; required?: boolean; hint?: string; error?: string; className?: string; children: React.ReactNode }) {
   return (
     <div className={`space-y-1.5 ${className}`}>
       <label className="text-sm font-medium text-text-secondary">
         {label}{required && <span className="text-error"> *</span>}
       </label>
       {children}
-      {hint && <p className="text-xs text-text-muted">{hint}</p>}
+      {error ? <p className="text-xs text-danger-text">{error}</p> : hint && <p className="text-xs text-text-muted">{hint}</p>}
     </div>
   );
 }
+
+/** Estilo de un campo con error. */
+export const errorCls = 'border-danger-text! focus:border-danger-text!';
 
 export function StepHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
@@ -213,7 +218,7 @@ export function PersonForm({
           <input className={`${inputCls} font-mono`} disabled={disabled} value={person.docNumber} onChange={e => set({ docNumber: e.target.value })} />
         </Field>
         <Field label="Fecha de nacimiento" required hint={age !== null && age >= 0 ? `Edad: ${age} años` : undefined}>
-          <input type="date" max={today} className={inputCls} disabled={disabled} value={person.birthDate} onChange={e => set({ birthDate: e.target.value })} />
+          <DateInput max={today} className={inputCls} disabled={disabled} value={person.birthDate} onChange={e => set({ birthDate: e.target.value })} />
         </Field>
         {!hidePhone && (
           <Field label="Teléfono">
