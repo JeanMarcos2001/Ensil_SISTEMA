@@ -1,7 +1,7 @@
 /**
  * Reglas de la Programación de asesorías y utilidades del calendario (funciones puras).
  */
-import type { CapacityConfig, CapacityOverride, Enrollment, MonthlySchedule, Schedule, ScheduleActivity, Student } from '../context/DataContext';
+import type { ActivityAttendance, CapacityConfig, CapacityOverride, Enrollment, MonthlySchedule, Schedule, ScheduleActivity, Student } from '../context/DataContext';
 
 export const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 export const WEEKDAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -107,7 +107,7 @@ export function slotsForDate(iso: string): string[] {
   return [];
 }
 
-const to12h = (hhmm: string) => {
+export const to12h = (hhmm: string) => {
   const [h, m] = hhmm.split(':').map(Number);
   const suffix = h >= 12 ? 'p. m.' : 'a. m.';
   return `${h % 12 === 0 ? 12 : h % 12}:${pad(m)} ${suffix}`;
@@ -173,17 +173,26 @@ export const changeBlockedByNotice = (s: Pick<Schedule, 'status' | 'date' | 'tim
  *  - Asistió y Registrar sesión: desde el día de la asesoría (la sesión solo existe si hubo asesoría).
  *  - Faltó: desde el día de la asesoría.
  */
-export function availableActions(s: Pick<Schedule, 'status' | 'date' | 'time'>, today: string, now: Date = new Date()): ScheduleAction[] {
+export function availableActions(
+  s: Pick<Schedule, 'status' | 'date' | 'time'>,
+  today: string,
+  now: Date = new Date(),
+  /** Primera asesoría cuya matrícula no está verificada: no se registra y se puede reprogramar sin las 24 horas. */
+  unverifiedFirst = false,
+  /** La institución puede cancelar o reprogramar con menos de 24 horas (con permiso y motivo). */
+  institutional = false
+): ScheduleAction[] {
   const active = ACTIVE_STATUSES.includes(s.status);
   const attended = s.status === 'Asistió';
-  const due = s.date <= today;
+  const due = s.date <= today && !unverifiedFirst;
   const withNotice = canChangeWithNotice(s.date, s.time, now);
   const out: ScheduleAction[] = [];
-  if ((active && !attended && withNotice) || !active) out.push('reprogramar');
+  const freeToChange = withNotice || unverifiedFirst || institutional;
+  if ((active && !attended && freeToChange) || !active) out.push('reprogramar');
   if (active && !attended && due) out.push('asistio');
   if (active && due) out.push('sesion');
   if (active && !attended && due) out.push('falta');
-  if (active && !attended && withNotice) out.push('cancelar');
+  if (active && !attended && (withNotice || institutional)) out.push('cancelar');
   return out;
 }
 
@@ -316,8 +325,12 @@ export interface FlatActivity {
   start: string;
   end: string;
   responsible: string;
+  /** Personal a cargo (si se asignó desde Actividades especiales). */
+  responsibleId?: string;
   capacity: number | null;
   enrolled: string[];
+  /** Asistencia de los inscritos (alumno → estado). */
+  attendance: Record<string, ActivityAttendance>;
 }
 
 export function allActivities(monthly: MonthlySchedule[]): FlatActivity[] {
@@ -327,7 +340,7 @@ export function allActivities(monthly: MonthlySchedule[]): FlatActivity[] {
       .map(a => ({
         id: `${m.id}:${a.id}`, monthlyId: m.id, activityId: a.id, branchId: m.branchId, sede: m.sede,
         name: a.actividad, date: a.fecha, start: a.horaInicio, end: a.horaFin,
-        responsible: a.responsable, capacity: a.cupo, enrolled: a.inscritos,
+        responsible: a.responsable, responsibleId: a.responsableId, capacity: a.cupo, enrolled: a.inscritos, attendance: a.asistencia ?? {},
       }))
   );
 }
@@ -433,8 +446,10 @@ export function validateActivityEnrollment(args: {
 export const withEnrollment = (a: ScheduleActivity, studentId: string): ScheduleActivity =>
   a.inscritos.includes(studentId) ? a : { ...a, inscritos: [...a.inscritos, studentId] };
 
-export const withoutEnrollment = (a: ScheduleActivity, studentId: string): ScheduleActivity =>
-  ({ ...a, inscritos: a.inscritos.filter(id => id !== studentId) });
+export const withoutEnrollment = (a: ScheduleActivity, studentId: string): ScheduleActivity => {
+  const { [studentId]: _removed, ...rest } = a.asistencia ?? {};
+  return { ...a, inscritos: a.inscritos.filter(id => id !== studentId), asistencia: rest };
+};
 
 // ---------------------------------------------------------------- Estado de un horario (cupo + actividades)
 

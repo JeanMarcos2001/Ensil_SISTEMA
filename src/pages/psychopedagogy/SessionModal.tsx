@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type FirstSessionChecklist, type Schedule } from '../../context/DataContext';
 import { longDayLabel, slotLabel } from '../../utils/schedule';
+import { METRIC_LABEL, MIN_NOTE, noteProblem, previousMetrics, validateMetrics } from '../../utils/sessionMetrics';
 import { SessionMetricsForm } from './SessionMetricsForm';
 import { labelCls, textareaCls } from './formStyles';
 
@@ -27,16 +28,16 @@ const CHECKS: { key: keyof FirstSessionChecklist; label: string; required: boole
  * incluye el checklist de cierre. Guardar marca la asesoría como «Asistió».
  */
 export function SessionModal({ schedule, onClose }: Props) {
-  const { students, trackings, addTracking, updateTracking, updateSchedule } = useData();
+  const { students, trackings, addTracking, updateTracking, updateSchedule, attendanceBlockOf, programs, levels } = useData();
   const existing = schedule ? trackings.find(t => t.scheduleId === schedule.id) : undefined;
   const [metrics, setMetrics] = useState<Record<string, any>>({});
   const [observations, setObservations] = useState('');
   const [checklist, setChecklist] = useState<FirstSessionChecklist>(emptyChecklist());
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string[]>([]);
 
   useEffect(() => {
     if (!schedule) return;
-    setError(null);
+    setError([]);
     setMetrics(existing?.metrics ?? {});
     setObservations(existing?.observations ?? '');
     setChecklist(existing?.checklist ?? emptyChecklist());
@@ -47,15 +48,27 @@ export function SessionModal({ schedule, onClose }: Props) {
   const student = students.find(s => s.id === schedule.studentId) ?? students.find(s => s.name === schedule.student);
   const pendingChecks = schedule.isFirst ? CHECKS.filter(c => c.required && !checklist[c.key]) : [];
 
+  // Métricas del programa: rangos, obligatorias y comparación con la sesión anterior del alumno
+  const programName = schedule.program.split(' - ')[0];
+  const programId = programs.find(p => p.name === programName)?.id;
+  const levelNames = levels.filter(l => l.programId === programId && l.status === 'Activo').sort((a, b) => a.order - b.order).map(l => l.name);
+  const previous = student ? previousMetrics(trackings, student.id, schedule.date, schedule.id) : null;
+  const check = validateMetrics(schedule.program, metrics, { previous, levels: levelNames, enrollmentLevel: schedule.level });
+
   const handleSave = () => {
-    if (!student) { setError('La asesoría no está vinculada a una ficha de alumno; no se puede registrar la sesión.'); return; }
-    if (pendingChecks.length > 0) {
-      setError(`Para cerrar la primera asesoría marque: ${pendingChecks.map(c => c.label.toLowerCase()).join(' y ')}.`);
-      return;
-    }
+    // La verificación (entrega de materiales) va antes de la primera asesoría
+    const blocked = attendanceBlockOf(schedule);
+    if (blocked) { setError([blocked]); return; }
+    if (!student) { setError(['La asesoría no está vinculada a una ficha de alumno; no se puede registrar la sesión.']); return; }
+    const problems: string[] = [];
+    if (pendingChecks.length > 0) problems.push(`Para cerrar la primera asesoría marque: ${pendingChecks.map(c => c.label.toLowerCase()).join(' y ')}.`);
+    problems.push(...check.errors);
+    if (schedule.isFirst && observations.trim().length < MIN_NOTE) problems.push('En la primera asesoría anote el diagnóstico inicial en las observaciones.');
+    else { const note = noteProblem(check, observations); if (note) problems.push(note); }
+    if (problems.length > 0) { setError(problems); return; }
     const record = {
       studentId: student.id, scheduleId: schedule.id, date: schedule.date, status: 'Asistió',
-      metrics, observations: observations.trim(), checklist: schedule.isFirst ? checklist : undefined,
+      metrics: check.clean, observations: observations.trim(), checklist: schedule.isFirst ? checklist : undefined,
     };
     if (existing) updateTracking(existing.id, record);
     else addTracking(record);
@@ -85,10 +98,10 @@ export function SessionModal({ schedule, onClose }: Props) {
       }
     >
       <div className="space-y-6 pb-4">
-        {error && (
+        {error.length > 0 && (
           <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <p>{error}</p>
+            <ul className="space-y-0.5">{error.map(e => <li key={e}>{e}</li>)}</ul>
           </div>
         )}
 
@@ -125,7 +138,7 @@ export function SessionModal({ schedule, onClose }: Props) {
                     type="checkbox"
                     className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
                     checked={checklist[c.key]}
-                    onChange={e => { setError(null); setChecklist({ ...checklist, [c.key]: e.target.checked }); }}
+                    onChange={e => { setError([]); setChecklist({ ...checklist, [c.key]: e.target.checked }); }}
                   />
                   <span className="text-sm text-text-primary">{c.label}{c.required && <span className="text-error"> *</span>}</span>
                 </label>
@@ -138,12 +151,18 @@ export function SessionModal({ schedule, onClose }: Props) {
           <div className="pb-2 border-b border-border-soft">
             <h3 className="text-base font-semibold text-text-primary">Avance de la sesión</h3>
           </div>
-          <SessionMetricsForm program={schedule.program} metrics={metrics} onChange={setMetrics} />
+          <SessionMetricsForm program={schedule.program} metrics={metrics} onChange={m => { setError([]); setMetrics(m); }} levels={levelNames} />
+          {previous && <p className="text-xs text-text-muted">Sesión anterior: {Object.entries(previous).map(([k, v]) => `${METRIC_LABEL[k] ?? k}: ${v}`).join(' · ')}</p>}
+          {check.warnings.length > 0 && (
+            <div className="bg-warning-tint/60 border border-warning-text/20 rounded-xl p-3 text-sm text-warning-text space-y-1">
+              {check.warnings.map(w => <p key={w.text}>{w.text}{w.needsNote ? ' Explíquelo en las observaciones.' : ''}</p>)}
+            </div>
+          )}
           <div>
-            <label className={labelCls}>Observaciones</label>
+            <label className={labelCls}>Observaciones{(schedule.isFirst || check.needsNote) && <span className="text-error"> *</span>}</label>
             <textarea
               className={`${textareaCls} h-28`}
-              placeholder="¿Qué trabajó el alumno? ¿Cómo avanzó?"
+              placeholder={schedule.isFirst ? 'Diagnóstico inicial: punto de partida del alumno.' : '¿Qué trabajó el alumno? ¿Cómo avanzó?'}
               value={observations}
               onChange={e => setObservations(e.target.value)}
             ></textarea>

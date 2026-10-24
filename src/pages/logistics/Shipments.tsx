@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2, ArrowRight, Calendar, Clock, MapPin, Save } from 'lucide-react';
 import { useData, ShippingMethod, Courier, ShipmentItem, Shipment, ShipmentBox, ShipmentBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
+import { todayLocalISO } from '../../utils/schedule';
 
 export function Shipments() {
   const { 
@@ -63,7 +64,7 @@ export function Shipments() {
   // New Shipment Form State
   const [destinationId, setDestinationId] = useState('');
   const [observation, setObservation] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalISO());
   const [eta, setEta] = useState('');
   const [etaTime, setEtaTime] = useState('');
   

@@ -1,31 +1,51 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Drawer } from '../components/ui/Drawer';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, MapPin, UserCheck, X } from 'lucide-react';
+import { Search, Download, MapPin, UserCheck, X } from 'lucide-react';
 import { useData, Assignment, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
-import { DateInput } from '../components/ui/DateInput';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { ReasonDialog } from '../components/ui/ReasonDialog';
+import { AssignmentFormModal } from './people/AssignmentFormModal';
+import { AREAS, closeImpact, isActive } from '../utils/assignments';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
+import { allActivities, todayLocalISO } from '../utils/schedule';
 
 export function AssignmentsPage() {
-  const { assignments, staff, branches } = useData();
+  const { assignments, staff, branches, schedules, monthlySchedules, closeAssignment } = useData();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const staffFilter = params.get('trabajador') ?? '';
+  const filteredStaff = staff.find(s => s.id === staffFilter);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Assignment | null>(null);
+  const [toClose, setToClose] = useState<Assignment | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedArea, setSelectedArea] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
+  const today = todayLocalISO();
 
   const filteredAssignments = assignments.filter(asg => {
     const staffName = `${staff.find(s => s.id === asg.staffId)?.names || ''} ${staff.find(s => s.id === asg.staffId)?.lastNameP || ''}`.toLowerCase();
     const matchesSearch = staffName.includes(searchTerm.toLowerCase()) || asg.branch.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBranch = !selectedBranch || asg.branch === selectedBranch;
-    return matchesSearch && matchesBranch;
+    const matchesArea = !selectedArea || asg.area === selectedArea;
+    const matchesStatus = !selectedStatus || asg.status === selectedStatus;
+    const matchesStaff = !staffFilter || asg.staffId === staffFilter;
+    return matchesSearch && matchesBranch && matchesArea && matchesStatus && matchesStaff;
   });
+  const hasFilters = !!(searchTerm || selectedBranch || selectedArea || selectedStatus || staffFilter);
+  const clearFilters = () => { setSearchTerm(''); setSelectedBranch(''); setSelectedArea(''); setSelectedStatus(''); setParams({}); };
 
   const totalPages = Math.ceil(filteredAssignments.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -34,7 +54,7 @@ export function AssignmentsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, selectedBranch, selectedArea, selectedStatus, staffFilter]);
 
   const handleOpenDetail = (assignment: Assignment) => {
     setSelectedAssignment(assignment);
@@ -46,6 +66,22 @@ export function AssignmentsPage() {
     return member ? `${member.names} ${member.lastNameP} ${member.lastNameM}` : 'Desconocido';
   };
 
+  const openNew = () => { setEditing(null); setIsFormOpen(true); };
+  const openEdit = (a: Assignment) => { setEditing(a); setIsFormOpen(true); };
+
+  const impact = useMemo(
+    () => (toClose ? closeImpact(toClose, assignments, staff.find(s => s.id === toClose.staffId), schedules, today, allActivities(monthlySchedules)) : undefined),
+    [toClose, assignments, staff, schedules, today]
+  );
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Asignaciones', today),
+      ['Trabajador', 'Sede', 'Área', 'Cargo', 'Rol del sistema', 'Principal', 'Estado', 'Inicio', 'Fin', 'Motivo de cierre'],
+      filteredAssignments.map(a => [getStaffName(a.staffId), a.branch, a.area, a.role, a.systemRole ?? '', a.isMain ? 'Sí' : 'No', a.status, a.startDate, a.endDate ?? '', a.closeReason ?? ''])
+    );
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -55,11 +91,11 @@ export function AssignmentsPage() {
           <p className="text-sm text-text-secondary">Vínculo entre trabajador, sede, área y cargo</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredAssignments.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={() => setIsFormOpen(true)} className="flex items-center gap-2">
+          <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
             <MapPin size={16} />
             Nueva asignación
           </Button>
@@ -90,22 +126,32 @@ export function AssignmentsPage() {
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Área</option>
-              <option value="admin">Administración</option>
-              <option value="psico">Psicopedagogía</option>
-              <option value="logistica">Logística</option>
+            <select
+              value={selectedArea}
+              onChange={(e) => setSelectedArea(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todas las áreas</option>
+              {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Estado</option>
-              <option value="activa">Activa</option>
-              <option value="inactiva">Inactiva</option>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los estados</option>
+              <option value="Activa">Activa</option>
+              <option value="Cerrada">Cerrada</option>
             </select>
-            <Button variant="secondary" className="shrink-0 px-3">
-              <Filter size={16} />
-            </Button>
+            <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
+        {filteredStaff && (
+          <div className="mt-3 flex items-center gap-2 text-sm">
+            <Badge variant="primary">Trabajador: {filteredStaff.names} {filteredStaff.lastNameP}</Badge>
+            <button className="text-xs text-text-muted hover:text-text-primary underline" onClick={() => setParams({})}>Quitar filtro</button>
+          </div>
+        )}
       </Card>
 
       {/* Data Table */}
@@ -134,14 +180,17 @@ export function AssignmentsPage() {
                     {asg.isMain ? <Badge variant="primary">Sí</Badge> : <Badge variant="secondary">No</Badge>}
                   </td>
                   <td className="px-6 py-4">
-                    <Badge variant={asg.status === 'Activa' ? 'success' : 'danger'}>{asg.status}</Badge>
+                    <Badge variant={asg.status === 'Activa' ? 'success' : 'neutral'}>{asg.status}</Badge>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(asg) },
-                        { label: 'Editar asignación', onClick: () => {} },
-                        { label: 'Cerrar asignación', onClick: () => {}, danger: true },
+                        { label: 'Ver trabajador', onClick: () => navigate(`/personas/personal?ficha=${asg.staffId}`) },
+                        ...(isActive(asg) ? [
+                          { label: 'Editar asignación', onClick: () => openEdit(asg) },
+                          { label: 'Cerrar asignación', onClick: () => setToClose(asg), danger: true },
+                        ] : []),
                       ]} 
                     />
                   </td>
@@ -240,11 +289,26 @@ export function AssignmentsPage() {
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Estado</label>
                   <div className="mt-1">
-                    <Badge variant={selectedAssignment.status === 'Activa' ? 'success' : 'danger'}>{selectedAssignment.status}</Badge>
+                    <Badge variant={selectedAssignment.status === 'Activa' ? 'success' : 'neutral'}>{selectedAssignment.status}</Badge>
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">{selectedAssignment.status === 'Activa' ? 'Fecha de fin prevista' : 'Fecha de cierre'}</label>
+                  <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.endDate || '—'}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Rol del sistema</label>
+                  <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.systemRole || '—'}</p>
                 </div>
               </div>
             </section>
+
+            {selectedAssignment.status === 'Cerrada' && (
+              <section className="bg-surface-muted p-4 rounded-xl border border-border-soft">
+                <label className="text-xs text-text-muted uppercase tracking-wider">Motivo del cierre</label>
+                <p className="text-sm text-text-primary mt-1">{selectedAssignment.closeReason || '—'}{selectedAssignment.closedBy ? ` · ${selectedAssignment.closedBy}` : ''}</p>
+              </section>
+            )}
 
             <section>
               <label className="text-xs text-text-muted uppercase tracking-wider">Observaciones</label>
@@ -254,85 +318,43 @@ export function AssignmentsPage() {
         )}
       </Modal>
 
-      {/* Form Modal */}
-      <Modal
-        isOpen={isFormOpen}
-        onClose={() => setIsFormOpen(false)}
-        title="Nueva Asignación"
-        size="2xl"
-        footer={
-          <div className="flex justify-end gap-3 w-full">
-            <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => setIsFormOpen(false)}>Guardar Asignación</Button>
-          </div>
-        }
+      <AssignmentFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editing} presetStaffId={staffFilter || undefined} />
+
+      <ReasonDialog
+        isOpen={!!toClose}
+        onClose={() => setToClose(null)}
+        title="Cerrar asignación"
+        confirmLabel="Cerrar asignación"
+        danger
+        reasonLabel="Motivo"
+        reasons={['Cambio de sede o de área', 'Fin del encargo', 'Renuncia o cese', 'Otro']}
+        detailLabel="Explicación"
+        dateLabel="Fecha de cierre"
+        dateMin={toClose?.startDate}
+        dateMax={today}
+        dateDefault={today}
+        blocked={impact?.blocked ? `Es su última asignación de Psicopedagogía y tiene ${impact.futureSessions.length} asesoría(s) y ${impact.futureActivities.length} actividad(es) futura(s) a su nombre. Reasígnelas en Psicopedagogía → Programación (y Actividades especiales) y vuelva a intentarlo.` : null}
+        onSubmit={({ reason, detail, date }) => {
+          if (!toClose) return;
+          if (!reason) return 'Seleccione el motivo del cierre.';
+          const r = closeAssignment(toClose.id, date, `${reason} — ${detail.trim()}`);
+          return r.ok ? null : r.error ?? 'No se pudo cerrar la asignación.';
+        }}
       >
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-text-primary">Trabajador</label>
-            <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-              <option value="">Seleccionar trabajador...</option>
-              {staff.map(s => (
-                <option key={s.id} value={s.id}>{s.names} {s.lastNameP} {s.lastNameM}</option>
-              ))}
-            </select>
+        {toClose && impact && (
+          <div className="space-y-3 text-sm">
+            <p className="text-text-secondary">
+              Se cerrará la asignación de <span className="font-medium text-text-primary">{getStaffName(toClose.staffId)}</span> como {toClose.role} en {toClose.branch} ({toClose.area}). No se borra: queda en el historial.
+            </p>
+            <ul className="space-y-1 text-text-secondary list-disc pl-5">
+              {impact.promoted && <li>«{impact.promoted.role} · {impact.promoted.branch}» pasará a ser su asignación principal.</li>}
+              {impact.noneLeft && <li>Quedará sin ninguna asignación activa: no aparecerá en las listas de responsables.</li>}
+              {impact.leavesInterviewers && <li>Dejará de aparecer como responsable de entrevistas y asesorías.</li>}
+              {!impact.promoted && !impact.noneLeft && !impact.leavesInterviewers && <li>No cambia su asignación principal ni sus otras asignaciones.</li>}
+            </ul>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Sede</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                {branches.map(b => (
-                  <option key={b.id} value={b.name}>{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Área</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                <option value="Administración">Administración</option>
-                <option value="Psicopedagogía">Psicopedagogía</option>
-                <option value="Logística">Logística</option>
-                <option value="Ventas">Ventas</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Cargo</label>
-              <input type="text" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" placeholder="Ej: Psicólogo Senior" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Rol del Sistema</label>
-              <select className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent">
-                <option value="Administración">Administración</option>
-                <option value="Psicopedagogía">Psicopedagogía</option>
-                <option value="Ventas">Ventas</option>
-                <option value="Sin acceso">Sin acceso</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Fecha de Inicio</label>
-              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-text-primary">Fecha de Fin (Opcional)</label>
-              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent" />
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-4 bg-surface-muted rounded-xl border border-border-soft">
-            <div>
-              <p className="text-sm font-medium text-text-primary">Asignación Principal</p>
-              <p className="text-xs text-text-secondary">Define si esta es la sede y cargo base del trabajador</p>
-            </div>
-            <input type="checkbox" className="w-5 h-5 accent-primary-accent" />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-text-primary">Observaciones</label>
-            <textarea className="w-full h-24 bg-surface border border-border-soft rounded-xl p-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent resize-none" placeholder="Detalles adicionales de la asignación..."></textarea>
-          </div>
-        </div>
-      </Modal>
+        )}
+      </ReasonDialog>
     </div>
   );
 }

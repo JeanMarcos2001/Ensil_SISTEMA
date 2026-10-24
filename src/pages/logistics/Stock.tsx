@@ -4,13 +4,18 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
-import { Search, Filter, Plus, Download, Package, AlertTriangle, History, ArrowRight, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
+import { Search, Plus, Download, Package, AlertTriangle, History, ArrowRight, ArrowDownRight, ArrowUpRight, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ClearFilters } from '../../components/ui/ClearFilters';
+import { csvFileName, downloadCsv } from '../../utils/exportCsv';
+import { todayLocalISO } from '../../utils/schedule';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 
 export function Stock() {
   const { stockItems, items, branches, unpackPackage, packPackage, updateStock, addAdjustment, updateMinStock, currentBranchId } = useData();
+  const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
   const [isUnpackOpen, setIsUnpackOpen] = useState(false);
@@ -97,6 +102,20 @@ export function Stock() {
     return matchesSearch && matchesBranch && matchesType && matchesStatus;
   });
 
+  const hasFilters = !!(searchTerm || branchFilter || typeFilter || statusFilter);
+  const clearFilters = () => { setSearchTerm(''); setBranchFilter(''); setTypeFilter(''); setStatusFilter(''); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Stock', todayLocalISO()),
+      ['Artículo', 'Código', 'Tipo', 'Sede', 'Stock', 'Stock mínimo', 'Estado'],
+      filteredStocks.map(s => {
+        const item = items.find(i => i.id === s.itemId);
+        return [item?.name ?? s.itemId, s.itemId, item?.type ?? '', branches.find(b => b.id === s.branchId)?.name ?? s.branchId, s.stock, s.minStock, getStockStatus(s.stock, s.minStock)];
+      })
+    );
+  };
+
   const totalPages = Math.ceil(filteredStocks.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -115,7 +134,7 @@ export function Stock() {
           <p className="text-sm text-text-secondary">Monitoreo de inventario y registro de ingresos por sede</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredStocks.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
@@ -183,9 +202,7 @@ export function Stock() {
                 <option value="Bajo mínimo">Bajo mínimo</option>
                 <option value="Sin stock">Sin stock</option>
               </select>
-              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
-                <Filter size={16} />
-              </Button>
+              <ClearFilters active={hasFilters} onClear={clearFilters} className="h-10 rounded-xl" />
             </div>
           </div>
         </div>
@@ -388,7 +405,7 @@ export function Stock() {
                     <History size={16} className="text-text-muted" />
                     Últimos Movimientos
                   </h4>
-                  <Button variant="ghost" className="text-xs h-auto py-1 px-2 text-primary-accent">Ver Kardex completo</Button>
+                  <Button variant="ghost" className="text-xs h-auto py-1 px-2 text-primary-accent" onClick={() => navigate(`/logistica/kardex?material=${encodeURIComponent(items.find(i => i.id === selectedStock?.itemId)?.name ?? '')}`)}>Ver Kardex completo</Button>
                 </div>
                 <div className="border border-border-soft rounded-xl overflow-hidden">
                   <table className="w-full text-sm text-left">
@@ -515,7 +532,7 @@ export function Stock() {
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha del movimiento *</label>
-              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" defaultValue={new Date().toISOString().split('T')[0]} />
+              <DateInput className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" defaultValue={todayLocalISO()} />
             </div>
           </div>
 

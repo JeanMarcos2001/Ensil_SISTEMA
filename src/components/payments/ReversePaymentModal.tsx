@@ -5,6 +5,7 @@ import { Modal } from '../ui/Modal';
 import { useData } from '../../context/DataContext';
 import { REFUND_REASON, REVERSAL_REASONS, applyReversalToPlan, reversalTargets, validateReversal } from '../../utils/paymentReversal';
 import { todayLocalISO } from '../../utils/schedule';
+import { NOTE_SERIES, allowedNoteModes, documentOf, nextNoteNumber, noteLabel, validateNoteChoice, type NoteMode } from '../../utils/creditNotes';
 import { Field, inputCls } from '../../pages/enrollment/fields';
 
 interface Props {
@@ -26,10 +27,11 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
   const [detail, setDetail] = useState('');
   const [refunded, setRefunded] = useState(false);
   const [creditNote, setCreditNote] = useState('');
+  const [noteMode, setNoteMode] = useState<NoteMode>('emitir');
   const [error, setError] = useState<string | null>(null);
   const today = todayLocalISO();
 
-  useEffect(() => { setReason(''); setDetail(''); setRefunded(false); setCreditNote(''); setError(null); }, [paymentId]);
+  useEffect(() => { setReason(''); setDetail(''); setRefunded(false); setCreditNote(''); setError(null); setNoteMode(payment ? allowedNoteModes(payment)[0] : 'emitir'); }, [paymentId]);
 
   const ctx = useMemo(() => ({ payments: data.payments, plans: data.plans, enrollments: data.enrollments, groups: data.promotionGroups }), [data.payments, data.plans, data.enrollments, data.promotionGroups]);
 
@@ -48,10 +50,16 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
   const refundForced = reason === REFUND_REASON;
   const effectiveRefund = refundForced || refunded;
   const verified = impacts.filter(i => i.enrollment?.verificationStatus && i.enrollment.verificationStatus !== 'Pendiente');
-  const problems = validateReversal(payment, { reason, detail, refunded: effectiveRefund, creditNote }, ctx);
+  const problems = [
+    ...validateReversal(payment, { reason, detail, refunded: effectiveRefund, creditNote, creditNoteMode: noteMode }, ctx),
+    ...validateNoteChoice(payment, noteMode, creditNote, detail, data.creditNotes),
+  ];
+  const doc = documentOf(payment);
+  const modes = allowedNoteModes(payment);
+  const nextLabel = doc ? noteLabel(NOTE_SERIES[doc.type], nextNoteNumber(data.creditNotes, NOTE_SERIES[doc.type])) : '';
 
   const handleSave = () => {
-    const r = data.reversePayment(payment.id, { reason, detail, refunded: effectiveRefund, creditNote });
+    const r = data.reversePayment(payment.id, { reason, detail, refunded: effectiveRefund, creditNote, creditNoteMode: noteMode });
     if (!r.ok) { setError(r.error ?? 'No se pudo reversar el pago.'); return; }
     onClose();
   };
@@ -131,9 +139,31 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
               {REVERSAL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           </Field>
-          <Field label="N.º de nota de crédito" hint="Opcional: si ya emitió una para anular el comprobante.">
-            <input className={inputCls} value={creditNote} onChange={e => setCreditNote(e.target.value)} placeholder="Ej: BC01-000012" />
-          </Field>
+          <div className="md:col-span-2 border border-border-soft rounded-xl p-4 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-text-primary">Comprobante {doc ? `${doc.serie}-${doc.number} (${doc.type.toLowerCase()})` : '(el pago no tiene comprobante)'}</p>
+              <p className="text-xs text-text-secondary">{doc ? 'Un comprobante entregado no se borra ni se reutiliza: se anula con una nota de crédito.' : 'No corresponde nota de crédito.'}</p>
+            </div>
+            {doc && (
+              <div className="space-y-2">
+                {([
+                  ['emitir', `Emitir la nota de crédito (el sistema le asigna ${nextLabel})`],
+                  ['externa', 'Registrar una nota que ya se emitió en otro sistema de facturación'],
+                  ['no-entregado', 'El comprobante nunca se entregó al cliente (se deja constancia)'],
+                ] as [NoteMode, string][]).filter(([m]) => modes.includes(m)).map(([m, label]) => (
+                  <label key={m} className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input type="radio" name="note-mode" className="mt-1" checked={noteMode === m} onChange={() => { setNoteMode(m); setError(null); }} />
+                    <span className="text-text-primary">{label}</span>
+                  </label>
+                ))}
+                {noteMode === 'externa' && (
+                  <Field label="N.º de la nota emitida" required hint={`Formato ${NOTE_SERIES[doc.type]}-000001`}>
+                    <input className={inputCls} value={creditNote} onChange={e => { setCreditNote(e.target.value); setError(null); }} placeholder={`Ej: ${NOTE_SERIES[doc.type]}-000012`} />
+                  </Field>
+                )}
+              </div>
+            )}
+          </div>
           <Field label="Explicación" required className="md:col-span-2" hint="Qué ocurrió. Queda en el historial del pago y de la matrícula.">
             <textarea
               className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none"
@@ -156,7 +186,7 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
           </label>
         </section>
 
-        {problems.length > 0 && (reason || detail) && <p className="text-xs text-text-muted">{problems[0]}</p>}
+        {problems.length > 0 && (reason || detail || creditNote) && <p className="text-xs text-text-muted">{problems[0]}</p>}
       </div>
     </Modal>
   );

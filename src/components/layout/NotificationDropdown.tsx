@@ -102,8 +102,12 @@ export function NotificationDropdown() {
           
           {filteredNotifications.length > 0 && (
             <div className="p-3 border-t border-border-soft text-center bg-surface-muted/30">
-              <button className="text-xs font-medium text-primary-accent hover:underline">
-                Ver todas las notificaciones
+              <button
+                className="text-xs font-medium text-primary-accent hover:underline disabled:text-text-muted disabled:no-underline disabled:cursor-default"
+                disabled={unreadCount === 0}
+                onClick={() => filteredNotifications.filter(n => !n.read).forEach(n => markNotificationAsRead(n.id))}
+              >
+                {unreadCount === 0 ? 'No hay notificaciones nuevas' : 'Marcar todas como leídas'}
               </button>
             </div>
           )}

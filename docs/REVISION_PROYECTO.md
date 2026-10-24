@@ -545,3 +545,38 @@ Análisis y decisiones en `docs/PLAN_CICLO_MATRICULA.md`.
 | **Otros** | Cobrado de una matrícula = lo cobrado en sus cuotas; fechas de instantes mostradas en hora local; el Dashboard muestra las solicitudes pendientes reales. |
 
 Verificación: `tsc` 0 errores · `vite build` · `check-lifecycle` 57 (nuevo) y el resto de scripts sin cambios · en navegador: ficha con sus pestañas, solicitud de caída (validaciones y vista previa), resolución en Solicitudes pendientes (matrícula «Caída», alumno «Inactivo», asesorías canceladas), cobro y reversa de un pago (el plan vuelve de USD 600 a 800, el pago queda «Anulado»).
+
+
+# Acciones con menú sin función, segunda parte: personal, caja, titulares y controles decorativos (2026-10-23)
+
+Análisis general y lo que sigue sin conectar en `docs/INFORME_CONEXIONES_SISTEMA.md`.
+
+| Tema | Cambio |
+|---|---|
+| **Asignaciones** | `utils/assignments.ts` + `AssignmentFormModal`: nueva, editar y cerrar (fecha y motivo). Una principal por trabajador; no repite sede + área; no se cierra la última de Psicopedagogía con asesorías futuras. |
+| **Personal y contratos** | `utils/staffStatus.ts`: inactivar (cierra asignaciones; exige contrato cerrado y sin asesorías futuras) y reactivar. `utils/payroll.ts`: editar contrato con diferencias, motivo e historial (`Contract.revisions`). |
+| **Estado de cuenta del titular** | `utils/guardianStatement.ts` + `GuardianStatementModal`: saldo derivado de planes y pagos; la lista de Titulares ya no usa el saldo guardado. |
+| **Caja** | `utils/cash.ts`: origen del movimiento, reversa con constancia (la venta devuelve el stock), lote de depósito (`DepositBatchModal`) y detalle/comprobante (`CashMovementModal`). Lo nacido de un pago se reversa desde el pago (`?pago=`). |
+| **Caja chica** | `utils/pettyCash.ts`: de maqueta a datos reales en el contexto (`pettyCashMovements`); valida saldo; reversa con motivo. |
+| **Refinanciación** | `utils/refinance.ts`: traslada el saldo de la cuota a una cuota nueva (antes duplicaba el saldo del plan); valida, guarda el motivo y notifica. |
+| **Dashboard** | `utils/dashboard.ts`: KPIs, sedes, vencimientos, caja por moneda y actividad derivados de los datos. |
+| **Exportar y filtros** | `utils/exportCsv.ts`, `utils/printTable.ts` (PDF por impresión e imagen), `ClearFilters`, `ReasonDialog`. Filtros reales en las tablas. |
+| **Otros** | Carga masiva de libros (`utils/itemImport.ts`), tabla de sesiones del material, Permisos (guardar/descartar), Mensajería, Alumnos → seguimiento, Stock → Kardex, notificaciones de solicitudes, reversas y refinanciaciones, fecha local en vez de UTC. |
+
+Verificación: `tsc` 0 errores · `vite build` · `check-operations` 75 casos (nuevo) y los demás scripts sin cambios · probado en navegador (ver el informe).
+
+
+# Reglas de negocio: reversas, ciclo de la matrícula, solicitudes, documentos y cobranza (2026-10-23)
+
+Diseño, decisiones y lo que falta en `docs/REGLAS_DE_NEGOCIO.md`.
+
+| Tema | Cambio |
+|---|---|
+| **Autoridad** | `utils/authority.ts`: `can(permiso)` y reglas para pedir/resolver cada solicitud; el catálogo de Permisos suma Pagos, Caja chica, Cobranza y más acciones de Matrículas y Caja. Los hechos de control (reversas, cierres, documentos…) la consultan. |
+| **Nota de crédito** | `utils/creditNotes.ts`: correlativo BC01/FC01, nota registrada o constancia de no entrega; `CreditNotesModal` en Pagos. |
+| **Caja y Caja chica** | `utils/cashClosure.ts` (arqueo, cierre, reapertura, desactualizado), `utils/cash.ts` (egreso validado), fondo y tope, reposición; Sistema → Cierres y Reaperturas. |
+| **Ciclo de la matrícula** | `utils/enrollmentChange.ts`: reactivación, cambio de programa/nivel, traslado, renovación; solicitudes unificadas en Solicitudes pendientes. |
+| **Contrato y ficha** | `utils/enrollmentDocuments.ts`: documentos con número, versión y firma; plantilla editable (Configuración); pestaña «Contrato y ficha». |
+| **Cobranza** | `utils/planState.ts` (estados derivados), `utils/collections.ts` (política, mora, recordatorios, cartera), pestaña de recordatorios en Planes y Reportes → Cartera. |
+
+Verificación: `tsc` 0 errores · `vite build` · `check-business` (nuevo, 97 casos) y los demás scripts sin cambios · probado en navegador (ver `REGLAS_DE_NEGOCIO.md` §7).

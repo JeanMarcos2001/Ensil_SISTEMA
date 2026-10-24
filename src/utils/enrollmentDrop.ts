@@ -51,7 +51,7 @@ const isVoidPayment = (p: Payment) => /anulad|revers/i.test(p.status);
  */
 export function enrollmentPaidUSD(enrollmentId: string, payments: Payment[], groups: PromotionGroup[], plan?: Plan): number {
   if (plan && plan.installments.length > 0) {
-    return roundMoney(plan.installments.reduce((a, i) => a + (i.payments ?? []).reduce((s: number, x: any) => s + (x.amount ?? 0), 0), 0));
+    return roundMoney(plan.installments.filter(i => !i.isMora).reduce((a, i) => a + (i.payments ?? []).reduce((s: number, x: any) => s + (x.amount ?? 0), 0), 0));
   }
   let total = 0;
   for (const p of payments) {
@@ -183,8 +183,14 @@ export function previewDrop(ctx: DropContext, effectiveDate: string): DropPrevie
 
 /** Plan después de la caída: cuotas futuras anuladas (y las vencidas, si se condonan); el saldo es lo que queda como deuda. */
 export function applyDropToPlan(plan: Plan, preview: DropPreview, forgiveOverdue: boolean): Plan {
-  const kill = new Set([...preview.annulled.map(r => r.id), ...(forgiveOverdue ? preview.overdue.map(r => r.id) : [])]);
-  const installments = plan.installments.map(i => (kill.has(i.id) ? { ...i, status: 'Anulada', balance: 0, note: 'Anulada por caída de la matrícula' } : i));
+  const future = new Set(preview.annulled.map(r => r.id));
+  const forgiven = new Set(forgiveOverdue ? preview.overdue.map(r => r.id) : []);
+  // `dropAnnulled` = cuota futura anulada por la caída (se restituye si la matrícula se reactiva); `forgiven` = deuda condonada (no se restituye)
+  const installments = plan.installments.map(i => {
+    if (future.has(i.id)) return { ...i, status: 'Anulada', balance: 0, note: 'Anulada por caída de la matrícula', dropAnnulled: true };
+    if (forgiven.has(i.id)) return { ...i, status: 'Anulada', balance: 0, note: 'Condonada al aprobar la caída', forgiven: true };
+    return i;
+  });
   const balance = roundMoney(installments.reduce((a, i) => a + (i.balance > 0 && i.status !== 'Refinanciada' ? i.balance : 0), 0));
   return { ...plan, installments, balance, status: 'Caída', next: '-' };
 }

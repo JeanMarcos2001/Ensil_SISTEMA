@@ -4,6 +4,9 @@ import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Schedule, type Student } from '../../context/DataContext';
 import { getInterviewerOptions } from '../../utils/enrollment';
+import { gateRescheduleNote } from '../../utils/verificationGate';
+import { PERM } from '../../utils/authority';
+import { MATERIALS_REASON, reasonOption, reasonsFor } from '../../utils/psyHistory';
 import { isStudentWorkable, studentExpiring, studentLimit } from '../../utils/validity';
 import {
   SLOT_DURATION,
@@ -66,12 +69,22 @@ function programOf(student: Student, enrollments: ReturnType<typeof useData>['en
 }
 
 export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defaultStudentId }: Props) {
-  const { students, enrollments, programs, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule } = useData();
+  const { students, enrollments, programs, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule, gateOfSchedule, can } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate || today));
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [reasonSel, setReasonSel] = useState('');
+  const [reasonDetail, setReasonDetail] = useState('');
   const isReschedule = !!schedule;
+  // Primera asesoría sin materiales: se reprograma aunque falten menos de 24 horas (el cambio es de la institución)
+  const gate = schedule ? gateOfSchedule(schedule) : undefined;
+  // Con menos de 24 horas solo la institución puede cambiarla (con permiso y motivo)
+  const late = !!schedule && !gate?.blocked && changeBlockedByNotice(schedule, new Date());
+  const mayChangeLate = can(PERM.psiInstitutionalChange);
+  const reasonChoices = gate?.blocked
+    ? reasonsFor('reprogramar').filter(r => r.reason === MATERIALS_REASON)
+    : late ? reasonsFor('reprogramar').filter(r => r.initiator === 'Institución') : reasonsFor('reprogramar');
 
   const ctx = useMemo(
     () => ({ schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) }),
@@ -96,6 +109,8 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
     if (!isOpen) return;
     setError(null);
     setQuery('');
+    setReasonSel(schedule && gateOfSchedule(schedule).blocked ? MATERIALS_REASON : '');
+    setReasonDetail('');
     if (schedule) {
       const known = students.find(s => s.id === schedule.studentId) ?? students.find(s => s.name === schedule.student);
       setForm({
@@ -155,7 +170,7 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
   const handleSave = () => {
     const slotChanged = !schedule || schedule.date !== form.date || schedule.time !== form.time;
     // Regla de 24 horas: una asesoría activa solo se reprograma con anticipación
-    if (schedule && changeBlockedByNotice(schedule, new Date())) { setError(noticeMessage(schedule.date, schedule.time)); return; }
+    if (schedule && late && !mayChangeLate) { setError(noticeMessage(schedule.date, schedule.time)); return; }
     // No se programan asesorías después del fin de la vigencia del alumno (la primera asesoría es la que la inicia)
     if (!isFirst && slotChanged && limit && form.date > limit) {
       setError(`La vigencia del alumno termina el ${longDayLabel(limit)}; no se puede programar una asesoría posterior.`);
@@ -176,7 +191,11 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
     if (schedule) {
       // Cambiar fecha, horario o responsable reprograma la asesoría (estado automático)
       const moved = slotChanged || schedule.responsible.trim() !== form.responsible.trim();
-      updateSchedule(schedule.id, { ...base, status: moved ? 'Reprogramado' : schedule.status });
+      // Si se movió por falta de verificación, queda constancia en las observaciones
+      const note = gate?.blocked && slotChanged ? gateRescheduleNote(schedule.date, schedule.time) : '';
+      const observations = [base.observations, note].filter(Boolean).join('\n') || undefined;
+      const res = updateSchedule(schedule.id, { ...base, observations, status: moved ? 'Reprogramado' : schedule.status }, moved ? { reason: reasonSel, detail: reasonDetail } : undefined);
+      if (!res.ok) { setError(res.reason ?? 'No se pudo guardar la reprogramación.'); return; }
     } else {
       addSchedule({ ...base, status: 'Reservado' });
     }
@@ -201,6 +220,34 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
       }
     >
       <div className="space-y-6 pb-4">
+        {gate?.blocked && (
+          <div className="bg-warning-tint border border-warning-text/20 rounded-xl p-3 flex gap-2 text-sm text-warning-text">
+            <AlertCircle size={16} className="shrink-0 mt-0.5" />
+            <p>
+              {gate.message} Elija una fecha en la que ya se haya podido entregar los materiales: si la matrícula sigue sin verificarse cuando llegue la nueva fecha, habrá que reprogramarla otra vez.
+            </p>
+          </div>
+        )}
+        {isReschedule && (
+          <div className="border border-border-soft rounded-xl p-4 space-y-3 bg-surface-muted/40">
+            <h3 className="text-sm font-semibold text-text-primary">Motivo de la reprogramación</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Motivo <span className="text-error">*</span></label>
+                <select className={nativeFieldCls} value={reasonSel} onChange={e => { setError(null); setReasonSel(e.target.value); }}>
+                  <option value="">Seleccionar...</option>
+                  {reasonChoices.map(r => <option key={r.reason} value={r.reason}>{r.reason}</option>)}
+                </select>
+                {reasonSel && <p className="text-xs text-text-muted mt-1">Lo pidió: {reasonOption(reasonSel)?.initiator}. Queda en el historial.</p>}
+                {late && mayChangeLate && <p className="text-xs text-warning-text mt-1">Faltan menos de 24 horas: se registra como cambio de la institución.</p>}
+              </div>
+              <div>
+                <label className={labelCls}>Detalle <span className="text-xs text-text-muted font-normal">(opcional)</span></label>
+                <input className={nativeFieldCls} value={reasonDetail} onChange={e => setReasonDetail(e.target.value)} placeholder="Quién avisó, cuándo..." />
+              </div>
+            </div>
+          </div>
+        )}
         {error && (
           <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />

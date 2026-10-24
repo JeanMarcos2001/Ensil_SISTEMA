@@ -1,12 +1,18 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Plus, Search, Calendar as CalendarIcon, List, User, ChevronLeft, ChevronRight, CalendarDays, Gauge, ChevronDown, ChevronUp } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Calendar as CalendarIcon, List, User, ChevronLeft, ChevronRight, CalendarDays, Gauge, ChevronDown, ChevronUp, PackageX, UserX } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
+import { ReasonDialog } from '../../components/ui/ReasonDialog';
 import { useData, type Schedule as ScheduleItem } from '../../context/DataContext';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { isStudentWorkable } from '../../utils/validity';
+import { GATE_LABEL, compareGates } from '../../utils/verificationGate';
+import { PERM } from '../../utils/authority';
+import { needsResponsible } from '../../utils/psyActivities';
+import { reasonsFor, rescheduleCount } from '../../utils/psyHistory';
 import {
   MONTHS,
   STATUS_OPTIONS,
@@ -26,6 +32,7 @@ import {
 } from '../../utils/schedule';
 import { ScheduleCalendar, type CalendarMode } from './ScheduleCalendar';
 import { ScheduleFormModal } from './ScheduleFormModal';
+import { ScheduleHistoryModal } from './ScheduleHistoryModal';
 import { DayAgendaModal, ACTION_LABEL } from './DayAgendaModal';
 import { SessionModal } from './SessionModal';
 import { CapacityModal } from './CapacityModal';
@@ -33,7 +40,8 @@ import { ActivityEnrollModal } from './ActivityEnrollModal';
 import { nativeFieldCls } from './formStyles';
 
 export function Schedule() {
-  const { schedules, updateSchedule, branches, trackings, students, enrollments, programs, monthlySchedules, capacityConfig } = useData();
+  const { schedules, updateSchedule, branches, trackings, students, enrollments, programs, monthlySchedules, capacityConfig, gateOfSchedule, pendingFirstSessions, psyEvents, can } = useData();
+  const navigate = useNavigate();
   const today = todayLocalISO();
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('list');
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,6 +58,8 @@ export function Schedule() {
   const [capacityOpen, setCapacityOpen] = useState(false);
   const [activities, setActivities] = useState<{ open: boolean; activityId?: string }>({ open: false });
   const [pendingOpen, setPendingOpen] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [historyOf, setHistoryOf] = useState<ScheduleItem | null>(null);
 
   // Calendario
   const [calendarMode, setCalendarMode] = useState<CalendarMode>('month');
@@ -58,6 +68,17 @@ export function Schedule() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
+
+  // Primeras asesorías cuya matrícula aún no se verifica (la más urgente primero)
+  const unverified = Object.values(pendingFirstSessions())
+    .filter(g => !branchFilter || g.session?.branchId === branchFilter)
+    .sort(compareGates);
+  const overdueCount = unverified.filter(g => g.overdue).length;
+  // Actividades especiales cercanas que todavía no tienen responsable
+  const mayChangeLate = can(PERM.psiInstitutionalChange);
+  const withoutLead = allActivities(monthlySchedules)
+    .filter(a => needsResponsible(a, today) && (!branchFilter || a.branchId === branchFilter))
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
 
   const branchName = (id?: string) => branches.find(b => b.id === id)?.name ?? '—';
   const activeBranches = branches.filter(b => b.status === 'Activo');
@@ -112,27 +133,38 @@ export function Schedule() {
   const runAction = (action: ScheduleAction, s: ScheduleItem) => {
     setDayDetail(null);
     if (action === 'reprogramar') openForm(s);
-    else if (action === 'asistio') updateSchedule(s.id, { status: 'Asistió' });
+    else if (action === 'asistio' || action === 'falta') {
+      const r = updateSchedule(s.id, { status: action === 'asistio' ? 'Asistió' : 'Faltó' });
+      if (!r.ok) setNotice(r.reason ?? 'No se pudo registrar.');
+    }
     else if (action === 'sesion') setSessionOf(s);
-    else if (action === 'falta') updateSchedule(s.id, { status: 'Faltó' });
     else if (action === 'cancelar') setToCancel(s);
   };
 
   const rowActions = (s: ScheduleItem) => {
     const now = new Date();
-    const items = availableActions(s, today, now).map(a => ({
-      label: a === 'sesion' && trackings.some(t => t.scheduleId === s.id) ? 'Ver sesión' : ACTION_LABEL[a],
+    const gate = gateOfSchedule(s);
+    const late = changeBlockedByNotice(s, now) && !gate.blocked;
+    const items = availableActions(s, today, now, gate.blocked, mayChangeLate).map(a => ({
+      label: a === 'sesion' && trackings.some(t => t.scheduleId === s.id) ? 'Ver sesión'
+        : a === 'reprogramar' && gate.blocked ? 'Reprogramar (matrícula sin verificar)'
+        : (a === 'reprogramar' || a === 'cancelar') && late ? `${ACTION_LABEL[a]} (cambio de la institución)`
+        : ACTION_LABEL[a],
       onClick: () => runAction(a, s),
       danger: a === 'falta' || a === 'cancelar',
       disabled: false,
     }));
     // Regla de 24 horas: se muestran, pero no se pueden usar
-    if (changeBlockedByNotice(s, now)) {
+    if (gate.blocked) {
+      items.push({ label: 'Marcar asistencia (requiere matrícula verificada)', onClick: () => {}, danger: false, disabled: true });
+    }
+    if (late && !mayChangeLate) {
       items.push(
         { label: 'Reprogramar (requiere 24 h de anticipación)', onClick: () => {}, danger: false, disabled: true },
         { label: 'Cancelar (requiere 24 h de anticipación)', onClick: () => {}, danger: true, disabled: true },
       );
     }
+    items.push({ label: 'Ver historial', onClick: () => setHistoryOf(s), danger: false, disabled: false });
     return items;
   };
 
@@ -183,6 +215,44 @@ export function Schedule() {
           </Button>
         </div>
       </div>
+
+      {/* Verificación: los materiales se entregan antes de la primera asesoría */}
+      {unverified.length > 0 && (
+        <div className={`border rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between ${overdueCount > 0 ? 'bg-danger-tint/60 border-danger-text/20' : 'bg-warning-tint/60 border-warning-text/20'}`}>
+          <div className="flex items-start gap-3">
+            <PackageX size={20} className={overdueCount > 0 ? 'text-danger-text mt-0.5' : 'text-warning-text mt-0.5'} />
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                {unverified.length} {unverified.length === 1 ? 'primera asesoría espera' : 'primeras asesorías esperan'} la verificación de materiales
+                {overdueCount > 0 && ` · ${overdueCount} por reprogramar`}
+              </p>
+              <p className="text-xs text-text-secondary mt-0.5">
+                Sin la verificación el alumno no tiene sus materiales: la asesoría no se puede registrar y, si llega su hora, se reprograma sin contar como falta.
+                {' '}Más cercana: {unverified[0].session?.student}, {longDayLabel(unverified[0].session!.date)}.
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" onClick={() => navigate('/operacion/verificacion')} className="shrink-0">Ir a Verificación</Button>
+        </div>
+      )}
+
+      {/* Actividades especiales sin responsable (sin él no se registra la asistencia) */}
+      {withoutLead.length > 0 && (
+        <div className="bg-warning-tint/60 border border-warning-text/20 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+          <div className="flex items-start gap-3">
+            <UserX size={20} className="text-warning-text mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                {withoutLead.length} {withoutLead.length === 1 ? 'actividad especial sin responsable' : 'actividades especiales sin responsable'} en los próximos días
+              </p>
+              <p className="text-xs text-text-secondary mt-0.5">
+                Más cercana: «{withoutLead[0].name}» ({withoutLead[0].sede}), {longDayLabel(withoutLead[0].date)}. Sin responsable no se puede registrar la asistencia.
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" onClick={() => setActivities({ open: true, activityId: withoutLead[0].id })} className="shrink-0">Asignar responsable</Button>
+        </div>
+      )}
 
       {/* Frecuencia: al menos una asesoría por semana */}
       {withoutSession.length > 0 && (
@@ -263,6 +333,7 @@ export function Schedule() {
                 )}
                 {paginatedSchedules.map((schedule) => {
                   const hasSession = trackings.some(t => t.scheduleId === schedule.id);
+                  const gate = gateOfSchedule(schedule);
                   return (
                     <tr key={schedule.id} className="hover:bg-surface-muted/50 transition-colors group">
                       <td className="py-4 px-6">
@@ -297,6 +368,14 @@ export function Schedule() {
                       </td>
                       <td className="py-4 px-6">
                         <Badge variant={statusTone(schedule.status) as any}>{schedule.status}</Badge>
+                        {rescheduleCount(psyEvents, schedule.id) > 0 && (
+                          <div className="text-xs mt-1 text-text-muted">Reprogramada {rescheduleCount(psyEvents, schedule.id)} {rescheduleCount(psyEvents, schedule.id) === 1 ? 'vez' : 'veces'}</div>
+                        )}
+                        {gate.blocked && (
+                          <div className={`text-xs mt-1 font-medium ${gate.overdue || gate.level === 'critica' ? 'text-danger-text' : 'text-warning-text'}`} title={gate.message}>
+                            {gate.overdue ? 'Reprogramar: sin materiales' : `Sin verificar · ${GATE_LABEL[gate.level].toLowerCase()}`}
+                          </div>
+                        )}
                         {schedule.status === 'Asistió' && (
                           <div className={`text-xs mt-1 ${hasSession ? 'text-text-muted' : 'text-warning-text font-medium'}`}>
                             {hasSession ? 'Sesión registrada' : 'Falta registrar la sesión'}
@@ -399,14 +478,41 @@ export function Schedule() {
         branchId={branchFilter}
       />
 
-      <ConfirmDialog
+      <ReasonDialog
         isOpen={!!toCancel}
         onClose={() => setToCancel(null)}
-        onConfirm={() => { if (toCancel) updateSchedule(toCancel.id, { status: 'Cancelado' }); setToCancel(null); }}
         title="Cancelar asesoría"
-        description={toCancel ? `¿Cancelar la asesoría de ${toCancel.student} del ${longDayLabel(toCancel.date)} a las ${toCancel.time}? El horario quedará libre.` : ''}
-        variant="danger"
-        confirmLabel="SÍ, CANCELAR"
+        reasons={reasonsFor('cancelar').map(r => r.reason)}
+        reasonLabel="Motivo de la cancelación"
+        detailLabel="Detalle"
+        detailPlaceholder="Quién avisó, cuándo, cualquier dato útil..."
+        detailOptional
+        confirmLabel="Cancelar asesoría"
+        danger
+        onSubmit={({ reason, detail }) => {
+          if (!toCancel) return null;
+          const r = updateSchedule(toCancel.id, { status: 'Cancelado' }, { reason, detail });
+          return r.ok ? null : r.reason ?? 'No se pudo cancelar.';
+        }}
+      >
+        {toCancel && (
+          <p className="text-sm text-text-secondary">
+            ¿Cancelar la asesoría de <strong>{toCancel.student}</strong> del {longDayLabel(toCancel.date)} a las {toCancel.time}? El horario quedará libre y la cancelación queda en el historial con su motivo y quién la pidió.
+          </p>
+        )}
+      </ReasonDialog>
+
+      <ScheduleHistoryModal schedule={historyOf} onClose={() => setHistoryOf(null)} />
+
+      <ConfirmDialog
+        isOpen={!!notice}
+        onClose={() => setNotice(null)}
+        onConfirm={() => setNotice(null)}
+        title="No se puede registrar"
+        description={notice ?? ''}
+        variant="warning"
+        confirmLabel="ENTENDIDO"
+        hideCancel
       />
 
       {/* Agenda de un día (desde un horario o «+N más» del calendario) */}
@@ -419,6 +525,9 @@ export function Schedule() {
         branchId={branchFilter}
         branchName={branchName}
         trackings={trackings}
+        gateOf={gateOfSchedule}
+        canChangeLate={mayChangeLate}
+        onHistory={s => { setDayDetail(null); setHistoryOf(s); }}
         onClose={() => setDayDetail(null)}
         onReserve={(d) => { setDayDetail(null); openForm(null, d); }}
         onAction={runAction}

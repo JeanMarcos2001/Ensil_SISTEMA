@@ -11,13 +11,16 @@ import { RegisterPaymentModal } from '../payments/RegisterPaymentModal';
 import { DropRequestModal } from './DropRequestModal';
 import { EditEnrollmentModal } from './EditEnrollmentModal';
 import { ResolveDropModal } from './ResolveDropModal';
+import { EnrollmentDocumentsPanel } from './EnrollmentDocumentsPanel';
+import { useChangeActions } from './useChangeActions';
 
-export type FichaTab = 'resumen' | 'plan' | 'asesorias' | 'entrega' | 'historial';
+export type FichaTab = 'resumen' | 'plan' | 'asesorias' | 'entrega' | 'documentos' | 'historial';
 const TABS: { id: FichaTab; label: string }[] = [
   { id: 'resumen', label: 'Resumen' },
   { id: 'plan', label: 'Plan y pagos' },
   { id: 'asesorias', label: 'Asesorías y vigencia' },
   { id: 'entrega', label: 'Verificación y entrega' },
+  { id: 'documentos', label: 'Contrato y ficha' },
   { id: 'historial', label: 'Historial' },
 ];
 
@@ -79,6 +82,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
   const [editFor, setEditFor] = useState<string | null>(null);
   const [payFor, setPayFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const lifecycle = useChangeActions();
 
   useEffect(() => { if (enrollmentId) { setTab(initialTab); setNotice(null); } }, [enrollmentId, initialTab]);
 
@@ -145,6 +149,22 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
           {ficha.pendingDrop && (
             <div className="text-sm bg-warning-tint/60 border border-warning-text/20 rounded-xl px-4 py-2.5 text-text-primary">
               <strong>Caída solicitada</strong> el {localDateOf(ficha.pendingDrop.requestedAt)} por {ficha.pendingDrop.requestedBy}: {ficha.pendingDrop.reason}. Pendiente de resolver.
+            </div>
+          )}
+          {(() => {
+            const pendingChange = data.changeRequests.find(r => r.enrollmentId === e.id && r.status === 'Pendiente');
+            return pendingChange ? (
+              <div className="text-sm bg-warning-tint/60 border border-warning-text/20 rounded-xl px-4 py-2.5 text-text-primary">
+                <strong>{pendingChange.kind} solicitada</strong> el {localDateOf(pendingChange.requestedAt)} por {pendingChange.requestedBy}: {pendingChange.reason}. Pendiente de resolver en Sistema → Solicitudes pendientes.
+              </div>
+            ) : null;
+          })()}
+          {lifecycle.items(e).length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider mr-1">Ciclo de la matrícula</span>
+              {lifecycle.items(e).map(item => (
+                <Button key={item.label} variant="secondary" size="sm" disabled={item.disabled} onClick={item.onClick}>{item.label}</Button>
+              ))}
             </div>
           )}
           {e.status === 'Caída' && ficha.drop?.status === 'Aprobada' && (
@@ -371,6 +391,8 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
             </Card>
           )}
 
+          {tab === 'documentos' && <EnrollmentDocumentsPanel enrollmentId={e.id} />}
+
           {/* Historial */}
           {tab === 'historial' && (
             <div className="space-y-4">
@@ -392,6 +414,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
       </Modal>
 
       <DropRequestModal enrollmentId={dropFor} onClose={() => setDropFor(null)} />
+      {lifecycle.modals}
       <ResolveDropModal requestId={resolveFor} onClose={() => setResolveFor(null)} />
       <EditEnrollmentModal enrollmentId={editFor} onClose={() => setEditFor(null)} />
       <RegisterPaymentModal isOpen={!!payFor} onClose={() => setPayFor(null)} initialPlanId={payFor ?? undefined} />

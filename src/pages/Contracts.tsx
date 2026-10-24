@@ -1,23 +1,33 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Drawer } from '../components/ui/Drawer';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, FilePlus, History, X } from 'lucide-react';
+import { Search, Download, FilePlus, History, X } from 'lucide-react';
 import { useData, Contract, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { ContractFormModal } from './people/ContractFormModal';
 import { DateInput } from '../components/ui/DateInput';
-import { contractStatus } from '../utils/payroll';
+import { CONTRACT_TYPES, contractStatus } from '../utils/payroll';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { todayLocalISO } from '../utils/schedule';
 
 export function ContractsPage() {
   const { contracts, staff, updateContract } = useData();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const staffFilter = params.get('trabajador') ?? '';
+  const filteredStaff = staff.find(s => s.id === staffFilter);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Contract | null>(null);
+  const [selectedType, setSelectedType] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
   // Cierre de contrato (cese): fecha y motivo obligatorios
   const [toClose, setToClose] = useState<Contract | null>(null);
   const [closeDate, setCloseDate] = useState('');
@@ -30,8 +40,14 @@ export function ContractsPage() {
 
   const filteredContracts = contracts.filter(contract => {
     const staffName = `${staff.find(s => s.id === contract.staffId)?.names || ''} ${staff.find(s => s.id === contract.staffId)?.lastNameP || ''}`.toLowerCase();
-    return staffName.includes(searchTerm.toLowerCase());
+    const matchesSearch = staffName.includes(searchTerm.toLowerCase()) || contract.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = !selectedType || contract.type === selectedType;
+    const matchesStatus = !selectedStatus || contractStatus(contract, today) === selectedStatus;
+    const matchesStaff = !staffFilter || contract.staffId === staffFilter;
+    return matchesSearch && matchesType && matchesStatus && matchesStaff;
   });
+  const hasFilters = !!(searchTerm || selectedType || selectedStatus || staffFilter);
+  const clearFilters = () => { setSearchTerm(''); setSelectedType(''); setSelectedStatus(''); setParams({}); };
 
   const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -40,7 +56,18 @@ export function ContractsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, selectedType, selectedStatus, staffFilter]);
+
+  const openNew = () => { setEditing(null); setIsFormOpen(true); };
+  const openEdit = (contract: Contract) => { setEditing(contract); setIsFormOpen(true); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Contratos', today),
+      ['Código', 'Trabajador', 'Tipo', 'Jornada', 'Inicio', 'Fin', 'Estado', 'Sueldo bruto (S/)', 'Aportes (S/)', 'Sueldo neto estimado (S/)', 'Pensiones', 'Motivo de cese'],
+      filteredContracts.map(c => [c.id, getStaffName(c.staffId), c.type, c.shift ?? '', c.startDate, c.endDate ?? '', contractStatus(c, today), c.grossSalary ?? '', c.contribution ?? '', c.netSalary ?? '', `${c.pensionSystem ?? ''} ${c.pensionFund ?? ''}`.trim(), c.terminationReason ?? ''])
+    );
+  };
 
   const handleOpenDetail = (contract: Contract) => {
     setSelectedContract(contract);
@@ -61,11 +88,11 @@ export function ContractsPage() {
           <p className="text-sm text-text-secondary">Historial contractual y condiciones laborales</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredContracts.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={() => setIsFormOpen(true)} className="flex items-center gap-2">
+          <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
             <FilePlus size={16} />
             Nuevo contrato
           </Button>
@@ -86,23 +113,33 @@ export function ContractsPage() {
             />
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Tipo de contrato</option>
-              <option value="indeterminado">Indeterminado</option>
-              <option value="plazo-fijo">Plazo Fijo</option>
-              <option value="locacion">Locación de servicios</option>
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los tipos</option>
+              {CONTRACT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Estado</option>
-              <option value="vigente">Vigente</option>
-              <option value="vencido">Vencido</option>
-              <option value="cesado">Cesado</option>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los estados</option>
+              <option value="Vigente">Vigente</option>
+              <option value="Vencido">Vencido</option>
+              <option value="Cesado">Cesado</option>
             </select>
-            <Button variant="secondary" className="shrink-0 px-3">
-              <Filter size={16} />
-            </Button>
+            <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
+        {filteredStaff && (
+          <div className="mt-3 flex items-center gap-2 text-sm">
+            <Badge variant="primary">Trabajador: {filteredStaff.names} {filteredStaff.lastNameP}</Badge>
+            <button className="text-xs text-text-muted hover:text-text-primary underline" onClick={() => setParams({})}>Quitar filtro</button>
+          </div>
+        )}
       </Card>
 
       {/* Data Table */}
@@ -135,7 +172,8 @@ export function ContractsPage() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(contract) },
-                        { label: 'Editar contrato', onClick: () => {} },
+                        { label: 'Ver trabajador', onClick: () => navigate(`/personas/personal?ficha=${contract.staffId}`) },
+                        ...(contract.status === 'Vigente' ? [{ label: 'Editar contrato', onClick: () => openEdit(contract) }] : []),
                         ...(contractStatus(contract, today) === 'Vigente'
                           ? [{ label: 'Cerrar contrato', onClick: () => { setToClose(contract); setCloseDate(today); setCloseReason(''); setCloseError(null); }, danger: true }]
                           : []),
@@ -267,6 +305,23 @@ export function ContractsPage() {
               </div>
             </section>
 
+            {(selectedContract.revisions?.length ?? 0) > 0 && (
+              <section>
+                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Historial de modificaciones</h3>
+                <div className="space-y-3">
+                  {selectedContract.revisions!.map((r, i) => (
+                    <div key={i} className="bg-surface-muted rounded-xl p-3 border border-border-soft text-sm">
+                      <p className="text-xs text-text-muted">{new Date(r.at).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {r.by}</p>
+                      <p className="text-text-primary mt-0.5">{r.reason}</p>
+                      <ul className="mt-1 text-text-secondary">
+                        {r.changes.map(c => <li key={c.label}>{c.label}: <span className="line-through text-text-muted">{c.from}</span> → {c.to}</li>)}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {selectedContract.status === 'Cesado' && (
               <section className="bg-destructive/5 p-4 rounded-xl border border-destructive/10">
                 <label className="text-xs text-destructive font-semibold uppercase tracking-wider">Motivo de Cese</label>
@@ -277,7 +332,7 @@ export function ContractsPage() {
         )}
       </Modal>
 
-      <ContractFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} />
+      <ContractFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editing} />
 
       <Modal
         isOpen={!!toClose}

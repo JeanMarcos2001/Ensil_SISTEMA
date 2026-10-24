@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -6,6 +7,9 @@ import { Modal } from '../../components/ui/Modal';
 import { Search, Filter, Download, ArrowUpRight, ArrowDownRight, RefreshCw, Package, FileText, ArrowRightLeft, User, Calendar, MapPin, Hash, Info } from 'lucide-react';
 import { useData, KardexEntry } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
+import { csvFileName, downloadCsv } from '../../utils/exportCsv';
+import { printTable } from '../../utils/printTable';
+import { todayLocalISO } from '../../utils/schedule';
 
 export function Kardex() {
   const { kardex, branches, currentBranchId } = useData();
@@ -16,6 +20,7 @@ export function Kardex() {
   const [filterType, setFilterType] = useState('');
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
+  const [params, setParams] = useSearchParams();
   const [selectedEntry, setSelectedEntry] = useState<KardexEntry | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
@@ -79,6 +84,19 @@ export function Kardex() {
     return matchesSearch && matchesBranch && matchesType && matchesDateStart && matchesDateEnd;
   });
 
+  // ?material=NOMBRE filtra por ese artículo (se usa desde Stock → Ver Kardex completo)
+  useEffect(() => {
+    const m = params.get('material');
+    if (m === null) return;
+    setSearchQuery(m);
+    setParams({}, { replace: true });
+  }, [params, setParams]);
+
+  const exportHeaders = ['Fecha', 'Sede', 'Material', 'Tipo', 'Cantidad', 'Saldo anterior', 'Saldo nuevo', 'Documento', 'Usuario', 'Observación'];
+  const exportRows = () => filteredKardex.map(r => [r.date, r.branch, r.material, r.type, r.qty, r.prevBalance, r.newBalance, r.doc, r.user, r.observation ?? '']);
+  const handleExportExcel = () => downloadCsv(csvFileName('Kardex', todayLocalISO()), exportHeaders, exportRows());
+  const handleExportPdf = () => printTable('Kardex de inventario', `${filteredKardex.length} movimiento(s) · ${todayLocalISO()}`, exportHeaders, exportRows());
+
   const handleOpenDetail = (entry: KardexEntry) => {
     setSelectedEntry(entry);
     setIsDetailOpen(true);
@@ -93,11 +111,11 @@ export function Kardex() {
           <p className="text-sm text-text-secondary">Historial cronológico de movimientos de inventario</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="flex items-center gap-2">
+          <Button variant="secondary" className="flex items-center gap-2" onClick={handleExportExcel} disabled={filteredKardex.length === 0}>
             <Download size={16} />
             Exportar Excel
           </Button>
-          <Button variant="secondary" className="flex items-center gap-2">
+          <Button variant="secondary" className="flex items-center gap-2" onClick={handleExportPdf} disabled={filteredKardex.length === 0} title="Abre la impresión: elija «Guardar como PDF»">
             <Download size={16} />
             Exportar PDF
           </Button>

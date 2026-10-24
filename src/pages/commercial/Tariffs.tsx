@@ -10,6 +10,7 @@ import { useData, Tariff, TariffInstallment } from '../../context/DataContext';
 import { generateBreakdown, countObligations, resolveScheduleMode, sumBreakdown, roundMoney } from '../../utils/tariffs';
 import { Search, Plus, DollarSign, Calendar, AlertCircle } from 'lucide-react';
 import { DateInput } from '../../components/ui/DateInput';
+import { todayLocalISO } from '../../utils/schedule';
 
 export function Tariffs() {
   const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff } = useData();
@@ -89,7 +90,7 @@ export function Tariffs() {
         currency: 'USD',
         basePrice: 0,
         installments: [],
-        startDate: new Date().toISOString().split('T')[0],
+        startDate: todayLocalISO(),
         endDate: '',
         status: 'Activo'
       });

@@ -3,8 +3,9 @@
  * Funciones puras (sin estado). El Catálogo de Logística es la ÚNICA fuente de artículos.
  */
 import type { Item, ItemPrice, StockItem } from '../context/DataContext';
+import { todayLocalISO } from './schedule';
 
-export const todayISO = (): string => new Date().toISOString().slice(0, 10);
+export const todayISO = (): string => todayLocalISO();
 
 /**
  * Precio de venta vigente (USD) de un artículo en una sede y fecha.
@@ -66,6 +67,11 @@ export function validateItem({ item, allItems, editingId }: ItemValidationInput)
   if (allItems.some(i => i.id === item.id && i.id !== editingId)) return 'El código SKU ya existe en el sistema.';
 
   if (item.type === 'Libro' && !item.bindingType) return 'Seleccione el tipo de libro (Anillado o Encolado).';
+
+  // Material con entrenamientos variables: la tabla debe traer una fila por sesión
+  if (item.type === 'Material educativo' && item.trainingMode === 'Variable' && (item.sessions ?? 0) > 0 && (item.variableTrainings ?? []).length !== item.sessions) {
+    return 'Configure la tabla de sesiones: indique los entrenamientos de cada sesión del material.';
+  }
 
   if (item.type === 'Paquete / kit logístico') {
     const composition = item.composition ?? [];

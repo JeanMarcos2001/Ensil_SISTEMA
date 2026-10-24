@@ -54,8 +54,24 @@ const MODULES: Module[] = [
           { id: 'confirm', label: 'Confirmar matrícula' },
           { id: 'req_drop', label: 'Solicitar caída' },
           { id: 'approve_drop', label: 'Aprobar caída' },
-          { id: 'req_transfer', label: 'Solicitar traslado' },
-          { id: 'approve_transfer', label: 'Aprobar traslado' },
+          { id: 'req_reactivation', label: 'Solicitar reactivación' },
+          { id: 'approve_reactivation', label: 'Aprobar reactivación' },
+          { id: 'req_program_change', label: 'Solicitar cambio de programa o nivel' },
+          { id: 'approve_program_change', label: 'Aprobar cambio de programa o nivel' },
+          { id: 'req_transfer', label: 'Solicitar traslado de sede' },
+          { id: 'approve_transfer', label: 'Aprobar traslado de sede' },
+          { id: 'renew', label: 'Renovar matrícula' },
+          { id: 'edit_data', label: 'Corregir datos administrativos' },
+          { id: 'documents', label: 'Generar contrato y ficha' },
+        ]
+      },
+      {
+        id: 'op-pagos',
+        name: 'Pagos',
+        actions: [
+          { id: 'view', label: 'Ver pagos' },
+          { id: 'reverse_payment', label: 'Reversar pago' },
+          { id: 'credit_note', label: 'Emitir nota de crédito' },
         ]
       },
       {
@@ -65,8 +81,30 @@ const MODULES: Module[] = [
           { id: 'view', label: 'Ver caja' },
           { id: 'reg_income', label: 'Registrar ingreso' },
           { id: 'reg_expense', label: 'Registrar egreso' },
+          { id: 'reverse_movement', label: 'Reversar movimiento' },
+          { id: 'deposit', label: 'Crear lote de depósito' },
           { id: 'close_box', label: 'Cerrar caja' },
           { id: 'reopen_box', label: 'Reabrir caja' },
+        ]
+      },
+      {
+        id: 'op-caja-chica',
+        name: 'Caja chica',
+        actions: [
+          { id: 'view', label: 'Ver caja chica' },
+          { id: 'reverse_movement', label: 'Reversar movimiento' },
+          { id: 'count', label: 'Hacer arqueo y cierre' },
+          { id: 'config', label: 'Configurar fondo y tope por gasto' },
+        ]
+      },
+      {
+        id: 'op-cobranza',
+        name: 'Cobranza y cartera',
+        actions: [
+          { id: 'view', label: 'Ver cartera y reportes' },
+          { id: 'remind', label: 'Enviar recordatorios' },
+          { id: 'charge_mora', label: 'Cobrar mora' },
+          { id: 'config', label: 'Configurar políticas de cobranza' },
         ]
       }
     ]
@@ -99,6 +137,18 @@ const MODULES: Module[] = [
           { id: 'create', label: 'Crear programación' },
           { id: 'reg_tracking', label: 'Registrar seguimiento' },
           { id: 'export_schedule', label: 'Exportar cronograma mensual' },
+          { id: 'activity_lead', label: 'Asignar el responsable de una actividad especial' },
+          { id: 'activity_attendance', label: 'Registrar asistencia a actividades especiales' },
+          { id: 'institutional_change', label: 'Cancelar o reprogramar con menos de 24 h (cambio de la institución)' },
+        ]
+      },
+      {
+        id: 'psi-recordatorios',
+        name: 'Recordatorios de Psicopedagogía',
+        actions: [
+          { id: 'view', label: 'Ver recordatorios' },
+          { id: 'remind', label: 'Enviar y registrar recordatorios' },
+          { id: 'config', label: 'Configurar los días de recordatorio' },
         ]
       }
     ]
@@ -192,6 +242,10 @@ export function Permissions() {
 
   const filteredRoles = roles.filter(r => r.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  // ¿Hay cambios sin guardar? (se compara con lo guardado para el rol elegido)
+  const savedSet = new Set(allPermissions.find(p => p.roleId === selectedRole)?.permissions || []);
+  const dirty = !!selectedRole && (savedSet.size !== permissions.size || [...permissions].some(k => !savedSet.has(k)));
+
   const handleSave = () => {
     if (selectedRole) {
       savePermissions(selectedRole, Array.from(permissions));
@@ -214,10 +268,11 @@ export function Permissions() {
           <p className="text-sm text-text-secondary">Configuración detallada de accesos por rol</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="flex items-center gap-2">
+          {dirty && <span className="text-xs text-warning-text">Hay cambios sin guardar</span>}
+          <Button variant="secondary" className="flex items-center gap-2" onClick={handleDiscard} disabled={!dirty}>
             Descartar Cambios
           </Button>
-          <Button variant="primary" className="flex items-center gap-2">
+          <Button variant="primary" className="flex items-center gap-2" onClick={handleSave} disabled={!dirty}>
             <Save size={16} />
             Guardar Configuración
           </Button>

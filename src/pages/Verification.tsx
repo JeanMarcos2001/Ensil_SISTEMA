@@ -4,11 +4,14 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, CheckCircle, Package, AlertCircle, ArrowRight, Layers, ShieldAlert } from 'lucide-react';
+import { Search, CheckCircle, Package, AlertCircle, ArrowRight, Layers, ShieldAlert } from 'lucide-react';
+import { ClearFilters } from '../components/ui/ClearFilters';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData, Enrollment, Recipe } from '../context/DataContext';
 import { availableStock } from '../utils/inventory';
-import { todayLocalISO } from '../utils/schedule';
+import { longDayLabel, to12h, todayLocalISO } from '../utils/schedule';
+import { firstSessionOf } from '../utils/validity';
+import { GATE_LABEL, compareGates } from '../utils/verificationGate';
 import { DateInput } from '../components/ui/DateInput';
 import {
   availableComponents,
@@ -17,12 +20,24 @@ import {
   computeVerification,
   findShortage,
   initialModes,
+  isLineDelivered,
   pendingDeductions,
+  recipeForEnrollment,
+  type Deduction,
   type DeliveryMode,
 } from '../utils/verification';
 
+/** Lo que se muestra en la ventana de confirmación antes de entregar y descontar el stock. */
+interface PendingConfirm {
+  deductions: Deduction[];
+  notDelivered: string[];
+  complete: boolean;
+  delivered: number;
+  total: number;
+}
+
 export function Verification() {
-  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, updateStock, updateEnrollmentVerification } = useData();
+  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, schedules, updateStock, updateEnrollmentVerification, pendingFirstSessions } = useData();
   const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<Enrollment | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<Recipe | null>(null);
@@ -34,6 +49,12 @@ export function Verification() {
   const [verificationDate, setVerificationDate] = useState(todayLocalISO());
   const [formError, setFormError] = useState<string | null>(null);
   const [paymentWarning, setPaymentWarning] = useState<string | null>(null);
+  // Confirmación previa: la entrega descuenta stock, así que no basta con un botón de guardar
+  const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  // Matrículas cuya primera asesoría espera la verificación (por número de matrícula)
+  const waiting = pendingFirstSessions();
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
@@ -95,7 +116,22 @@ export function Verification() {
       return;
     }
 
-    deductions.forEach(d => {
+    // Todo en orden: antes de entregar y descontar el stock se pide una confirmación explícita
+    const notDelivered = activeRecipe.items
+      .filter(line => {
+        const item = items.find(i => i.id === line.itemId);
+        return !isLineDelivered(line, item, checkedItems, modes[line.itemId] ?? 'kit');
+      })
+      .map(line => items.find(i => i.id === line.itemId)?.name ?? line.itemId);
+    setAcknowledged(false);
+    setConfirm({ deductions, notDelivered, complete: verification.complete, delivered: verification.delivered, total: verification.total });
+  };
+
+  /** Confirmada la entrega: descuenta el stock de la sede y deja la matrícula verificada. */
+  const applyVerification = () => {
+    if (!selectedEnrollment || !verification || !verifierStaff || !confirm) return;
+    const branchId = selectedEnrollment.branchId || '';
+    confirm.deductions.forEach(d => {
       updateStock(
         branchId,
         d.itemId,
@@ -114,6 +150,7 @@ export function Verification() {
       verifier: `${verifierStaff.names} ${verifierStaff.lastNameP} ${verifierStaff.lastNameM}`.trim(),
     });
 
+    setConfirm(null);
     setIsVerifyOpen(false);
     setFormError(null);
   };
@@ -130,32 +167,16 @@ export function Verification() {
     // Sin el primer pago registrado no se puede verificar: solo se muestra la advertencia
     const gate = checkPaymentGate(enrollment, plans);
     if (!gate.ok) {
-      setPaymentWarning(gate.reason ?? 'Realice el primer pago antes de realizar la verificación.');
+      // Sin el pago tampoco se puede entregar: se recuerda lo que eso implica para la primera asesoría
+      const waitingGate = waiting[enrollment.id];
+      setPaymentWarning(`${gate.reason ?? 'Realice el primer pago antes de realizar la verificación.'}${waitingGate ? ` ${waitingGate.message}` : ''}`);
       return;
     }
     setSelectedEnrollment(enrollment);
-    
-    // Buscar receta coincidente
-    const now = new Date().getTime();
-    const recipe = recipes.find(r => {
-      if (r.status !== 'Activo') return false;
-      if (r.programId !== enrollment.programId) return false;
-      
-      // Nivel: coincide si es el mismo o si la receta es para todos los niveles
-      const matchesLevel = !r.levelId || r.levelId === enrollment.levelId;
-      if (!matchesLevel) return false;
 
-      // Sede: coincide si aplica a todas o si la sede está en la lista
-      const matchesBranch = r.applyToAllBranches || (enrollment.branchId && r.branchIds.includes(enrollment.branchId));
-      if (!matchesBranch) return false;
+    // Receta de materiales vigente para el programa, nivel y sede de la matrícula
+    const recipe = recipeForEnrollment(enrollment, recipes, todayLocalISO());
 
-      // Vigencia: la fecha actual debe estar dentro del rango
-      const start = new Date(r.startDate).getTime();
-      const end = r.endDate ? new Date(r.endDate).getTime() : Infinity;
-      
-      return now >= start && now <= end;
-    });
-    
     setActiveRecipe(recipe || null);
     
     // Lo ya entregado en verificaciones anteriores queda marcado y bloqueado (su stock ya salió)
@@ -187,9 +208,16 @@ export function Verification() {
     const matchesStatus = !statusFilter || 
                          (statusFilter === 'pendiente' && (!e.verificationStatus || e.verificationStatus === 'Pendiente')) ||
                          (statusFilter === 'incompleta' && e.verificationStatus === 'Verificado Incompleto') ||
-                         (statusFilter === 'completa' && e.verificationStatus === 'Verificado Completo');
+                         (statusFilter === 'completa' && e.verificationStatus === 'Verificado Completo') ||
+                         (statusFilter === 'primera' && !!waiting[e.id]);
 
     return matchesSearch && matchesProgram && matchesStatus;
+  }).sort((a, b) => {
+    // Primero las que tienen la primera asesoría esperando: lo vencido y lo más cercano arriba
+    const ga = waiting[a.id];
+    const gb = waiting[b.id];
+    if (ga && gb) return compareGates(ga, gb);
+    return ga ? -1 : gb ? 1 : 0;
   });
 
   const totalPages = Math.ceil(filteredEnrollments.length / itemsPerPage);
@@ -232,6 +260,7 @@ export function Verification() {
                 <option value="pendiente">Pendiente</option>
                 <option value="incompleta">Incompleta</option>
                 <option value="completa">Completa</option>
+                <option value="primera">Esperan la 1.ª asesoría</option>
               </select>
               <select 
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
@@ -243,9 +272,7 @@ export function Verification() {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
-                <Filter size={16} />
-              </Button>
+              <ClearFilters active={!!(searchTerm || statusFilter || programFilter)} onClear={() => { setSearchTerm(''); setStatusFilter(''); setProgramFilter(''); }} className="h-10 rounded-xl" />
             </div>
           </div>
         </div>
@@ -259,6 +286,7 @@ export function Verification() {
                 <th className="px-6 py-3 font-medium">Alumno</th>
                 <th className="px-6 py-3 font-medium">Programa/Nivel</th>
                 <th className="px-6 py-3 font-medium">Fecha Matrícula</th>
+                <th className="px-6 py-3 font-medium">1.ª Asesoría</th>
                 <th className="px-6 py-3 font-medium">Estado Entrega</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -276,6 +304,30 @@ export function Verification() {
                     <div className="text-xs text-text-muted">{row.level || 'N/A'}</div>
                   </td>
                   <td className="px-6 py-3 text-text-secondary text-xs">{row.date}</td>
+                  <td className="px-6 py-3 text-xs">
+                    {(() => {
+                      const gate = waiting[row.id];
+                      const first = gate?.session ?? firstSessionOf(row.id, schedules);
+                      if (!first) return <span className="text-text-muted">—</span>;
+                      return (
+                        <div className="space-y-1">
+                          <div className="text-text-secondary">{longDayLabel(first.date)} · {to12h(first.time)}</div>
+                          {gate ? (
+                            <Badge variant={gate.level === 'planificada' ? 'neutral' : gate.level === 'urgente' ? 'warning' : 'danger'}>
+                              {gate.overdue ? 'Reprogramar: sin materiales' : `${GATE_LABEL[gate.level]} · ${gate.daysLeft === 0 ? 'hoy' : gate.daysLeft === 1 ? 'mañana' : `en ${gate.daysLeft} días`}`}
+                            </Badge>
+                          ) : (
+                            <span className="text-text-muted">
+                              {first.status === 'Asistió' ? 'Ya asistió' : first.status}
+                              {!row.verificationStatus || row.verificationStatus === 'Pendiente'
+                                ? (!recipeForEnrollment(row, recipes, todayLocalISO()) && ['Reservado', 'Reprogramado'].includes(first.status) ? ' · sin receta: no se bloquea' : '')
+                                : ''}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-6 py-3">
                     <Badge 
                       variant={
@@ -297,7 +349,7 @@ export function Verification() {
               ))}
               {paginatedEnrollments.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-10 text-center text-text-muted">
+                  <td colSpan={7} className="px-6 py-10 text-center text-text-muted">
                     No se encontraron matrículas pendientes de verificación
                   </td>
                 </tr>
@@ -367,7 +419,7 @@ export function Verification() {
               disabled={!activeRecipe || !verifierId}
               onClick={handleSaveVerification}
             >
-              Guardar verificación
+              Revisar y confirmar
             </Button>
           </div>
         }
@@ -401,6 +453,12 @@ export function Verification() {
                 </Badge>
               </div>
             </div>
+
+            {waiting[selectedEnrollment.id] && (
+              <div className={`rounded-xl border p-3 text-sm ${waiting[selectedEnrollment.id].overdue || waiting[selectedEnrollment.id].level === 'critica' ? 'bg-danger-tint/60 border-danger-text/20 text-danger-text' : 'bg-warning-tint/60 border-warning-text/20 text-warning-text'}`}>
+                {waiting[selectedEnrollment.id].message}
+              </div>
+            )}
 
             {!activeRecipe ? (
               <div className="p-4 bg-danger/10 border border-danger/20 rounded-xl flex gap-3 items-start">
@@ -446,7 +504,7 @@ export function Verification() {
                       <Package size={16} />
                       Checklist de Artículos (Receta: {activeRecipe.name})
                     </h3>
-                    <span className="text-xs text-text-muted">Descuenta stock al guardar</span>
+                    <span className="text-xs text-text-muted">Pide confirmación y descuenta stock</span>
                   </div>
 
                   <div className="border border-border-soft rounded-xl overflow-hidden">
@@ -609,6 +667,78 @@ export function Verification() {
                 </div>
               </>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Confirmación de la entrega: descuenta el stock de la sede y habilita la primera asesoría */}
+      <Modal
+        isOpen={!!confirm}
+        onClose={() => setConfirm(null)}
+        title="Confirmar la entrega de materiales"
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button variant="ghost" onClick={() => setConfirm(null)}>Volver a revisar</Button>
+            <Button variant="primary" disabled={!acknowledged} onClick={applyVerification}>Confirmar y descontar stock</Button>
+          </div>
+        }
+      >
+        {confirm && selectedEnrollment && verifierStaff && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+              <p className="text-text-muted">Alumno</p><p className="text-text-primary font-medium">{selectedEnrollment.student}</p>
+              <p className="text-text-muted">Matrícula</p><p className="text-text-primary font-mono text-xs self-center">{selectedEnrollment.id}</p>
+              <p className="text-text-muted">Sede</p><p className="text-text-primary">{branchName}</p>
+              <p className="text-text-muted">Verificador</p><p className="text-text-primary">{verifierStaff.names} {verifierStaff.lastNameP}</p>
+              <p className="text-text-muted">Fecha</p><p className="text-text-primary">{verificationDate}</p>
+              <p className="text-text-muted">Resultado</p>
+              <p><Badge variant={confirm.complete ? 'success' : 'warning'}>{confirm.complete ? 'Verificado Completo' : 'Verificado Incompleto'}</Badge> <span className="text-xs text-text-muted ml-1">{confirm.delivered} de {confirm.total} artículos</span></p>
+            </div>
+
+            <div className="border border-border-soft rounded-xl overflow-hidden">
+              <div className="px-4 py-2 bg-surface-muted/50 text-xs font-medium uppercase text-text-secondary">Se entrega y se descuenta ahora</div>
+              {confirm.deductions.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-text-muted">No hay artículos nuevos: solo se actualizan los datos de la verificación (el stock no cambia).</p>
+              ) : (
+                <ul className="divide-y divide-border-soft">
+                  {confirm.deductions.map(d => (
+                    <li key={d.itemId} className="px-4 py-2 flex justify-between text-sm">
+                      <span className="text-text-primary">{items.find(i => i.id === d.itemId)?.name ?? d.itemId}</span>
+                      <span className="text-text-secondary font-medium">× {d.quantity}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {confirm.notDelivered.length > 0 && (
+              <div className="bg-warning-tint/60 border border-warning-text/20 rounded-xl p-3 text-sm text-warning-text">
+                Quedan pendientes de entregar: <strong>{confirm.notDelivered.join(', ')}</strong>. La matrícula quedará como incompleta y podrá completarse en otra verificación.
+              </div>
+            )}
+
+            {(() => {
+              const gate = waiting[selectedEnrollment.id];
+              if (!gate?.session) return null;
+              return gate.overdue ? (
+                <div className="bg-danger-tint/60 border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">
+                  La primera asesoría ({longDayLabel(gate.session.date)}, {to12h(gate.session.time)}) ya pasó sin materiales. Al verificar, la matrícula queda habilitada, pero esa asesoría debe reprogramarse en Programación.
+                </div>
+              ) : (
+                <div className="bg-info-tint/60 border border-info-text/20 rounded-xl p-3 text-sm text-info-text">
+                  Con esta verificación la primera asesoría ({longDayLabel(gate.session.date)}, {to12h(gate.session.time)}) queda habilitada para registrarse.
+                </div>
+              );
+            })()}
+
+            <p className="text-xs text-text-muted">
+              El stock de la sede {branchName} baja al confirmar y la entrega no se deshace desde esta pantalla: una corrección posterior se hace con un ajuste de inventario.
+            </p>
+            <label className="flex items-start gap-2 text-sm text-text-primary cursor-pointer">
+              <input type="checkbox" className="mt-0.5 rounded border-border-soft text-primary-accent focus:ring-primary-accent" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} />
+              <span>Confirmo que los artículos indicados fueron entregados físicamente al alumno o a su apoderado.</span>
+            </label>
           </div>
         )}
       </Modal>

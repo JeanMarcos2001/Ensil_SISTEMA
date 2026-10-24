@@ -3,6 +3,9 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Shipping } from '../logistics/Shipping';
 import { LeadsConfig } from './LeadsConfig';
 import { ClassSchedulesConfig } from './ClassSchedulesConfig';
+import { DocumentTemplatesConfig } from './DocumentTemplatesConfig';
+import { CollectionsConfig } from './CollectionsConfig';
+import { PsyRemindersConfig } from './PsyRemindersConfig';
 
 export function SettingsPage() {
   const [isCrudsOpen, setIsCrudsOpen] = useState(true);
@@ -40,6 +43,25 @@ export function SettingsPage() {
                   Horarios de clases
                 </button>
                 
+                <button 
+                  onClick={() => setActiveTab('templates')}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'templates' ? 'bg-active-tint text-primary-accent font-medium' : 'text-text-secondary hover:bg-surface-muted hover:text-text-primary'}`}
+                >
+                  Plantillas de documentos
+                </button>
+                <button 
+                  onClick={() => setActiveTab('collections')}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'collections' ? 'bg-active-tint text-primary-accent font-medium' : 'text-text-secondary hover:bg-surface-muted hover:text-text-primary'}`}
+                >
+                  Política de cobranza
+                </button>
+                <button 
+                  onClick={() => setActiveTab('psyreminders')}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'psyreminders' ? 'bg-active-tint text-primary-accent font-medium' : 'text-text-secondary hover:bg-surface-muted'}`}
+                >
+                  Recordatorios de Psicopedagogía
+                </button>
+
                 <div className="h-px bg-border-soft my-1 mx-2"></div>
                 
                 <div className="text-[10px] font-semibold text-text-muted uppercase tracking-wider px-2 py-1">Logística</div>
@@ -59,6 +81,9 @@ export function SettingsPage() {
       <div className="flex-1 overflow-y-auto p-6 bg-surface">
         {activeTab === 'leads' && <LeadsConfig />}
         {activeTab === 'schedules' && <ClassSchedulesConfig />}
+        {activeTab === 'templates' && <DocumentTemplatesConfig />}
+        {activeTab === 'collections' && <CollectionsConfig />}
+        {activeTab === 'psyreminders' && <PsyRemindersConfig />}
         {activeTab === 'shipping' && <Shipping />}
       </div>
     </div>

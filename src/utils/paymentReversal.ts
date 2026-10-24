@@ -29,7 +29,10 @@ export interface ReversalInput {
   detail: string;
   /** ¿Se devolvió el dinero al cliente? */
   refunded: boolean;
+  /** Número de una nota de crédito ya emitida fuera del sistema (modo «externa»). */
   creditNote: string;
+  /** Qué hacer con el comprobante del pago (ver `utils/creditNotes.ts`). Si falta, se decide por la presencia del comprobante. */
+  creditNoteMode?: 'emitir' | 'externa' | 'no-entregado' | 'ninguna';
 }
 
 const numberOf = (id: string) => parseInt(id.replace(/\D/g, ''), 10) || 0;

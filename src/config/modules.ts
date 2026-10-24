@@ -20,7 +20,7 @@ export const MODULE_DATA: Record<string, { title: string, groups: { title?: stri
   psicopedagogia: {
     title: 'Psicopedagogía',
     groups: [
-      { items: ['Programación', 'Historial del alumno', 'Cronogramas mensuales'] }
+      { items: ['Programación', 'Historial del alumno', 'Cronogramas mensuales', 'Recordatorios'] }
     ]
   },
   personas: {

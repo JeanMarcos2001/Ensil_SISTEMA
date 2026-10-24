@@ -3,7 +3,7 @@ import { AlertCircle } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { DateInput } from '../../components/ui/DateInput';
 import { Modal } from '../../components/ui/Modal';
-import { useData } from '../../context/DataContext';
+import { useData, type Contract } from '../../context/DataContext';
 import { todayLocalISO } from '../../utils/schedule';
 import {
   AFP_FUNDS,
@@ -11,6 +11,9 @@ import {
   MIN_WAGE,
   PENSION_SYSTEMS,
   buildContract,
+  buildContractPatch,
+  contractToForm,
+  diffContract,
   emptyContractForm,
   estimateNet,
   hasPension,
@@ -24,29 +27,40 @@ import { Field, errorCls, inputCls } from '../enrollment/fields';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  /** Contrato vigente a editar; `null` o sin definir para registrar uno nuevo. */
+  editing?: Contract | null;
 }
 
 const money = (n: number) => `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none';
 
 /**
- * Nuevo contrato. Todos los contratos son Full time. El sueldo neto es una estimación (bruto − aportes a pensiones)
- * y se calcula solo; no hay «tipo de comisión». Los campos con asterisco son obligatorios.
+ * Nuevo contrato o edición de uno vigente. Todos los contratos son Full time. El sueldo neto es una estimación
+ * (bruto − aportes a pensiones) y se calcula solo; no hay «tipo de comisión». Los campos con asterisco son obligatorios.
+ * Al editar, el trabajador no se cambia, se pide el motivo y queda la constancia de lo que cambió.
  */
-export function ContractFormModal({ isOpen, onClose }: Props) {
-  const { staff, contracts, addContract } = useData();
+export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
+  const { staff, contracts, addContract, editContract } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<ContractForm>(emptyContractForm());
   const [submitted, setSubmitted] = useState(false);
+  const [reason, setReason] = useState('');
+  const [serverError, setServerError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm(emptyContractForm());
+    setForm(editing ? contractToForm(editing) : emptyContractForm());
     setSubmitted(false);
-  }, [isOpen]);
+    setReason('');
+    setServerError(null);
+  }, [isOpen, editing]);
 
-  const errors = useMemo(() => validateContractForm(form, contracts, staff, today), [form, contracts, staff, today]);
-  const set = (patch: Partial<ContractForm>) => setForm(f => ({ ...f, ...patch }));
+  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id), [form, contracts, staff, today, editing?.id]);
+  const changes = useMemo(
+    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form)) : []),
+    [editing, errors, form]
+  );
+  const set = (patch: Partial<ContractForm>) => { setForm(f => ({ ...f, ...patch })); setServerError(null); };
   const err = (k: keyof ContractForm) => (submitted ? errors[k] : undefined);
   const cls = (k: keyof ContractForm) => `${inputCls} ${err(k) ? errorCls : ''}`;
 
@@ -68,7 +82,12 @@ export function ContractFormModal({ isOpen, onClose }: Props) {
   const handleSave = () => {
     setSubmitted(true);
     if (Object.keys(errors).length > 0) return;
-    addContract(buildContract(form));
+    if (editing) {
+      const r = editContract(editing.id, form, reason);
+      if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar el contrato.'); return; }
+    } else {
+      addContract(buildContract(form));
+    }
     onClose();
   };
 
@@ -78,30 +97,30 @@ export function ContractFormModal({ isOpen, onClose }: Props) {
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Nuevo Contrato"
+      title={editing ? 'Editar contrato' : 'Nuevo Contrato'}
       size="3xl"
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>Guardar Contrato</Button>
+          <Button variant="primary" onClick={handleSave}>{editing ? 'Guardar cambios' : 'Guardar Contrato'}</Button>
         </div>
       }
     >
       <div className="space-y-6 pb-2">
-        {submitted && count > 0 && (
+        {(serverError || (submitted && count > 0)) && (
           <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <p>Revise {count} {count === 1 ? 'campo marcado' : 'campos marcados'} antes de guardar.</p>
+            <p>{serverError ?? `Revise ${count} ${count === 1 ? 'campo marcado' : 'campos marcados'} antes de guardar.`}</p>
           </div>
         )}
 
         <section className="space-y-4">
           <h4 className="text-sm font-bold text-text-primary uppercase tracking-wider">Condiciones laborales</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Field label="Trabajador" required className="md:col-span-2" error={err('staffId')}>
-              <select className={cls('staffId')} value={form.staffId} onChange={e => set({ staffId: e.target.value })}>
+            <Field label="Trabajador" required className="md:col-span-2" error={err('staffId')} hint={editing ? 'El trabajador de un contrato no se cambia. Si es otra persona, registre un contrato nuevo.' : undefined}>
+              <select className={cls('staffId')} value={form.staffId} disabled={!!editing} onChange={e => set({ staffId: e.target.value })}>
                 <option value="">Seleccionar trabajador...</option>
-                {staff.filter(s => s.status === 'Activo').map(s => (
+                {staff.filter(s => s.status === 'Activo' || s.id === form.staffId).map(s => (
                   <option key={s.id} value={s.id}>{s.names} {s.lastNameP} {s.lastNameM}</option>
                 ))}
               </select>
@@ -199,6 +218,28 @@ export function ContractFormModal({ isOpen, onClose }: Props) {
             <textarea className={`${textareaCls} h-20`} value={form.observations} onChange={e => set({ observations: e.target.value })} placeholder="Detalles adicionales del contrato..." />
           </Field>
         </section>
+
+        {editing && (
+          <section className="space-y-4 border-t border-border-soft pt-6">
+            <h4 className="text-sm font-bold text-text-primary uppercase tracking-wider">Constancia de la modificación</h4>
+            {changes.length > 0 ? (
+              <ul className="text-sm space-y-1 bg-surface-muted rounded-xl p-3 border border-border-soft">
+                {changes.map(c => (
+                  <li key={c.label} className="flex flex-wrap gap-x-2">
+                    <span className="font-medium text-text-primary">{c.label}:</span>
+                    <span className="text-text-muted line-through">{c.from}</span>
+                    <span className="text-text-primary">→ {c.to}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-text-muted">Aún no hay cambios respecto al contrato guardado.</p>
+            )}
+            <Field label="Motivo de la modificación" required={changes.length > 0} hint="Queda en el historial del contrato (quién, cuándo y por qué).">
+              <textarea className={`${textareaCls} h-20`} value={reason} onChange={e => { setReason(e.target.value); setServerError(null); }} placeholder="Ej: Renovación acordada, ajuste de sueldo..." />
+            </Field>
+          </section>
+        )}
       </div>
     </Modal>
   );

@@ -33,7 +33,11 @@ import { Messaging } from '../../pages/Messaging';
 import { Schedule } from '../../pages/psychopedagogy/Schedule';
 import { StudentHistory } from '../../pages/psychopedagogy/StudentHistory';
 import { PendingRequests } from '../../pages/system/PendingRequests';
+import { Closures, Reopenings } from '../../pages/system/Closures';
+import { PortfolioReport } from '../../pages/reports/PortfolioReport';
 import { MonthlySchedules } from '../../pages/psychopedagogy/MonthlySchedules';
+import { Reminders } from '../../pages/psychopedagogy/Reminders';
+import { PsychopedagogyReport } from '../../pages/reports/PsychopedagogyReport';
 import { StaffPage } from '../../pages/Staff';
 import { ContractsPage } from '../../pages/Contracts';
 import { AssignmentsPage } from '../../pages/Assignments';
@@ -118,11 +122,16 @@ export function AppShell() {
     
     // System Module
     if (activeItem === 'Solicitudes pendientes') return <PendingRequests />;
+    if (activeItem === 'Cierres') return <Closures />;
+    if (activeModule === 'reportes' && activeItem === 'Cartera') return <PortfolioReport />;
+    if (activeModule === 'reportes' && activeItem === 'Psicopedagogía') return <PsychopedagogyReport />;
+    if (activeItem === 'Reaperturas') return <Reopenings />;
 
     // Psychopedagogy Module
     if (activeItem === 'Programación') return <Schedule />;
     if (activeItem === 'Historial del alumno') return <StudentHistory />;
     if (activeItem === 'Cronogramas mensuales') return <MonthlySchedules />;
+    if (activeItem === 'Recordatorios') return <Reminders />;
     
     return (
       <div className="flex items-center justify-center h-full text-text-muted">

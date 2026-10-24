@@ -7,7 +7,7 @@
  *  - No hay «tipo de comisión»: de cada AFP se usa su tasa total referencial.
  *  - La locación de servicios no tiene aportes a pensiones: el neto es igual al bruto.
  */
-import type { Contract, Staff } from '../context/DataContext';
+import type { Contract, ContractRevisionChange, Staff } from '../context/DataContext';
 
 export const CONTRACT_TYPES = ['Indeterminado', 'Plazo Fijo', 'Locación de servicios'] as const;
 export type ContractType = (typeof CONTRACT_TYPES)[number];
@@ -79,7 +79,7 @@ export const hasVacations = (type: string) => type !== 'Locación de servicios';
 export const contractStatus = (c: Pick<Contract, 'status' | 'endDate'>, today: string): string =>
   c.status === 'Vigente' && c.endDate && c.endDate < today ? 'Vencido' : c.status;
 
-export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string): ContractErrors {
+export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string): ContractErrors {
   const e: ContractErrors = {};
   if (!f.staffId || !staff.some(s => s.id === f.staffId)) e.staffId = 'Seleccione al trabajador.';
   if (!(CONTRACT_TYPES as readonly string[]).includes(f.type)) e.type = 'Seleccione el tipo de contrato.';
@@ -104,7 +104,7 @@ export function validateContractForm(f: ContractForm, contracts: Contract[], sta
     if (f.vacationEnd && f.endDate && f.vacationEnd > f.endDate) e.vacationEnd = 'Las vacaciones no pueden terminar después del contrato.';
   }
   // Un trabajador tiene un solo contrato vigente
-  if (f.staffId && contracts.some(c => c.staffId === f.staffId && contractStatus(c, today) === 'Vigente')) {
+  if (f.staffId && contracts.some(c => c.id !== editingId && c.staffId === f.staffId && contractStatus(c, today) === 'Vigente')) {
     e.staffId = 'Este trabajador ya tiene un contrato vigente. Ciérrelo antes de crear otro.';
   }
   return e;
@@ -130,4 +130,47 @@ export function buildContract(f: ContractForm): Omit<Contract, 'id'> {
     vacationEnd: hasVacations(f.type) ? f.vacationEnd || undefined : undefined,
     observations: f.observations.trim() || undefined,
   };
+}
+
+// ---------------------------------------------------------------- Edición de un contrato vigente
+
+export const contractToForm = (c: Contract): ContractForm => ({
+  staffId: c.staffId, type: c.type, startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
+  pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '', vacationStart: c.vacationStart ?? '', vacationEnd: c.vacationEnd ?? '',
+  observations: c.observations ?? '',
+});
+
+/** Cambios que se guardan al editar (no toca al trabajador ni el estado del contrato). */
+export function buildContractPatch(f: ContractForm): Partial<Omit<Contract, 'id'>> {
+  const { staffId: _staffId, status: _status, ...patch } = buildContract(f);
+  return patch;
+}
+
+const fmtMoney = (n: number | undefined) => (n === undefined ? '—' : `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+const txt = (v: string | undefined) => (v && v.trim() ? v : '—');
+
+/** Qué cambia al editar un contrato (con etiquetas legibles, para la constancia). */
+export function diffContract(before: Contract, after: Partial<Omit<Contract, 'id'>>): ContractRevisionChange[] {
+  const rows: [string, string, string][] = [
+    ['Tipo de contrato', txt(before.type), txt(after.type)],
+    ['Fecha de inicio', txt(before.startDate), txt(after.startDate)],
+    ['Fecha de fin', txt(before.endDate), txt(after.endDate)],
+    ['Sueldo bruto', fmtMoney(before.grossSalary), fmtMoney(after.grossSalary)],
+    ['Sistema de pensiones', txt(before.pensionSystem), txt(after.pensionSystem)],
+    ['AFP', txt(before.pensionFund), txt(after.pensionFund)],
+    ['Vacaciones: inicio', txt(before.vacationStart), txt(after.vacationStart)],
+    ['Vacaciones: retorno', txt(before.vacationEnd), txt(after.vacationEnd)],
+    ['Observaciones', txt(before.observations), txt(after.observations)],
+  ];
+  return rows.filter(([, from, to]) => from !== to).map(([label, from, to]) => ({ label, from, to }));
+}
+
+export const MIN_REASON_LEN = 5;
+
+export function validateContractEdit(c: Contract, changes: ContractRevisionChange[], reason: string): string[] {
+  const e: string[] = [];
+  if (c.status !== 'Vigente') e.push('Solo se puede editar un contrato vigente. Un contrato cesado queda como historial: registre uno nuevo.');
+  if (changes.length === 0) e.push('No hay cambios que guardar.');
+  if (changes.length > 0 && reason.trim().length < MIN_REASON_LEN) e.push('Indique el motivo de la modificación: queda en el historial del contrato.');
+  return e;
 }

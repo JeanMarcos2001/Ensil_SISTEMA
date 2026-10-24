@@ -4,6 +4,7 @@ import { AlertCircle, Check, CheckCircle2, X } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { useData } from '../context/DataContext';
 import {
+  DRAFT_KEY,
   availablePaymentTypesFor,
   emptyDraft,
   emptyStudent,
@@ -23,14 +24,13 @@ import { StepProgram } from './enrollment/StepProgram';
 import { StepPayment } from './enrollment/StepPayment';
 import { StepSummary } from './enrollment/StepSummary';
 import { STEPS } from './enrollment/types';
-import { allActivities } from '../utils/schedule';
+import { allActivities, todayLocalISO } from '../utils/schedule';
 
 interface NewEnrollmentWizardProps {
   onClose: () => void;
 }
 
-const DRAFT_KEY = 'enrollmentDraft.v3';
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = todayLocalISO;
 
 function loadDraft(): { step: number; draft: EnrollmentDraft } | null {
   try {
@@ -229,9 +229,14 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
           <Button variant="secondary" onClick={() => { onClose(); navigate('/operacion/verificacion'); }}>Verificar</Button>
           <Button variant="primary" onClick={onClose}>Cerrar</Button>
         </div>
-        <p className="text-xs text-text-muted max-w-md">
-          Pendiente de módulos aún inexistentes: generar contrato y generar ficha de matrícula.
-        </p>
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-xs text-text-muted max-w-md">Genere, imprima y haga firmar el contrato y la ficha de cada matrícula:</p>
+          <div className="flex flex-wrap gap-2 justify-center">
+            {result.ids.map(id => (
+              <Button key={id} variant="secondary" size="sm" onClick={() => { onClose(); navigate(`/operacion/matriculas?ficha=${id}&tab=documentos`); }}>Contrato y ficha de {id}</Button>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

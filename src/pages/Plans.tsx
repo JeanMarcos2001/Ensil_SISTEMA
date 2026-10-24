@@ -1,41 +1,83 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, FileText, AlertTriangle, Calendar, DollarSign, History, ArrowRight } from 'lucide-react';
+import { Search, Download, FileText, AlertTriangle, Calendar, DollarSign, History, ArrowRight } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData } from '../context/DataContext';
 import { RegisterPaymentModal } from '../components/payments/RegisterPaymentModal';
 import { DateInput } from '../components/ui/DateInput';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { EnrollmentFichaModal } from '../components/enrollment/EnrollmentFichaModal';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
+import { todayLocalISO } from '../utils/schedule';
+import { RemindersPanel } from '../components/collections/RemindersPanel';
+import { installmentState, recomputePlan } from '../utils/planState';
+import { buildReminders, moraOf } from '../utils/collections';
+import { PERM } from '../utils/authority';
 
 export function Plans() {
-  const { plans, refinanceInstallment } = useData();
+  const data = useData();
+  const { refinanceInstallment, collectionPolicy, chargeMora, can } = data;
+  const navigate = useNavigate();
+  const today = todayLocalISO();
+  const [view, setView] = useState<'planes' | 'recordatorios'>('planes');
+  const [moraMessage, setMoraMessage] = useState<string | null>(null);
+  // El estado de cada cuota y de cada plan se calcula con lo cobrado y la fecha (no se confía en el texto guardado)
+  const plans = useMemo(() => data.plans.map(pl => {
+    const withStates = { ...pl, installments: pl.installments.map(i => ({ ...i, status: installmentState(i, today) })) };
+    return recomputePlan(withStates, today);
+  }), [data.plans, today]);
+  const reminderCount = useMemo(
+    () => buildReminders({ plans: data.plans, enrollments: data.enrollments, students: data.students, guardians: data.guardians, branches: data.branches }, collectionPolicy, data.reminderLogs, today).length,
+    [data.plans, data.enrollments, data.students, data.guardians, data.branches, collectionPolicy, data.reminderLogs, today]
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   // Ficha de la matrícula del plan (Ver detalles de matrícula)
   const [fichaFor, setFichaFor] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<any>(null);
-  const [selectedInstallment, setSelectedInstallment] = useState<any>(null);
+  const [selectedPlanSnap, setSelectedPlan] = useState<any>(null);
+  const [selectedInstallmentSnap, setSelectedInstallment] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [statusFilter, setStatusFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+
   // UI States
   const [isPlanDetailOpen, setIsPlanDetailOpen] = useState(false);
   const [isInstallmentDetailOpen, setIsInstallmentDetailOpen] = useState(false);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isRefinanceOpen, setIsRefinanceOpen] = useState(false);
+  const [refinanceError, setRefinanceError] = useState<string | null>(null);
+
+  // Siempre la versión actual del plan y de la cuota elegidos (cambian al cobrar, refinanciar o cobrar mora)
+  const selectedPlan = selectedPlanSnap ? plans.find(pl => pl.id === selectedPlanSnap.id) ?? selectedPlanSnap : null;
+  const selectedInstallment = selectedInstallmentSnap && selectedPlan ? selectedPlan.installments.find((i: any) => i.id === selectedInstallmentSnap.id) ?? selectedInstallmentSnap : selectedInstallmentSnap;
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
 
-  const filteredPlans = plans.filter(p => 
-    p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const filteredPlans = plans.filter(p =>
+    (p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.titular.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.mat.toLowerCase().includes(searchTerm.toLowerCase())
+    p.mat.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (!statusFilter || p.status === statusFilter) &&
+    (!typeFilter || p.type === typeFilter)
   );
+  const statusOptions = useMemo(() => [...new Set(plans.map(p => p.status))].sort(), [plans]);
+  const typeOptions = useMemo(() => [...new Set(plans.map(p => p.type))].sort(), [plans]);
+  const hasFilters = !!(searchTerm || statusFilter || typeFilter);
+  const clearFilters = () => { setSearchTerm(''); setStatusFilter(''); setTypeFilter(''); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Cartera', todayLocalISO()),
+      ['Plan', 'Matrícula', 'Titular', 'Tipo de pago', 'Total (USD)', 'Saldo (USD)', 'Próxima cuota', 'Estado'],
+      filteredPlans.map(p => [p.id, p.mat, p.titular, p.type, p.total, p.balance, p.next, p.status])
+    );
+  };
 
   const totalPages = Math.ceil(filteredPlans.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -44,13 +86,13 @@ export function Plans() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, statusFilter, typeFilter]);
 
   // Form States
   const [refinanceForm, setRefinanceForm] = useState({
     name: '',
     amount: 0,
-    dueDate: new Date().toISOString().split('T')[0],
+    dueDate: todayLocalISO(),
     reason: ''
   });
 
@@ -82,16 +124,15 @@ export function Plans() {
 
   const handleOpenRefinance = (installment: any) => {
     setSelectedInstallment(installment);
-    setRefinanceForm({
-      ...refinanceForm,
-      amount: installment.balance
-    });
+    setRefinanceForm({ name: `${installment.name} (refinanciada)`, amount: installment.balance, dueDate: todayLocalISO(), reason: '' });
+    setRefinanceError(null);
     setIsRefinanceOpen(true);
   };
 
   const handleRefinance = () => {
     if (selectedPlan && selectedInstallment) {
-      refinanceInstallment(selectedPlan.id, selectedInstallment.id, refinanceForm);
+      const r = refinanceInstallment(selectedPlan.id, selectedInstallment.id, { name: refinanceForm.name, dueDate: refinanceForm.dueDate, reason: refinanceForm.reason });
+      if (!r.ok) { setRefinanceError(r.error ?? 'No se pudo refinanciar la cuota.'); return; }
       setIsRefinanceOpen(false);
       setIsPlanDetailOpen(false);
     }
@@ -118,15 +159,24 @@ export function Plans() {
           <p className="text-sm text-text-secondary">Seguimiento financiero, cronogramas y refinanciaciones</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          {can(PERM.collections) && <Button variant="secondary" className="hidden md:flex" onClick={() => navigate('/reportes/cartera')}>Reporte de cartera</Button>}
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredPlans.length === 0}>
             <Download size={16} />
             Exportar Cartera
           </Button>
         </div>
       </div>
 
+      <div className="flex gap-2 mb-4">
+        {([['planes', 'Planes'], ['recordatorios', `Recordatorios de cobranza${reminderCount > 0 ? ` (${reminderCount})` : ''}`]] as const).map(([v, label]) => (
+          <button key={v} type="button" onClick={() => setView(v)} className={`h-9 px-4 rounded-xl border text-sm font-medium transition-colors ${view === v ? 'bg-primary-accent border-primary-accent text-white' : 'bg-surface border-border-soft text-text-secondary hover:bg-surface-muted'}`}>{label}</button>
+        ))}
+      </div>
+
+      {view === 'recordatorios' && <RemindersPanel />}
+
       {/* Main Content Card (Filters + Table + Pagination) */}
-      <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
+      {view === 'planes' && <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
         {/* Filters */}
         <div className="p-4 border-b border-border-soft">
           <div className="flex flex-col md:flex-row gap-4">
@@ -141,19 +191,23 @@ export function Plans() {
               />
             </div>
             <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Estado Plan</option>
-                <option value="al-dia">Al día</option>
-                <option value="atrasado">Atrasado</option>
+                {statusOptions.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Tipo de Pago</option>
-                <option value="contado">Contado</option>
-                <option value="cuotas">Cuotas</option>
+                {typeOptions.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
-              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
-                <Filter size={16} />
-              </Button>
+              <ClearFilters active={hasFilters} onClear={clearFilters} className="h-10 rounded-xl" />
             </div>
           </div>
         </div>
@@ -239,7 +293,7 @@ export function Plans() {
             </Button>
           </div>
         </div>
-      </div>
+      </div>}
 
       <EnrollmentFichaModal enrollmentId={fichaFor} onClose={() => setFichaFor(null)} />
 
@@ -299,6 +353,8 @@ export function Plans() {
                         <td className="px-4 py-3 text-right font-medium text-text-primary">$ {inst.balance.toFixed(2)}</td>
                         <td className="px-4 py-3">
                           <Badge variant={getInstallmentBadge(inst.status)}>{inst.status}</Badge>
+                          {inst.status === 'Vencida' && !inst.isMora && <span className="block text-[11px] text-danger-text mt-0.5">{moraOf(inst, collectionPolicy, today).daysOverdue} días de atraso</span>}
+                          {inst.isMora && <span className="block text-[11px] text-text-muted mt-0.5">Cargo por mora</span>}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <Button variant="secondary" className="px-2 py-1 h-auto text-xs" onClick={() => handleOpenInstallmentDetail(inst)}>
@@ -327,7 +383,7 @@ export function Plans() {
             <div className="flex gap-2">
               {selectedInstallment?.status !== 'Pagada' && selectedInstallment?.status !== 'Refinanciada' && selectedInstallment?.status !== 'Anulada' && (
                 <>
-                  <Button variant="secondary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenRefinance(selectedInstallment); }}>
+                  <Button variant="secondary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenRefinance(selectedInstallment); }} disabled={!!selectedInstallment?.isMora}>
                     Refinanciar
                   </Button>
                   <Button variant="primary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenPayment(selectedInstallment); }}>
@@ -361,6 +417,28 @@ export function Plans() {
                 </span>
               </div>
             </div>
+
+            {(() => {
+              const m = moraOf(selectedInstallment, collectionPolicy, today);
+              if (selectedInstallment.isMora || m.daysOverdue === 0 || selectedInstallment.balance <= 0) return null;
+              return (
+                <div className="border border-border-soft rounded-xl p-3 space-y-2 text-sm">
+                  <p className="font-medium text-text-primary">Mora</p>
+                  <p className="text-text-secondary">
+                    {m.daysOverdue} día(s) vencida{m.chargeableDays === 0 ? ` (dentro de los ${collectionPolicy.graceDays} días de gracia)` : ''}.{' '}
+                    {collectionPolicy.moraMonthlyRate > 0
+                      ? <>Mora acumulada: <strong>$ {m.accrued.toFixed(2)}</strong>{m.charged > 0 ? ` · ya cobrada: $ ${m.charged.toFixed(2)}` : ''} · por cobrar: <strong>$ {m.pending.toFixed(2)}</strong>.</>
+                      : 'La política actual no cobra mora (tasa 0 %).'}
+                  </p>
+                  {moraMessage && <p className="text-xs text-text-muted">{moraMessage}</p>}
+                  {collectionPolicy.moraMonthlyRate > 0 && m.pending >= 0.01 && (
+                    <Button variant="secondary" size="sm" disabled={!can(PERM.chargeMora)} onClick={() => { const r = chargeMora(selectedPlan.id, selectedInstallment.id); setMoraMessage(r.ok ? 'Se generó la cuota de mora: ya se puede cobrar.' : r.error ?? 'No se pudo cobrar la mora.'); }}>
+                      Cobrar mora (genera una cuota)
+                    </Button>
+                  )}
+                </div>
+              );
+            })()}
 
             {selectedInstallment.status === 'Parcial' && (
               <div className="bg-warning-tint/50 border border-warning-text/20 rounded-xl p-3 flex gap-2 text-sm text-warning-text">
@@ -423,7 +501,7 @@ export function Plans() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsRefinanceOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleRefinance}>Crear nueva versión de plan</Button>
+            <Button variant="primary" onClick={handleRefinance}>Refinanciar cuota</Button>
           </div>
         }
       >
@@ -431,8 +509,12 @@ export function Plans() {
           <div className="space-y-4">
             <div className="bg-info-tint/50 border border-info-text/20 rounded-xl p-3 flex gap-2 text-sm text-info-text mb-2">
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <p>La refinanciación anulará las cuotas futuras no ejecutadas y creará una nueva versión del plan de pagos. Esta acción notificará al superadministrador.</p>
+              <p>La refinanciación traslada el saldo pendiente de esta cuota a una cuota nueva con otra fecha. La cuota origen queda «Refinanciada» (lo ya cobrado se conserva) y las demás cuotas no cambian. Esta acción notifica al superadministrador.</p>
             </div>
+
+            {refinanceError && (
+              <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">{refinanceError}</div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Cuota origen (Solo lectura)</label>
@@ -441,29 +523,26 @@ export function Plans() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Motivo de refinanciación *</label>
-              <textarea value={refinanceForm.reason} onChange={e => setRefinanceForm({...refinanceForm, reason: e.target.value})} className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-primary-accent outline-none resize-none" placeholder="Explique el motivo por el cual el alumno solicita la refinanciación..."></textarea>
+              <textarea value={refinanceForm.reason} onChange={e => { setRefinanceForm({...refinanceForm, reason: e.target.value}); setRefinanceError(null); }} className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-primary-accent outline-none resize-none" placeholder="Explique el motivo por el cual el alumno solicita la refinanciación..."></textarea>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-text-secondary">Nombre nueva cuota *</label>
-                <input type="text" value={refinanceForm.name} onChange={e => setRefinanceForm({...refinanceForm, name: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="Ej: Cuota extraordinaria 1" />
+                <input type="text" value={refinanceForm.name} onChange={e => { setRefinanceForm({...refinanceForm, name: e.target.value}); setRefinanceError(null); }} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="Ej: Cuota extraordinaria 1" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">Monto nueva cuota *</label>
-                <input type="number" value={refinanceForm.amount} onChange={e => setRefinanceForm({...refinanceForm, amount: parseFloat(e.target.value)})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="0.00" />
+                <label className="text-sm font-medium text-text-secondary">Monto nueva cuota</label>
+                <input type="text" value={`$ ${Number(refinanceForm.amount).toFixed(2)}`} disabled className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm text-text-muted outline-none cursor-not-allowed" />
+                <p className="text-xs text-text-muted">Es el saldo pendiente de la cuota: no se condona ni se recarga.</p>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Nueva fecha de vencimiento *</label>
-              <DateInput value={refinanceForm.dueDate} onChange={e => setRefinanceForm({...refinanceForm, dueDate: e.target.value})} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
+              <DateInput min={todayLocalISO()} value={refinanceForm.dueDate} onChange={e => { setRefinanceForm({...refinanceForm, dueDate: e.target.value}); setRefinanceError(null); }} className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-text-secondary">Observaciones</label>
-              <textarea className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-primary-accent outline-none resize-none" placeholder="Condiciones adicionales del acuerdo..."></textarea>
-            </div>
           </div>
         )}
       </Modal>

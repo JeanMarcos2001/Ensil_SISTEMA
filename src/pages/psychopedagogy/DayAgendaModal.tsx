@@ -19,6 +19,7 @@ import {
   type ScheduleAction,
 } from '../../utils/schedule';
 import type { CapacityConfig } from '../../context/DataContext';
+import type { FirstSessionGate } from '../../utils/verificationGate';
 
 interface Props {
   /** Día que se muestra; `null` cierra la ventana. */
@@ -31,6 +32,11 @@ interface Props {
   branchId: string;
   branchName: (id?: string) => string;
   trackings: Tracking[];
+  /** Estado de la verificación frente a una primera asesoría (sin materiales no se registra). */
+  gateOf: (schedule: Schedule) => FirstSessionGate;
+  /** El usuario puede cambiar una asesoría con menos de 24 horas en nombre de la institución. */
+  canChangeLate: boolean;
+  onHistory: (schedule: Schedule) => void;
   onClose: () => void;
   onReserve: (date: string) => void;
   onAction: (action: ScheduleAction, schedule: Schedule) => void;
@@ -47,7 +53,7 @@ export const ACTION_LABEL: Record<ScheduleAction, string> = {
 
 /** Agenda de un día: actividades especiales y, por horario, los alumnos con sus acciones. */
 export function DayAgendaModal({
-  date, today, schedules, activities, capacity, branchId, branchName, trackings, onClose, onReserve, onAction, onShowActivity,
+  date, today, schedules, activities, capacity, branchId, branchName, trackings, gateOf, canChangeLate, onHistory, onClose, onReserve, onAction, onShowActivity,
 }: Props) {
   if (!date) return null;
   const day = schedules.filter(s => s.date === date);
@@ -108,8 +114,9 @@ export function DayAgendaModal({
               {g.items.map(s => {
                 const session = trackings.find(t => t.scheduleId === s.id);
                 const now = new Date();
-                const actions = availableActions(s, today, now);
-                const lockedByNotice = changeBlockedByNotice(s, now);
+                const gate = gateOf(s);
+                const actions = availableActions(s, today, now, gate.blocked, canChangeLate);
+                const lockedByNotice = changeBlockedByNotice(s, now) && !gate.blocked;
                 return (
                   <div key={s.id} className="p-3 border border-border-soft rounded-xl space-y-2">
                     <div className="flex items-start justify-between gap-3">
@@ -123,23 +130,25 @@ export function DayAgendaModal({
                         {s.status === 'Asistió' && <p className="text-xs text-text-muted">{session ? 'Sesión registrada' : 'Sin sesión'}</p>}
                       </div>
                     </div>
+                    {gate.blocked && (
+                      <p className={`text-xs font-medium ${gate.overdue ? 'text-danger-text' : 'text-warning-text'}`}>{gate.message}</p>
+                    )}
                     {lockedByNotice && (
-                      <p className="text-xs text-text-muted">{noticeMessage(s.date, s.time)}</p>
+                      <p className="text-xs text-text-muted">{canChangeLate ? 'Faltan menos de 24 horas: solo la institución puede cambiarla (con motivo).' : noticeMessage(s.date, s.time)}</p>
                     )}
-                    {actions.length > 0 && (
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        {actions.map(a => (
-                          <button
-                            key={a}
-                            type="button"
-                            onClick={() => onAction(a, s)}
-                            className={`text-xs font-medium hover:underline ${a === 'falta' || a === 'cancelar' ? 'text-danger-text' : 'text-primary-accent'}`}
-                          >
-                            {a === 'sesion' && session ? 'Ver sesión' : ACTION_LABEL[a]}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      {actions.map(a => (
+                        <button
+                          key={a}
+                          type="button"
+                          onClick={() => onAction(a, s)}
+                          className={`text-xs font-medium hover:underline ${a === 'falta' || a === 'cancelar' ? 'text-danger-text' : 'text-primary-accent'}`}
+                        >
+                          {a === 'sesion' && session ? 'Ver sesión' : ACTION_LABEL[a]}
+                        </button>
+                      ))}
+                      <button type="button" onClick={() => onHistory(s)} className="text-xs font-medium text-text-secondary hover:underline">Ver historial</button>
+                    </div>
                   </div>
                 );
               })}

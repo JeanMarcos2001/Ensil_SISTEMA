@@ -145,7 +145,12 @@ export interface EnrollmentDraft {
   payments: Record<string, PaymentPart[]>;
   /** Comprobante (boleta / factura) de cada unidad de pago. */
   paymentDocs: Record<string, PaymentDocument>;
+  /** Si es una renovación: la matrícula que se renueva (la nueva guardará de cuál viene). */
+  renewsId?: string;
 }
+
+/** Clave del borrador del asistente de matrícula en el navegador (también la usa «Renovar matrícula» para dejarlo listo). */
+export const DRAFT_KEY = 'enrollmentDraft.v3';
 
 export const emptyPerson = (): DraftPerson => ({
   docType: 'DNI', docNumber: '', names: '', lastNameP: '', lastNameM: '',
@@ -800,6 +805,7 @@ export function buildEnrollmentBatch(
       assignedPrice: q.assignedPrice,
       verificationStatus: 'Pendiente',
       createdAt: opts.now, createdBy: opts.userName,
+      renewsId: draft.renewsId && state.enrollments.some(o => o.id === draft.renewsId && (o.studentId ? o.studentId === studentId : o.student === name)) ? draft.renewsId : undefined,
     });
   });
 

@@ -2,12 +2,37 @@ import React, { createContext, useContext, useRef, useState, ReactNode } from 'r
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { nextNumericId, nextSequentialId } from '../utils/ids';
-import { addDaysISO, allActivities, MONTHS, todayLocalISO, weekdayIndex, withoutEnrollment } from '../utils/schedule';
-import { addMonths, canEnableExtension, enrollmentValidity, programOf } from '../utils/validity';
+import { addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
+import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
+import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
+import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
+import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
+import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
 import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
 import { applyReversalToPlan, reversalTargets, validateReversal, type ReversalInput } from '../utils/paymentReversal';
 import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEnrollmentEdit, type EnrollmentEditValues } from '../utils/enrollmentEdit';
 import { partsUSD } from '../utils/payments';
+import { closeAllOf, closeAssignmentIn, closeImpact, isActive as isActiveAssignment, saveAssignment as saveAssignmentIn, validateAssignmentClose, validateAssignmentForm, type AssignmentForm } from '../utils/assignments';
+import { validateInactivation, validateReactivation } from '../utils/staffStatus';
+import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
+import { applyCashReversal, buildDeposit, cashReversalCheck, validateCashReversal, validateDeposit, type DepositInput } from '../utils/cash';
+import { PERM, can as canDo, type AuthorityContext } from '../utils/authority';
+import { allowedNoteModes, buildCreditNote, validateNoteChoice, type NoteMode } from '../utils/creditNotes';
+import { buildClosure, closedMessage, expectedAt, validateClosure, validateReopen, type ClosureInput } from '../utils/cashClosure';
+import { DEFAULT_FUND, validateFund, type PettyFund } from '../utils/pettyCash';
+import {
+  applyProgramChangeToPlan, applyReactivationToPlan, previewProgramChange, previewReactivation, previewTransfer, programChangeProblems, reactivationProblems, transferProblems,
+  validateProgramChangeRequest, validateReactivationRequest, validateTransferRequest, type ChangeContext, type ProgramChangeInput, type ReactivationInput, type TransferInput,
+} from '../utils/enrollmentChange';
+import { canRequest, canResolve, type ChangeKind } from '../utils/authority';
+import {
+  DEFAULT_CONTRACT_TEMPLATE, buildDocument, docState, documentProblems, issueDocument, issuedNumbers, validateSignature, validateTemplate, type DocContext, type DocKind,
+} from '../utils/enrollmentDocuments';
+import {
+  DEFAULT_POLICY, chargeMoraOn, parsePolicy, validateMoraCharge, validatePolicy, validateReminderLog, type CollectionPolicy, type Reminder, type ReminderLog,
+} from '../utils/collections';
+import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils/refinance';
+import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 
 // Types
@@ -112,6 +137,73 @@ export interface Enrollment {
   /** Caída aprobada: desde qué fecha el alumno dejó de asistir y la solicitud que la originó. */
   dropDate?: string;
   dropRequestId?: string;
+  /** Reactivación aprobada de una matrícula caída. */
+  reactivatedAt?: string;
+  reactivationRequestId?: string;
+  /** Matrícula que esta renueva (nueva matrícula del mismo alumno al terminar o caer la anterior). */
+  renewsId?: string;
+  /** Contrato y ficha generados (numeración, versión y firma). */
+  documents?: EnrollmentDocuments;
+}
+
+/** Documento generado de una matrícula (contrato o ficha). */
+export interface IssuedDocument {
+  number: string;
+  version: number;
+  generatedAt: string;
+  generatedBy: string;
+  /** Resumen de los datos con los que se generó (si cambian, el documento queda desactualizado). */
+  fingerprint: string;
+  signedAt?: string;
+  signedBy?: string;
+  /** Nombre del archivo escaneado con la firma (el sistema aún no guarda archivos). */
+  signedFile?: string;
+}
+
+export interface EnrollmentDocuments {
+  contract?: IssuedDocument;
+  ficha?: IssuedDocument;
+}
+
+/** Cláusula editable del contrato (con campos entre llaves dobles, p. ej. `{{alumno}}`). */
+export interface ContractClause {
+  id: string;
+  title: string;
+  body: string;
+}
+
+/** Plantilla del contrato de servicios educativos (Configuración → Plantillas de documentos). */
+export interface ContractTemplate {
+  version: number;
+  /** ¿El área legal ya revisó este texto? Mientras no, los contratos se generan con una advertencia. */
+  reviewed: boolean;
+  intro: string;
+  clauses: ContractClause[];
+  closing: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type ChangeKindName = 'Reactivación' | 'Cambio de programa' | 'Traslado de sede';
+
+/** Solicitud de cambio sobre una matrícula (la pide quien atiende y la resuelve quien tiene autoridad). */
+export interface ChangeRequest {
+  id: string;
+  kind: ChangeKindName;
+  enrollmentId: string;
+  studentId?: string;
+  requestedAt: string;
+  requestedBy: string;
+  reason: string;
+  detail: string;
+  /** Datos propios de cada tipo (fecha de reinicio, programa/nivel destino, sede destino…). */
+  payload: Record<string, string>;
+  status: DropStatus;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNote?: string;
+  /** Qué se hizo al aprobar (líneas para el historial). */
+  effects?: string[];
 }
 
 export type DropStatus = 'Pendiente' | 'Aprobada' | 'Rechazada';
@@ -168,8 +260,56 @@ export interface PaymentReversal {
   detail: string;
   /** true = el dinero se devolvió al cliente (sale de caja); false = nunca ingresó o se registró por error. */
   refunded: boolean;
-  /** N.º de la nota de crédito emitida (opcional). */
+  /** Etiqueta de la nota de crédito (emitida por el sistema o registrada) que anuló el comprobante. */
   creditNote?: string;
+  creditNoteId?: string;
+  /** Qué se hizo con el comprobante: nota emitida, nota registrada, comprobante no entregado o sin comprobante. */
+  creditNoteMode?: NoteMode;
+}
+
+/** Cierre (arqueo) de una caja a una fecha; se puede reabrir con motivo. */
+export interface CashClosure {
+  id: string;
+  scope: 'caja' | 'caja-chica';
+  currency: 'PEN' | 'USD';
+  /** Último día cubierto (YYYY-MM-DD). */
+  date: string;
+  /** Saldo que decía el sistema a esa fecha. */
+  expected: number;
+  /** Dinero contado. */
+  counted: number;
+  /** Contado − sistema (sobrante positivo, faltante negativo). */
+  difference: number;
+  note: string;
+  closedAt: string;
+  closedBy: string;
+  status: 'Cerrada' | 'Reabierta';
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+}
+
+/**
+ * Nota de crédito: anula (total) un comprobante ya entregado. Se emite con el correlativo de su serie
+ * (BC01 para boletas, FC01 para facturas) o se registra una emitida fuera del sistema.
+ */
+export interface CreditNote {
+  id: string;
+  series: string;
+  sequence: number;
+  label: string;
+  origin: 'sistema' | 'externa';
+  paymentId: string;
+  studentName: string;
+  enrollmentIds: string[];
+  originalType: 'Boleta' | 'Factura';
+  originalDocument: string;
+  amount: number;
+  currency: 'PEN' | 'USD';
+  reason: string;
+  detail: string;
+  issuedAt: string;
+  issuedBy: string;
 }
 
 /** Datos para cobrar una cuota (los mismos que pide el asistente al cobrar la matrícula). */
@@ -265,6 +405,31 @@ export interface CashMovement {
   paymentId?: string;
   enrollmentIds?: string[];
   status: 'Aplicado' | 'Reversado';
+  /** Constancia de la reversa (el movimiento no se borra). */
+  reversal?: { at: string; by: string; reason: string; detail: string };
+  /** Ingreso en efectivo: código del lote de depósito en el que se llevó al banco. */
+  depositedIn?: string;
+  /** Egreso que es un lote de depósito: sus ingresos. */
+  deposit?: { code: string; bank: string; movementIds: string[] };
+  /** Venta de artículo: qué se vendió (para devolverlo al stock si se reversa). */
+  sale?: { itemId: string; branchId: string; qty: number };
+}
+
+/** Movimiento de la caja chica (fondo fijo en soles para gastos menores). */
+export interface PettyCashMovement {
+  id: string;
+  date: string; // ISO datetime
+  kind: 'Ingreso' | 'Egreso';
+  category: string;
+  concept: string;
+  amount: number; // PEN
+  method: string;
+  reference?: string; // N.º de boleta, recibo, etc.
+  evidence?: string; // nombre del archivo adjunto (aún no hay almacenamiento)
+  observations?: string;
+  user: string;
+  status: 'Aplicado' | 'Reversado';
+  reversal?: { at: string; by: string; reason: string; detail: string };
 }
 
 export type ItemType = 'Material educativo' | 'Herramienta / adicional' | 'Libro' | 'Paquete / kit logístico';
@@ -586,6 +751,79 @@ export interface ScheduleActivity {
   cupo: number | null;
   /** IDs de los alumnos inscritos. */
   inscritos: string[];
+  /** Personal de Psicopedagogía a cargo (el nombre queda en `responsable`). Se asigna desde Actividades especiales. */
+  responsableId?: string;
+  /** Asistencia de los inscritos (alumno → estado). Se registra desde el día de la actividad y exige responsable. */
+  asistencia?: Record<string, ActivityAttendance>;
+}
+
+/** Asistencia de un alumno a una actividad especial. */
+export interface ActivityAttendance {
+  status: 'Asistió' | 'Faltó';
+  /** Fecha y hora del registro (ISO). */
+  at: string;
+  by: string;
+  note?: string;
+}
+
+/** Quién pidió el cambio de una asesoría: el alumno (o su titular) o la propia institución. */
+export type ChangeInitiator = 'Alumno o titular' | 'Institución';
+
+export type PsyEventType =
+  | 'Reservada' | 'Reprogramada' | 'Cancelada' | 'Asistió' | 'Faltó' | 'Sesión registrada'
+  | 'Inscripción' | 'Inscripción quitada' | 'Responsable asignado' | 'Asistencia a actividad';
+
+/**
+ * Historial de Psicopedagogía: cada cambio de una asesoría o de una actividad queda como un evento (quién, cuándo, de qué
+ * a qué, por qué y quién lo pidió). Se genera solo al cambiar la agenda, así que ninguna pantalla puede olvidarlo.
+ */
+export interface PsyEvent {
+  id: string;
+  /** Fecha y hora del cambio (ISO). */
+  at: string;
+  /** Usuario del sistema que lo hizo. */
+  by: string;
+  subject: 'asesoria' | 'actividad';
+  /** Asesoría (id) o actividad (`cronograma:actividad`). */
+  refId: string;
+  studentId?: string;
+  type: PsyEventType;
+  initiator?: ChangeInitiator;
+  reason?: string;
+  detail?: string;
+  from?: { date: string; time: string; responsible: string };
+  to?: { date: string; time: string; responsible: string };
+}
+
+/** Motivo que acompaña a una cancelación o reprogramación. */
+export interface ChangeMeta {
+  reason: string;
+  detail?: string;
+}
+
+/** Política de recordatorios de Psicopedagogía (editable en Configuración). Los días son antes de la fecha. */
+export interface PsyReminderPolicy {
+  /** Asesorías: días antes (1 = el día anterior; 0 = el mismo día). */
+  sessionBefore: number[];
+  /** Actividades especiales a las que el alumno está inscrito. */
+  activityBefore: number[];
+  /** Fin de la duración base de la matrícula (por vencer, sin extensión habilitada). */
+  validityBefore: number[];
+}
+
+export interface PsyReminderLog {
+  id: string;
+  /** Clave del recordatorio atendido (tipo:referencia:días). */
+  key: string;
+  kind: 'asesoria' | 'actividad' | 'vigencia';
+  refId: string;
+  studentId: string;
+  offset: number;
+  at: string;
+  by: string;
+  channel: 'WhatsApp' | 'Correo' | 'Llamada' | 'Otro';
+  result: 'Enviado' | 'Omitido';
+  note?: string;
 }
 
 export interface MonthlySchedule {
@@ -642,6 +880,9 @@ export interface Staff {
   address?: string;
   status: string;
   observations?: string;
+  /** Última baja o reactivación (fecha YYYY-MM-DD y motivo). */
+  statusDate?: string;
+  statusReason?: string;
 }
 
 export interface Contract {
@@ -661,6 +902,21 @@ export interface Contract {
   vacationEnd?: string;
   terminationReason?: string;
   observations?: string;
+  /** Modificaciones del contrato vigente, con motivo (la más reciente primero). */
+  revisions?: ContractRevision[];
+}
+
+export interface ContractRevisionChange {
+  label: string;
+  from: string;
+  to: string;
+}
+
+export interface ContractRevision {
+  at: string;
+  by: string;
+  reason: string;
+  changes: ContractRevisionChange[];
 }
 
 export interface Assignment {
@@ -673,8 +929,11 @@ export interface Assignment {
   startDate: string;
   endDate?: string;
   isMain: boolean;
+  /** Activa | Cerrada */
   status: string;
   observations?: string;
+  closeReason?: string;
+  closedBy?: string;
 }
 
 export interface Company {
@@ -841,6 +1100,13 @@ interface DataContextType {
   deleteClassSchedule: (id: string) => StockResult;
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
+  /** Reversa un movimiento de caja manual, venta o lote de depósito (los de un pago se reversan desde el pago). */
+  reverseCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
+  /** Lleva ingresos en efectivo al banco: un egreso «Depósito bancario» y los ingresos quedan depositados. */
+  createDepositBatch: (input: DepositInput) => StockResult & { code?: string };
+  pettyCashMovements: PettyCashMovement[];
+  addPettyCashMovement: (input: PettyInput) => StockResult;
+  reversePettyCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
   promotionGroups: PromotionGroup[];
   itemPrices: ItemPrice[];
   addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => { ok: boolean; error?: string };
@@ -855,7 +1121,26 @@ interface DataContextType {
   addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => StockResult;
   schedules: Schedule[];
   addSchedule: (data: Omit<Schedule, 'id'>) => Schedule;
-  updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>) => void;
+  /** Una primera asesoría con la matrícula sin verificar no admite «Asistió» ni «Faltó» (ver `utils/verificationGate.ts`). */
+  updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>, meta?: Partial<ChangeMeta>) => { ok: boolean; reason?: string };
+  /** Historial de Psicopedagogía: cada cambio de una asesoría o actividad (quién, cuándo, por qué y quién lo pidió). */
+  psyEvents: PsyEvent[];
+  /** Asigna (o quita, con `null`) el responsable de una actividad especial (`cronograma:actividad`). */
+  setActivityResponsible: (flatId: string, staffId: string | null) => StockResult;
+  enrollInActivity: (flatId: string, studentId: string) => StockResult;
+  unenrollFromActivity: (flatId: string, studentId: string, meta: Partial<ChangeMeta>) => StockResult;
+  /** Registra la asistencia de un inscrito (`null` quita la marca; pide una nota). */
+  markActivityAttendance: (flatId: string, studentId: string, status: 'Asistió' | 'Faltó' | null, note?: string) => StockResult;
+  psyReminderPolicy: PsyReminderPolicy;
+  savePsyReminderPolicy: (policy: PsyReminderPolicy) => StockResult;
+  psyReminderLogs: PsyReminderLog[];
+  logPsyReminder: (reminder: Pick<PsyReminder, 'key' | 'kind' | 'refId' | 'studentId' | 'offset'>, channel: PsyReminderLog['channel'], result: PsyReminderLog['result'], note: string) => StockResult;
+  /** Estado de la verificación frente a una primera asesoría (solo la primera asesoría vigente de una matrícula). */
+  gateOfSchedule: (schedule: Pick<Schedule, 'id' | 'isFirst' | 'enrollmentId'>) => FirstSessionGate;
+  /** Motivo por el que no se puede registrar la asistencia o la sesión de una asesoría (null = se puede). */
+  attendanceBlockOf: (schedule: Pick<Schedule, 'id' | 'isFirst' | 'enrollmentId'>) => string | null;
+  /** Matrículas cuya primera asesoría espera la verificación, por número de matrícula. */
+  pendingFirstSessions: () => Record<string, FirstSessionGate>;
   trackings: Tracking[];
   monthlySchedules: MonthlySchedule[];
   addMonthlySchedule: (data: Omit<MonthlySchedule, 'id'>) => MonthlySchedule;
@@ -868,6 +1153,15 @@ interface DataContextType {
   addContract: (contract: Omit<Contract, 'id'>) => Contract;
   updateContract: (id: string, data: Partial<Omit<Contract, 'id'>>) => void;
   assignments: Assignment[];
+  /** Crea (o edita, con `editingId`) una asignación. La nueva principal desplaza a la anterior. */
+  saveAssignment: (form: AssignmentForm, editingId?: string) => StockResult;
+  /** Cierra una asignación con fecha y motivo (no se borra). */
+  closeAssignment: (id: string, date: string, reason: string) => StockResult;
+  /** Edita un contrato vigente con motivo; queda la constancia de lo que cambió. */
+  editContract: (id: string, form: ContractForm, reason: string) => StockResult;
+  /** Da de baja a un trabajador (cierra sus asignaciones). Exige contrato cerrado y sin asesorías futuras. */
+  inactivateStaff: (id: string, input: { reason: string; detail: string; date: string }) => StockResult;
+  reactivateStaff: (id: string, detail: string) => StockResult;
   roles: Role[];
   setRoles: React.Dispatch<React.SetStateAction<Role[]>>;
   addRole: (role: Role) => void;
@@ -925,11 +1219,49 @@ interface DataContextType {
   updateEnrollmentData: (enrollmentId: string, after: EnrollmentEditValues, reason: string) => StockResult;
   /** Reversa un pago: queda anulado, repone la cuota, ajusta caja y libera su comprobante. */
   reversePayment: (paymentId: string, input: ReversalInput) => StockResult;
+  cashClosures: CashClosure[];
+  /** Hace el arqueo y cierra una caja hasta una fecha (Caja PEN, Caja USD o Caja chica). */
+  closeCash: (input: ClosureInput) => StockResult;
+  /** Reabre el último cierre de una caja (con motivo y permiso). */
+  reopenCash: (closureId: string, reason: string) => StockResult;
+  /** Fondo fijo y tope por gasto de la caja chica. */
+  pettyFund: PettyFund;
+  collectionPolicy: CollectionPolicy;
+  /** Guarda la política de cobranza (días de gracia, mora y días de recordatorio). */
+  updateCollectionPolicy: (input: { graceDays: string; moraMonthlyRatePct: string; remindBefore: string; remindAfter: string }) => StockResult;
+  reminderLogs: ReminderLog[];
+  /** Registra que un recordatorio de cobranza se envió (o se omitió, con motivo). */
+  logReminder: (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string) => StockResult;
+  /** Cobra la mora acumulada de una cuota vencida generando una cuota «Mora». */
+  chargeMora: (planId: string, installmentId: string) => StockResult;
+  contractTemplate: ContractTemplate;
+  /** Guarda la plantilla del contrato (sube la versión; pierde la marca de revisada si el texto cambió). */
+  updateContractTemplate: (template: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>) => StockResult;
+  /** Datos con los que se arman el contrato y la ficha de una matrícula. */
+  documentContextOf: (enrollmentId: string) => DocContext | undefined;
+  /** Genera (o regenera, si los datos cambiaron) el contrato o la ficha de la matrícula. */
+  generateEnrollmentDocument: (enrollmentId: string, kind: DocKind) => StockResult;
+  /** Registra que el documento fue firmado (fecha y archivo escaneado). */
+  registerDocumentSignature: (enrollmentId: string, kind: DocKind, input: { date: string; file: string }) => StockResult;
+  changeRequests: ChangeRequest[];
+  /** Pide reactivar una matrícula caída (la resuelve quien tiene autoridad). */
+  requestReactivation: (enrollmentId: string, input: ReactivationInput) => StockResult;
+  /** Pide cambiar el programa o el nivel de una matrícula activa. */
+  requestProgramChange: (enrollmentId: string, input: ProgramChangeInput) => StockResult;
+  /** Pide trasladar una matrícula activa a otra sede. */
+  requestTransfer: (enrollmentId: string, input: TransferInput) => StockResult;
+  /** Aprueba (aplica los efectos) o rechaza una solicitud de reactivación, cambio de programa o traslado. */
+  resolveChangeRequest: (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string) => StockResult;
+  updatePettyFund: (fund: { assigned: string; maxExpense: string }) => StockResult;
+  creditNotes: CreditNote[];
+  /** ¿El usuario actual tiene el permiso `funcionalidad:acción`? (el Superusuario puede todo) */
+  can: (permission: string) => boolean;
   addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
   updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
   /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
   registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => StockResult;
-  refinanceInstallment: (planId: string, installmentId: string, refinanceData: any) => void;
+  /** Traslada el saldo pendiente de una cuota a una cuota nueva con otro vencimiento (con motivo). */
+  refinanceInstallment: (planId: string, installmentId: string, input: RefinanceInput) => StockResult;
   addLeadSource: (name: string) => void;
   updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => void;
   deleteLeadSource: (id: string) => void;
@@ -1142,6 +1474,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'CJ-003', date: '2026-10-08T17:45:00.000Z', kind: 'Egreso', concept: 'Egreso', reference: 'Pago Proveedor Limpieza', currency: 'PEN', amount: 350, amountUSD: 0, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
   ]);
   const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [cashClosures, setCashClosures] = useState<CashClosure[]>([]);
+  const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
+  const [collectionPolicy, setCollectionPolicy] = useState<CollectionPolicy>(DEFAULT_POLICY);
+  const [reminderLogs, setReminderLogs] = useState<ReminderLog[]>([]);
+  const [contractTemplate, setContractTemplate] = useState<ContractTemplate>(DEFAULT_CONTRACT_TEMPLATE);
+  const [pettyFund, setPettyFund] = useState<PettyFund>(DEFAULT_FUND);
+
+  // Caja chica: fondo fijo en soles. Semilla: los tres movimientos de ejemplo que mostraba la pantalla.
+  const [pettyCashMovements, setPettyCashMovements] = useState<PettyCashMovement[]>(() => {
+    const at = (back: number, hh: string) => new Date(`${addDaysISO(todayLocalISO(), -back)}T${hh}:00`).toISOString();
+    return [
+      { id: 'CCH-003', date: at(0, '11:30'), kind: 'Egreso', category: 'Movilidad', concept: 'Taxi a notaría', amount: 25, method: 'Efectivo', user: 'Ana G.', status: 'Aplicado' },
+      { id: 'CCH-002', date: at(1, '15:20'), kind: 'Egreso', category: 'Útiles de oficina', concept: 'Compra de papel bond', amount: 120, method: 'Efectivo', reference: 'Boleta B001-0456', user: 'Carlos R.', status: 'Aplicado' },
+      { id: 'CCH-001', date: at(3, '09:00'), kind: 'Ingreso', category: 'Reposición de fondo', concept: 'Reposición de fondo fijo', amount: 1000, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
+    ];
+  });
 
   // Horarios de clases (antes una lista fija dentro del asistente)
   const [classSchedules, setClassSchedules] = useState<ClassSchedule[]>([
@@ -1350,14 +1699,62 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: '6', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: expiringStart, time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-3', enrollmentId: 'MAT-2024-005' },
   ]);
 
+  // Historial de Psicopedagogía: cada cambio de la agenda deja un evento
+  const [psyEvents, setPsyEvents] = useState<PsyEvent[]>([
+    { id: 'EVT-0001', at: new Date(Date.now() - 86400000).toISOString(), by: 'Superadmin', subject: 'asesoria', refId: '3', studentId: 'ALU-003', type: 'Cancelada', initiator: 'Alumno o titular', reason: 'Enfermedad del alumno', detail: 'Avisó la mañana anterior.', from: { date: seedDay(1), time: '16:00', responsible: 'Lic. María Torres' } },
+  ]);
+  const eventSeq = useRef(2);
+  const nextEventId = () => `EVT-${String(eventSeq.current++).padStart(4, '0')}`;
+  const pushEvents = (events: PsyEvent[]) => { if (events.length > 0) setPsyEvents(prev => [...prev, ...events]); };
+  /** Cancelaciones que hace el sistema por otra causa (caída de la matrícula, traslado de sede). */
+  const logSystemCancel = (scheduleIds: string[], reason: string) => pushEvents(
+    schedules.filter(s => scheduleIds.includes(s.id)).map(s => ({
+      id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'asesoria' as const, refId: s.id, studentId: s.studentId,
+      type: 'Cancelada' as const, initiator: 'Institución' as const, reason, from: { date: s.date, time: s.time, responsible: s.responsible },
+    }))
+  );
+  const logActivityRemovals = (removals: { monthlyId: string; activityId: string; studentId: string }[], reason: string) => pushEvents(
+    removals.map(r => ({
+      id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'actividad' as const, refId: `${r.monthlyId}:${r.activityId}`, studentId: r.studentId,
+      type: 'Inscripción quitada' as const, initiator: 'Institución' as const, reason,
+    }))
+  );
+
   const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
     const created: Schedule = { ...data, id: nextNumericId(schedules.map(x => x.id)) };
     setSchedules(prev => [...prev, created]);
+    pushEvents(buildScheduleEvents(undefined, created, undefined, currentUser.name, new Date().toISOString(), nextEventId));
     return created;
   };
 
-  const updateSchedule = (id: string, data: Partial<Omit<Schedule, 'id'>>) => {
+  const gateContext = () => ({ schedules, plans, recipes, today: todayLocalISO(), now: new Date() });
+  const gateOfSchedule: DataContextType['gateOfSchedule'] = s => scheduleGate(s, enrollments, gateContext());
+  const attendanceBlockOf: DataContextType['attendanceBlockOf'] = s => attendanceBlock(s, enrollments, gateContext());
+  const pendingFirstSessions = () => blockedFirstSessions(enrollments, gateContext());
+
+  const updateSchedule: DataContextType['updateSchedule'] = (id, data, meta) => {
+    const target = schedules.find(x => x.id === id);
+    if (!target) return { ok: false, reason: 'No se encontró la asesoría.' };
+    const next: Schedule = { ...target, ...data };
+    // La verificación va antes de la primera asesoría: sin ella no se marca asistencia ni falta
+    if (data.status === 'Asistió' || data.status === 'Faltó') {
+      const reason = attendanceBlockOf(target);
+      if (reason) return { ok: false, reason };
+    }
+    // Cancelar o reprogramar exige el motivo (y quién lo pidió); con menos de 24 h solo lo decide la institución
+    const cancelling = next.status === 'Cancelado' && target.status !== 'Cancelado';
+    const moved = next.status !== 'Cancelado' && (next.date !== target.date || next.time !== target.time || next.responsible.trim() !== target.responsible.trim());
+    if (cancelling || moved) {
+      const problems = validateChangeMeta(cancelling ? 'cancelar' : 'reprogramar', meta, {
+        withNotice: !changeBlockedByNotice(target, new Date()),
+        canInstitutional: can(PERM.psiInstitutionalChange),
+        materialsMissing: gateOfSchedule(target).blocked,
+      });
+      if (problems.length > 0) return { ok: false, reason: problems[0] };
+    }
+    pushEvents(buildScheduleEvents(target, next, meta, currentUser.name, new Date().toISOString(), nextEventId));
     setSchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
+    return { ok: true };
   };
 
   const [trackings, setTrackings] = useState<Tracking[]>([
@@ -1380,6 +1777,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       actividades: [
         { id: 'a1', actividad: 'Taller de Ortografía', fecha: seedDay(2), horaInicio: '16:00', horaFin: '18:00', responsable: '', orden: 1, cupo: 12, inscritos: [] },
         { id: 'a2', actividad: 'Maratón de Lectura', fecha: seedDay(5), horaInicio: '17:00', horaFin: '19:00', responsable: '', orden: 2, cupo: null, inscritos: ['ALU-001', 'ALU-005'] },
+        {
+          id: 'a0', actividad: 'Taller de Velocidad Lectora', fecha: seedDay(-3), horaInicio: '15:00', horaFin: '17:00', responsable: 'Juan Pérez', responsableId: '1', orden: 3, cupo: 10,
+          inscritos: ['ALU-001', 'ALU-003', 'ALU-005'],
+          asistencia: {
+            'ALU-001': { status: 'Asistió', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin' },
+            'ALU-003': { status: 'Faltó', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin', note: 'No avisó.' },
+            'ALU-005': { status: 'Asistió', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin' },
+          },
+        },
       ],
       observaciones: 'Mes con enfoque en comprensión lectora.'
     },
@@ -1409,6 +1815,94 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const deleteMonthlySchedule = (id: string) => {
     setMonthlySchedules(prev => prev.filter(x => x.id !== id));
+  };
+
+  // ---- Actividades especiales: responsable, inscripción y asistencia (cada acción deja su evento)
+  const flatActivityOf = (flatId: string) => allActivities(monthlySchedules).find(a => a.id === flatId);
+  const patchActivity = (a: FlatActivity, fn: (x: ScheduleActivity) => ScheduleActivity) =>
+    setMonthlySchedules(prev => prev.map(m => (m.id === a.monthlyId ? { ...m, actividades: m.actividades.map(x => (x.id === a.activityId ? fn(x) : x)) } : m)));
+  const activityEvent = (a: FlatActivity, type: PsyEventType, extra: Partial<PsyEvent> = {}): PsyEvent =>
+    ({ id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'actividad', refId: a.id, type, ...extra });
+
+  const setActivityResponsible: DataContextType['setActivityResponsible'] = (flatId, staffId) => {
+    if (!can(PERM.psiActivityLead)) return { ok: false, error: 'Su rol no puede asignar el responsable de una actividad.' };
+    const a = flatActivityOf(flatId);
+    if (!a) return { ok: false, error: 'No se encontró la actividad.' };
+    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches });
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const member = staffId ? staff.find(s => s.id === staffId) : undefined;
+    patchActivity(a, x => ({ ...x, responsable: member ? staffLabel(member) : '', responsableId: member?.id }));
+    pushEvents([activityEvent(a, 'Responsable asignado', { detail: member ? staffLabel(member) : 'Se quitó el responsable' })]);
+    return { ok: true };
+  };
+
+  const enrollInActivity: DataContextType['enrollInActivity'] = (flatId, studentId) => {
+    if (!can(PERM.psiSchedule)) return { ok: false, error: 'Su rol no puede inscribir alumnos en actividades.' };
+    const a = flatActivityOf(flatId);
+    const student = students.find(s => s.id === studentId);
+    if (!a || !student) return { ok: false, error: 'No se encontró la actividad o el alumno.' };
+    if (a.date < todayLocalISO()) return { ok: false, error: 'La actividad ya pasó: no admite inscripciones.' };
+    const problem = validateActivityEnrollment({ activity: a, studentId, studentName: student.name, studentBranchId: branchOfStudent(student, enrollments), schedules });
+    if (problem) return { ok: false, error: problem };
+    patchActivity(a, x => withEnrollment(x, studentId));
+    pushEvents([activityEvent(a, 'Inscripción', { studentId })]);
+    return { ok: true };
+  };
+
+  const unenrollFromActivity: DataContextType['unenrollFromActivity'] = (flatId, studentId, meta) => {
+    if (!can(PERM.psiSchedule)) return { ok: false, error: 'Su rol no puede quitar inscripciones.' };
+    const a = flatActivityOf(flatId);
+    if (!a) return { ok: false, error: 'No se encontró la actividad.' };
+    if (a.date < todayLocalISO()) return { ok: false, error: 'La actividad ya pasó: no se quitan inscripciones.' };
+    if (!canRemoveEnrollment(a, studentId)) return { ok: false, error: 'Ya tiene asistencia registrada: no se puede quitar la inscripción.' };
+    const problems = validateChangeMeta('cancelar', meta, { withNotice: canChangeWithNotice(a.date, a.start, new Date()), canInstitutional: can(PERM.psiInstitutionalChange) });
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    patchActivity(a, x => withoutEnrollment(x, studentId));
+    pushEvents([activityEvent(a, 'Inscripción quitada', { studentId, reason: meta.reason, detail: meta.detail?.trim() || undefined, initiator: initiatorOfReason(meta.reason ?? '') })]);
+    return { ok: true };
+  };
+
+  const markActivityAttendance: DataContextType['markActivityAttendance'] = (flatId, studentId, status, note) => {
+    if (!can(PERM.psiActivityAttendance)) return { ok: false, error: 'Su rol no puede registrar la asistencia a actividades.' };
+    const a = flatActivityOf(flatId);
+    if (!a) return { ok: false, error: 'No se encontró la actividad.' };
+    const text = (note ?? '').trim();
+    if (status === null) {
+      if (!a.attendance[studentId]) return { ok: false, error: 'El alumno no tiene marca de asistencia.' };
+      if (text.length < 5) return { ok: false, error: 'Explique por qué se quita la marca: queda en el historial.' };
+      patchActivity(a, x => ({ ...x, asistencia: withoutAttendance(x.asistencia ?? {}, studentId) }));
+      pushEvents([activityEvent(a, 'Asistencia a actividad', { studentId, detail: 'Marca quitada', reason: text })]);
+      return { ok: true };
+    }
+    const problems = validateAttendance(a, studentId, status, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    patchActivity(a, x => ({ ...x, asistencia: withAttendance(x.asistencia ?? {}, studentId, { status, at: new Date().toISOString(), by: currentUser.name, note: text || undefined }) }));
+    pushEvents([activityEvent(a, 'Asistencia a actividad', { studentId, detail: status, reason: text || undefined })]);
+    return { ok: true };
+  };
+
+  // ---- Recordatorios de Psicopedagogía (el sistema prepara el texto; aquí queda el registro de lo enviado u omitido)
+  const [psyReminderPolicy, setPsyReminderPolicy] = useState<PsyReminderPolicy>(DEFAULT_PSY_POLICY);
+  const [psyReminderLogs, setPsyReminderLogs] = useState<PsyReminderLog[]>([]);
+
+  const savePsyReminderPolicy: DataContextType['savePsyReminderPolicy'] = policy => {
+    if (!can(PERM.psiConfig)) return { ok: false, error: 'Su rol no puede configurar los recordatorios de Psicopedagogía.' };
+    const problems = validatePsyPolicy({ sessionBefore: policy.sessionBefore.join(','), activityBefore: policy.activityBefore.join(','), validityBefore: policy.validityBefore.join(',') });
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setPsyReminderPolicy(policy);
+    return { ok: true };
+  };
+
+  const logPsyReminder: DataContextType['logPsyReminder'] = (reminder, channel, result, note) => {
+    if (!can(PERM.psiRemind)) return { ok: false, error: 'Su rol no puede registrar recordatorios.' };
+    const problems = validatePsyReminderLog(reminder, channel, result, note, psyReminderLogs);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const entry: PsyReminderLog = {
+      id: nextSequentialId('PRL', psyReminderLogs.map(l => l.id)), key: reminder.key, kind: reminder.kind, refId: reminder.refId, studentId: reminder.studentId,
+      offset: reminder.offset, at: new Date().toISOString(), by: currentUser.name, channel, result, note: note.trim() || undefined,
+    };
+    setPsyReminderLogs(prev => [entry, ...prev]);
+    return { ok: true };
   };
 
   const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
@@ -1536,6 +2030,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [assignments, setAssignments] = useState<Assignment[]>([
     { id: 'ASG-001', staffId: '1', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicólogo Senior', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
     { id: 'ASG-002', staffId: '2', branch: 'Chiclayo', area: 'Administración', role: 'Coordinadora', systemRole: 'Administración', startDate: '2023-06-01', isMain: true, status: 'Activa' },
+    { id: 'ASG-003', staffId: '2', branch: 'Chiclayo', area: 'Psicopedagogía', role: 'Psicopedagoga', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
   ]);
 
   const [companies, setCompanies] = useState<Company[]>([
@@ -1859,6 +2354,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
       status: 'Activo',
       items: [
         { itemId: 'ITM-LIB-K1', quantity: 1 },
+        { itemId: 'ITM-MAT-01', quantity: 1 }
+      ],
+      startDate: '2026-01-01',
+      endDate: '2026-12-31'
+    },
+    {
+      id: 'REC-003',
+      name: 'Pack Pre-Kids Nivel 1 2026',
+      programId: '2',
+      levelId: '4',
+      branchIds: [],
+      applyToAllBranches: true,
+      status: 'Activo',
+      items: [
+        { itemId: 'ITM-KIT-BIENV', quantity: 1 },
         { itemId: 'ITM-MAT-01', quantity: 1 }
       ],
       startDate: '2026-01-01',
@@ -2218,38 +2728,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const refinanceInstallment = (planId: string, installmentId: string, refinanceData: any) => {
-    setPlans(prevPlans => prevPlans.map(plan => {
-      if (plan.id === planId) {
-        const updatedInstallments = plan.installments.map(inst => {
-          if (inst.id === installmentId) {
-            return {
-              ...inst,
-              status: 'Refinanciada'
-            };
-          }
-          return inst;
-        });
-
-        // Add new installment
-        const newInstallment = {
-          id: `C-${Date.now()}`,
-          name: refinanceData.name,
-          amount: refinanceData.amount,
-          balance: refinanceData.amount,
-          dueDate: refinanceData.dueDate,
-          status: 'Pendiente',
-          payments: []
-        };
-
-        return {
-          ...plan,
-          installments: [...updatedInstallments, newInstallment],
-          balance: plan.balance + refinanceData.amount // Assuming the old balance is kept or adjusted, let's just add the new amount for simplicity, or maybe the old installment's balance should be subtracted.
-        };
-      }
-      return plan;
-    }));
+  const refinanceInstallment = (planId: string, installmentId: string, input: RefinanceInput): StockResult => {
+    const plan = plans.find(p => p.id === planId);
+    if (!plan) return { ok: false, error: 'No se encontró el plan.' };
+    const today = todayLocalISO();
+    const problems = validateRefinance(plan, installmentId, input, today);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const installmentName = plan.installments.find(x => x.id === installmentId)?.name ?? '';
+    setPlans(prev => prev.map(p => (p.id === planId ? applyRefinance(p, installmentId, input, today, new Date().toISOString()) : p)));
+    addNotification({
+      title: 'Cuota refinanciada',
+      message: `${currentUser.name} refinanció «${installmentName}» del plan ${planId} (${plan.mat}): ${input.reason.trim()}`,
+      type: 'info',
+    });
+    return { ok: true };
   };
 
   const addStaff = (staffData: Omit<Staff, 'id'>): Staff => {
@@ -2369,6 +2861,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const requestEnrollmentDrop = (enrollmentId: string, input: DropInput): StockResult => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const auth = canRequest(authority(), 'Caída');
+    if (!auth.ok) return { ok: false, error: auth.reason };
     const problems = validateDropRequest(enrollment, input, dropRequests, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const request: DropRequest = {
@@ -2383,12 +2877,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       status: 'Pendiente',
     };
     setDropRequests(prev => [request, ...prev]);
+    addNotification({ title: 'Solicitud de caída pendiente', message: `${currentUser.name} solicitó la caída de la matrícula ${enrollmentId} (${enrollment.student}): ${input.reason}.`, type: 'warning' });
     return { ok: true };
   };
 
   const resolveEnrollmentDrop = (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }): StockResult => {
     const request = dropRequests.find(r => r.id === requestId);
     if (!request) return { ok: false, error: 'No se encontró la solicitud.' };
+    const auth = canResolve(authority(), 'Caída', request.requestedBy);
+    if (!auth.ok) return { ok: false, error: auth.reason };
     const problems = validateDropResolution(request, decision, opts.note);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const resolution = { status: decision, resolvedAt: new Date().toISOString(), resolvedBy: currentUser.name, resolutionNote: opts.note.trim() || undefined };
@@ -2413,7 +2910,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive) : p)));
     if (preview.scheduleIds.length > 0) {
       setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
+      logSystemCancel(preview.scheduleIds, 'Caída de la matrícula');
     }
+    logActivityRemovals(preview.activityRemovals, 'Caída de la matrícula');
     if (preview.activityRemovals.length > 0) {
       setMonthlySchedules(prev => prev.map(m => ({
         ...m,
@@ -2450,14 +2949,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
+  /** Autoridad del usuario actual (ver `utils/authority.ts`). */
+  const authority = (): AuthorityContext => ({ user: currentUser, roles, permissions });
+  const can = (permission: string) => canDo(authority(), permission);
+
   const reversePayment = (paymentId: string, input: ReversalInput): StockResult => {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment) return { ok: false, error: 'No se encontró el pago.' };
+    if (!can(PERM.reversePayment)) return { ok: false, error: 'Su rol no puede reversar pagos.' };
     const ctx = { payments, plans, enrollments, groups: promotionGroups };
     const problems = validateReversal(payment, input, ctx);
     if (problems.length > 0) return { ok: false, error: problems[0] };
+    // Comprobante: nota de crédito emitida por el sistema, registrada, o constancia de que no se entregó
+    const noteMode: NoteMode = input.creditNoteMode ?? allowedNoteModes(payment)[0];
+    const noteProblems = validateNoteChoice(payment, noteMode, input.creditNote, input.detail, creditNotes);
+    if (noteProblems.length > 0) return { ok: false, error: noteProblems[0] };
+    if ((noteMode === 'emitir' || noteMode === 'externa') && !can(PERM.creditNote)) return { ok: false, error: 'Su rol no puede emitir ni registrar notas de crédito.' };
     const today = todayLocalISO();
     const targets = reversalTargets(payment, ctx);
+    let note: CreditNote | undefined;
+    if (noteMode === 'emitir' || noteMode === 'externa') {
+      const built = buildCreditNote({ payment, mode: noteMode, external: input.creditNote, reason: input.reason, detail: input.detail, by: currentUser.name, at: new Date().toISOString() }, creditNotes);
+      note = { ...built, id: nextSequentialId('NC', creditNotes.map(n => n.id)) };
+      setCreditNotes(prev => [note!, ...prev]);
+    }
 
     // 1) Cuotas y planes: se repone lo que cubrió el pago
     setPlans(prev => prev.map(plan => {
@@ -2466,7 +2981,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
     // 2) El pago queda anulado (con constancia); su comprobante y su operación quedan libres
     setPayments(prev => prev.map(p => (p.id === paymentId
-      ? { ...p, status: 'Anulado', reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim(), refunded: input.refunded, creditNote: input.creditNote.trim() || undefined } }
+      ? { ...p, status: 'Anulado', reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim(), refunded: input.refunded, creditNote: note?.label, creditNoteId: note?.id, creditNoteMode: noteMode } }
       : p)));
     // 3) Caja: devolución (egreso) o ingresos reversados
     if (input.refunded) {
@@ -2491,6 +3006,388 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } else {
       setCashMovements(prev => prev.map(m => (m.paymentId === paymentId && m.kind === 'Ingreso' ? { ...m, status: 'Reversado' } : m)));
     }
+    addNotification({ title: 'Pago reversado', message: `${currentUser.name} reversó el pago ${paymentId} de ${payment.student} (${input.reason}).`, type: 'warning' });
+    return { ok: true };
+  };
+
+  // ---- Personal: asignaciones, contratos y baja
+  const saveAssignment = (form: AssignmentForm, editingId?: string): StockResult => {
+    if (editingId) {
+      const current = assignments.find(a => a.id === editingId);
+      if (!current) return { ok: false, error: 'No se encontró la asignación.' };
+      if (!isActiveAssignment(current)) return { ok: false, error: 'La asignación está cerrada: no se edita. Cree una nueva.' };
+      if (current.staffId !== form.staffId) return { ok: false, error: 'No se puede cambiar el trabajador de una asignación.' };
+    }
+    const errors = validateAssignmentForm(form, assignments, staff, branches, todayLocalISO(), editingId);
+    const first = Object.values(errors)[0];
+    if (first) return { ok: false, error: first };
+    setAssignments(prev => saveAssignmentIn(prev, form, editingId).assignments);
+    return { ok: true };
+  };
+
+  const closeAssignment = (id: string, date: string, reason: string): StockResult => {
+    const target = assignments.find(a => a.id === id);
+    if (!target) return { ok: false, error: 'No se encontró la asignación.' };
+    const today = todayLocalISO();
+    const problems = validateAssignmentClose(target, date, reason, today);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const impact = closeImpact(target, assignments, staff.find(s => s.id === target.staffId), schedules, today, allActivities(monthlySchedules));
+    if (impact.blocked) return { ok: false, error: `Es su última asignación de Psicopedagogía y tiene ${impact.futureSessions.length} asesoría(s) y ${impact.futureActivities.length} actividad(es) futura(s): reasígnelas primero.` };
+    setAssignments(prev => closeAssignmentIn(prev, id, date, reason, currentUser.name).assignments);
+    return { ok: true };
+  };
+
+  const editContract = (id: string, form: ContractForm, reason: string): StockResult => {
+    const current = contracts.find(c => c.id === id);
+    if (!current) return { ok: false, error: 'No se encontró el contrato.' };
+    if (form.staffId !== current.staffId) return { ok: false, error: 'No se puede cambiar el trabajador de un contrato.' };
+    const errors = validateContractForm(form, contracts, staff, todayLocalISO(), id);
+    const first = Object.values(errors)[0];
+    if (first) return { ok: false, error: first };
+    const patch = buildContractPatch(form);
+    const changes = diffContract(current, patch);
+    const problems = validateContractEdit(current, changes, reason);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setContracts(prev => prev.map(c => (c.id === id
+      ? { ...c, ...patch, revisions: [{ at: new Date().toISOString(), by: currentUser.name, reason: reason.trim(), changes }, ...(c.revisions ?? [])] }
+      : c)));
+    return { ok: true };
+  };
+
+  const inactivateStaff = (id: string, input: { reason: string; detail: string; date: string }): StockResult => {
+    const member = staff.find(s => s.id === id);
+    if (!member) return { ok: false, error: 'No se encontró al trabajador.' };
+    const ctx = { contracts, assignments, schedules, activities: allActivities(monthlySchedules), today: todayLocalISO() };
+    const problems = validateInactivation(member, input.reason, input.detail, input.date, ctx);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const note = `${input.reason} — ${input.detail.trim()}`;
+    setStaff(prev => prev.map(s => (s.id === id ? { ...s, status: 'Inactivo', statusDate: input.date, statusReason: note } : s)));
+    setAssignments(prev => closeAllOf(prev, id, input.date, note, currentUser.name));
+    return { ok: true };
+  };
+
+  const reactivateStaff = (id: string, detail: string): StockResult => {
+    const member = staff.find(s => s.id === id);
+    if (!member) return { ok: false, error: 'No se encontró al trabajador.' };
+    const problems = validateReactivation(member, detail);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setStaff(prev => prev.map(s => (s.id === id ? { ...s, status: 'Activo', statusDate: todayLocalISO(), statusReason: `Reactivado — ${detail.trim()}` } : s)));
+    return { ok: true };
+  };
+
+  // ---- Caja: reversa de movimientos y lotes de depósito
+  const reverseCashMovement = (id: string, input: { reason: string; detail: string }): StockResult => {
+    const movement = cashMovements.find(m => m.id === id);
+    if (!movement) return { ok: false, error: 'No se encontró el movimiento.' };
+    if (!can(PERM.reverseCash)) return { ok: false, error: 'Su rol no puede reversar movimientos de caja.' };
+    const closed = closedMessage(cashClosures, 'caja', movement.currency, localDateOf(movement.date));
+    if (closed) return { ok: false, error: closed };
+    const problems = validateCashReversal(movement, input.reason, input.detail, cashMovements);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const check = cashReversalCheck(movement, cashMovements);
+    if (check.restock) {
+      const r = updateStock(check.restock.branchId, check.restock.itemId, check.restock.qty, 'Devolución', `Reversa de la venta registrada en caja (${movement.id})`, movement.id);
+      if (!r.ok) return r;
+    }
+    setCashMovements(prev => applyCashReversal(prev, id, { ...input, at: new Date().toISOString(), by: currentUser.name }));
+    addNotification({ title: 'Movimiento de caja reversado', message: `${currentUser.name} reversó el movimiento ${movement.id} (${movement.concept}): ${input.reason}.`, type: 'warning' });
+    return { ok: true };
+  };
+
+  const createDepositBatch = (input: DepositInput): StockResult & { code?: string } => {
+    if (!can(PERM.deposit)) return { ok: false, error: 'Su rol no puede crear lotes de depósito.' };
+    const closed = closedMessage(cashClosures, 'caja', input.currency, input.date);
+    if (closed) return { ok: false, error: closed };
+    const problems = validateDeposit(input, cashMovements, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const built = buildDeposit(input, cashMovements, currentUser.name, new Date(`${input.date}T12:00:00`).toISOString());
+    const created: CashMovement = { ...built.egress, id: `CJ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, user: currentUser.name, status: 'Aplicado' };
+    const ids = new Set(built.selected.map(m => m.id));
+    setCashMovements(prev => [created, ...prev.map(m => (ids.has(m.id) ? { ...m, depositedIn: built.code } : m))]);
+    return { ok: true, code: built.code };
+  };
+
+  // ---- Caja chica
+  const addPettyCashMovement = (input: PettyInput): StockResult => {
+    const errors = validatePettyInput(input, pettyCashMovements, todayLocalISO(), pettyFund);
+    const first = Object.values(errors)[0];
+    if (first) return { ok: false, error: first };
+    const closed = closedMessage(cashClosures, 'caja-chica', 'PEN', input.date);
+    if (closed) return { ok: false, error: closed };
+    const created: PettyCashMovement = {
+      ...buildPettyMovement(input),
+      id: nextSequentialId('CCH', pettyCashMovements.map(m => m.id)),
+      user: currentUser.name,
+      status: 'Aplicado',
+    };
+    setPettyCashMovements(prev => [created, ...prev]);
+    return { ok: true };
+  };
+
+  const reversePettyCashMovement = (id: string, input: { reason: string; detail: string }): StockResult => {
+    const movement = pettyCashMovements.find(m => m.id === id);
+    if (!movement) return { ok: false, error: 'No se encontró el movimiento.' };
+    if (!can(PERM.reversePetty)) return { ok: false, error: 'Su rol no puede reversar movimientos de la caja chica.' };
+    const closed = closedMessage(cashClosures, 'caja-chica', 'PEN', localDateOf(movement.date));
+    if (closed) return { ok: false, error: closed };
+    const problems = validatePettyReversal(movement, input.reason, input.detail, pettyCashMovements);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setPettyCashMovements(prev => prev.map(m => (m.id === id
+      ? { ...m, status: 'Reversado' as const, reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim() } }
+      : m)));
+    return { ok: true };
+  };
+
+  // ---- Cierre y reapertura de caja, fondo de la caja chica
+  const closeCash = (input: ClosureInput): StockResult => {
+    if (!can(input.scope === 'caja' ? PERM.closeCash : PERM.closePetty)) return { ok: false, error: 'Su rol no puede cerrar esta caja.' };
+    const expected = expectedAt(input.scope, input.currency, input.date, cashMovements, pettyCashMovements);
+    const problems = validateClosure(input, cashClosures, expected, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const built = buildClosure(input, expected, currentUser.name, new Date().toISOString());
+    setCashClosures(prev => [{ ...built, id: nextSequentialId('CIE', prev.map(c => c.id)) }, ...prev]);
+    return { ok: true };
+  };
+
+  const reopenCash = (closureId: string, reason: string): StockResult => {
+    const closure = cashClosures.find(c => c.id === closureId);
+    if (!closure) return { ok: false, error: 'No se encontró el cierre.' };
+    if (!can(closure.scope === 'caja' ? PERM.reopenCash : PERM.closePetty)) return { ok: false, error: 'Su rol no puede reabrir esta caja.' };
+    const problems = validateReopen(closure, cashClosures, reason);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setCashClosures(prev => prev.map(c => (c.id === closureId ? { ...c, status: 'Reabierta' as const, reopenedAt: new Date().toISOString(), reopenedBy: currentUser.name, reopenReason: reason.trim() } : c)));
+    addNotification({ title: 'Caja reabierta', message: `${currentUser.name} reabrió el cierre ${closure.id} (${closure.scope === 'caja' ? `Caja ${closure.currency}` : 'Caja chica'} al ${closure.date}): ${reason.trim()}`, type: 'warning' });
+    return { ok: true };
+  };
+
+  const updatePettyFund = (fund: { assigned: string; maxExpense: string }): StockResult => {
+    if (!can(PERM.configPetty)) return { ok: false, error: 'Su rol no puede configurar el fondo de la caja chica.' };
+    const errors = validateFund(fund);
+    const first = errors.assigned ?? errors.maxExpense;
+    if (first) return { ok: false, error: first };
+    setPettyFund({ assigned: Number(fund.assigned), maxExpense: Number(fund.maxExpense) });
+    return { ok: true };
+  };
+
+  // ---- Cambios de matrícula: reactivación, cambio de programa/nivel y traslado de sede
+  const changeContext = (omit?: string): ChangeContext => ({
+    enrollments, plans, students, schedules, monthly: monthlySchedules, programs, levels, tariffs, paymentTypes, branches, classSchedules,
+    payments, groups: promotionGroups, requests: omit ? changeRequests.filter(r => r.id !== omit) : changeRequests, today: todayLocalISO(),
+  });
+
+  const openChange = (kind: ChangeKind & ChangeRequest['kind'], enrollment: Enrollment, reason: string, detail: string, payload: Record<string, string>): StockResult => {
+    const request: ChangeRequest = {
+      id: nextSequentialId('SOL', changeRequests.map(r => r.id)), kind, enrollmentId: enrollment.id, studentId: enrollment.studentId,
+      requestedAt: new Date().toISOString(), requestedBy: currentUser.name, reason, detail: detail.trim(), payload, status: 'Pendiente',
+    };
+    setChangeRequests(prev => [request, ...prev]);
+    addNotification({ title: `Solicitud de ${kind.toLowerCase()} pendiente`, message: `${currentUser.name} solicitó ${kind.toLowerCase()} para la matrícula ${enrollment.id} (${enrollment.student}): ${reason}.`, type: 'warning' });
+    return { ok: true };
+  };
+
+  const requestReactivation = (enrollmentId: string, input: ReactivationInput): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const auth = canRequest(authority(), 'Reactivación');
+    if (!auth.ok) return { ok: false, error: auth.reason };
+    const problems = validateReactivationRequest(enrollment, input, changeContext());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    return openChange('Reactivación', enrollment, input.reason, input.detail, { startDate: input.startDate });
+  };
+
+  const requestProgramChange = (enrollmentId: string, input: ProgramChangeInput): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const auth = canRequest(authority(), 'Cambio de programa');
+    if (!auth.ok) return { ok: false, error: auth.reason };
+    const problems = validateProgramChangeRequest(enrollment, input, changeContext());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    return openChange('Cambio de programa', enrollment, input.reason, input.detail, { programId: input.programId, levelId: input.levelId });
+  };
+
+  const requestTransfer = (enrollmentId: string, input: TransferInput): StockResult => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const auth = canRequest(authority(), 'Traslado de sede');
+    if (!auth.ok) return { ok: false, error: auth.reason };
+    const problems = validateTransferRequest(enrollment, input, changeContext());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    return openChange('Traslado de sede', enrollment, input.reason, input.detail, { branchId: input.branchId, schedule: input.schedule });
+  };
+
+  const resolveChangeRequest = (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string): StockResult => {
+    const request = changeRequests.find(r => r.id === requestId);
+    if (!request) return { ok: false, error: 'No se encontró la solicitud.' };
+    if (request.status !== 'Pendiente') return { ok: false, error: 'Esta solicitud ya fue resuelta.' };
+    const auth = canResolve(authority(), request.kind, request.requestedBy);
+    if (!auth.ok) return { ok: false, error: auth.reason };
+    if (decision === 'Rechazada' && note.trim().length < 5) return { ok: false, error: 'Indique por qué se rechaza la solicitud.' };
+    const at = new Date().toISOString();
+    const base = { status: decision, resolvedAt: at, resolvedBy: currentUser.name, resolutionNote: note.trim() || undefined };
+    if (decision === 'Rechazada') {
+      setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base } : r)));
+      return { ok: true };
+    }
+    const enrollment = enrollments.find(e => e.id === request.enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const c = changeContext(requestId);
+    const today = c.today;
+    const log = (field: string, label: string, from: string, to: string) =>
+      setEnrollmentChanges(prev => [{ id: `COR-${Date.now()}-${field}`, enrollmentId: enrollment.id, at, by: currentUser.name, field, label, from, to, reason: request.reason }, ...prev]);
+    const plan = plans.find(p => p.mat === enrollment.id);
+    const effects: string[] = [];
+
+    if (request.kind === 'Reactivación') {
+      const problems = reactivationProblems(enrollment, c);
+      if (problems.length > 0) return { ok: false, error: problems[0] };
+      const startDate = request.payload.startDate || today;
+      const preview = previewReactivation(enrollment, c, startDate);
+      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa', plan: 'Al día', dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e)));
+      if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyReactivationToPlan(p, preview, today) : p)));
+      if (preview.studentReactivates) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, status: 'Activo' } : st)));
+      log('reactivation', 'Reactivación de la matrícula', 'Caída', 'Activa');
+      effects.push(`Matrícula reactivada desde el ${startDate}.`, `${preview.restored.length} cuota(s) restituida(s) por USD ${preview.restoredUSD.toFixed(2)}, con el calendario corrido ${preview.shiftDays} día(s).`);
+      if (preview.keptDebt.length > 0) effects.push(`Sigue pendiente la deuda vencida de USD ${preview.keptDebtUSD.toFixed(2)}.`);
+    } else if (request.kind === 'Cambio de programa') {
+      const input = { programId: request.payload.programId, levelId: request.payload.levelId };
+      const problems = programChangeProblems(enrollment, input, c);
+      if (problems.length > 0) return { ok: false, error: problems[0] };
+      const preview = previewProgramChange(enrollment, input, c);
+      if (!preview) return { ok: false, error: 'No se pudo calcular el precio del programa nuevo.' };
+      if (preview.remaining < 0) return { ok: false, error: `Ya se cobró más (USD ${preview.paidUSD.toFixed(2)}) que el precio del programa nuevo (USD ${preview.newTotal.toFixed(2)}): primero devuelva la diferencia.` };
+      const toLabel = preview.level ? `${preview.program.name} - ${preview.level.name}` : preview.program.name;
+      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? {
+        ...e, program: preview.program.name, programId: preview.program.id, level: preview.level?.name ?? 'Sin nivel', levelId: preview.level?.id,
+        tariffId: preview.tariff.id, tariffName: preview.tariff.name, assignedPrice: preview.newTotal,
+        verificationStatus: preview.verificationReset ? 'Pendiente' : e.verificationStatus,
+      } : e)));
+      if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyProgramChangeToPlan(p, preview, today) : p)));
+      const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && (o.studentId && enrollment.studentId ? o.studentId === enrollment.studentId : o.student === enrollment.student));
+      setSchedules(prev => prev.map(sc => {
+        const mine = enrollment.studentId && sc.studentId ? sc.studentId === enrollment.studentId : sc.student === enrollment.student;
+        const target = otherActive ? sc.isFirst && sc.enrollmentId === enrollment.id : mine;
+        return target && sc.date >= today && ['Reservado', 'Reprogramado'].includes(sc.status) ? { ...sc, program: preview.program.name, level: preview.level?.name ?? 'Sin nivel' } : sc;
+      }));
+      if (!otherActive) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, program: toLabel } : st)));
+      log('program', 'Cambio de programa o nivel', preview.fromLabel, toLabel);
+      effects.push(`${preview.fromLabel} → ${toLabel}.`, `Precio: USD ${preview.oldTotal.toFixed(2)} → USD ${preview.newTotal.toFixed(2)}; cobrado USD ${preview.paidUSD.toFixed(2)}; saldo USD ${preview.remaining.toFixed(2)}.`);
+      if (preview.verificationReset) effects.push('La verificación vuelve a «Pendiente» para entregar los materiales del programa nuevo.');
+    } else {
+      const input = { branchId: request.payload.branchId, schedule: request.payload.schedule };
+      const problems = transferProblems(enrollment, input, c);
+      if (problems.length > 0) return { ok: false, error: problems[0] };
+      const preview = previewTransfer(enrollment, input, c);
+      if (!preview) return { ok: false, error: 'No se encontró la sede destino.' };
+      const fromName = preview.fromName;
+      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, branchId: input.branchId, sede: preview.toName } : e)));
+      if (preview.scheduleChanged) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, horario: preview.schedule } : st)));
+      if (preview.scheduleIds.length > 0) {
+        setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
+        logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
+      }
+      logActivityRemovals(preview.activityRemovals, `Traslado de sede (${fromName} → ${preview.toName})`);
+      if (preview.activityRemovals.length > 0) {
+        setMonthlySchedules(prev => prev.map(m => ({
+          ...m,
+          actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
+        })));
+      }
+      log('branch', 'Traslado de sede', fromName, preview.toName);
+      effects.push(`Sede: ${fromName} → ${preview.toName}.`, `${preview.scheduleIds.length} asesoría(s) y ${preview.activityRemovals.length} inscripción(es) de la sede anterior canceladas.`);
+      if (preview.scheduleChanged) effects.push(`Horario de clases: ${preview.schedule}.`);
+    }
+    setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base, effects } : r)));
+    addNotification({ title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info' });
+    return { ok: true };
+  };
+
+  // ---- Contrato y ficha de la matrícula
+  const documentContextOf = (enrollmentId: string): DocContext | undefined => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return undefined;
+    const today = todayLocalISO();
+    const student = students.find(s => s.id === enrollment.studentId) ?? students.find(s => s.name === enrollment.student);
+    const linked = (enrollment.guardianIds && enrollment.guardianIds.length > 0 ? enrollment.guardianIds : student?.guardianIds ?? [])
+      .map(id => guardians.find(g => g.id === id)).filter((g): g is Guardian => !!g);
+    // Registros antiguos: sin vínculo, el titular se reconoce por el nombre guardado
+    const legacy = linked.length === 0 && student && student.titular && student.titular !== student.name ? guardians.find(g => g.name === student.titular) : undefined;
+    const guardiansOf = legacy ? [legacy] : linked;
+    const program = programOf(enrollment, programs);
+    const branch = branches.find(b => b.id === enrollment.branchId);
+    return {
+      enrollment, student, guardians: guardiansOf, program,
+      level: levels.find(l => l.id === enrollment.levelId), plan: plans.find(p => p.mat === enrollment.id), branch,
+      company: companies.find(c => c.name === branch?.company), firstSession: firstSessionOf(enrollment.id, schedules),
+      validity: enrollmentValidity(enrollment, program, schedules, today), template: contractTemplate, today,
+    };
+  };
+
+  const updateContractTemplate = (input: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>): StockResult => {
+    if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede editar las plantillas de documentos.' };
+    const problems = validateTemplate({ ...input, version: contractTemplate.version });
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const changed = JSON.stringify([input.intro, input.clauses, input.closing]) !== JSON.stringify([contractTemplate.intro, contractTemplate.clauses, contractTemplate.closing]);
+    setContractTemplate({
+      ...input, reviewed: input.reviewed,
+      version: changed ? contractTemplate.version + 1 : contractTemplate.version, updatedAt: new Date().toISOString(), updatedBy: currentUser.name,
+    });
+    return { ok: true };
+  };
+
+  const generateEnrollmentDocument = (enrollmentId: string, kind: DocKind): StockResult => {
+    if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede generar contratos ni fichas.' };
+    const ctx = documentContextOf(enrollmentId);
+    if (!ctx) return { ok: false, error: 'No se encontró la matrícula.' };
+    const problems = documentProblems(kind, ctx);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const built = buildDocument(kind, ctx);
+    const issued = issueDocument(kind, ctx.enrollment.documents?.[kind], built, currentUser.name, new Date().toISOString(), issuedNumbers(enrollments, kind));
+    setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, documents: { ...(e.documents ?? {}), [kind]: issued } } : e)));
+    return { ok: true };
+  };
+
+  const registerDocumentSignature = (enrollmentId: string, kind: DocKind, input: { date: string; file: string }): StockResult => {
+    if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede registrar firmas.' };
+    const ctx = documentContextOf(enrollmentId);
+    if (!ctx) return { ok: false, error: 'No se encontró la matrícula.' };
+    const issued = ctx.enrollment.documents?.[kind];
+    const state = docState(issued, buildDocument(kind, ctx).fingerprint);
+    const problems = validateSignature(issued, state, input, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setEnrollments(prev => prev.map(e => (e.id === enrollmentId && e.documents?.[kind]
+      ? { ...e, documents: { ...e.documents, [kind]: { ...e.documents[kind]!, signedAt: input.date, signedBy: currentUser.name, signedFile: input.file.trim() } } }
+      : e)));
+    return { ok: true };
+  };
+
+  // ---- Cobranza: política, recordatorios y mora
+  const updateCollectionPolicy = (input: { graceDays: string; moraMonthlyRatePct: string; remindBefore: string; remindAfter: string }): StockResult => {
+    if (!can(PERM.configCollections)) return { ok: false, error: 'Su rol no puede configurar la política de cobranza.' };
+    const problems = validatePolicy(input);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setCollectionPolicy(parsePolicy(input));
+    return { ok: true };
+  };
+
+  const logReminder = (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string): StockResult => {
+    if (!can(PERM.sendReminders)) return { ok: false, error: 'Su rol no puede registrar recordatorios.' };
+    const problems = validateReminderLog(reminder, channel, result, note, reminderLogs);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setReminderLogs(prev => [{
+      id: nextSequentialId('REC', prev.map(r => r.id)), key: reminder.key, planId: reminder.planId, installmentId: reminder.installmentId, stageOffset: reminder.stage.offset,
+      at: new Date().toISOString(), by: currentUser.name, channel, result, note: note.trim() || undefined,
+    }, ...prev]);
+    return { ok: true };
+  };
+
+  const chargeMora = (planId: string, installmentId: string): StockResult => {
+    if (!can(PERM.chargeMora)) return { ok: false, error: 'Su rol no puede cobrar mora.' };
+    const plan = plans.find(p => p.id === planId);
+    if (!plan) return { ok: false, error: 'No se encontró el plan.' };
+    const today = todayLocalISO();
+    const problems = validateMoraCharge(plan, installmentId, collectionPolicy, today);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    setPlans(prev => prev.map(pl => (pl.id === planId ? chargeMoraOn(pl, installmentId, collectionPolicy, today) : pl)));
     return { ok: true };
   };
 
@@ -2520,6 +3417,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       id: `TRK-${Date.now().toString().slice(-4)}`
     };
     setTrackings(prev => [newTracking, ...prev]);
+    if (newTracking.scheduleId) {
+      pushEvents([{ id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'asesoria', refId: newTracking.scheduleId, studentId: newTracking.studentId, type: 'Sesión registrada' }]);
+    }
     return newTracking;
   };
 
@@ -2743,6 +3643,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       deleteClassSchedule,
       cashMovements,
       addCashMovement,
+      reverseCashMovement,
+      createDepositBatch,
+      pettyCashMovements,
+      addPettyCashMovement,
+      reversePettyCashMovement,
       promotionGroups,
       itemPrices,
       addItemPrice,
@@ -2757,6 +3662,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
       schedules, 
       addSchedule,
       updateSchedule,
+      psyEvents,
+      setActivityResponsible,
+      enrollInActivity,
+      unenrollFromActivity,
+      markActivityAttendance,
+      psyReminderPolicy,
+      savePsyReminderPolicy,
+      psyReminderLogs,
+      logPsyReminder,
+      gateOfSchedule,
+      attendanceBlockOf,
+      pendingFirstSessions,
       trackings, 
       monthlySchedules, 
       addMonthlySchedule,
@@ -2767,6 +3684,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       staff,
       contracts,
       assignments,
+      saveAssignment,
+      closeAssignment,
+      editContract,
+      inactivateStaff,
+      reactivateStaff,
       companies,
       setCompanies,
       addCompany,
@@ -2820,6 +3742,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
       enrollmentChanges,
       updateEnrollmentData,
       reversePayment,
+      collectionPolicy,
+      updateCollectionPolicy,
+      reminderLogs,
+      logReminder,
+      chargeMora,
+      contractTemplate,
+      updateContractTemplate,
+      documentContextOf,
+      generateEnrollmentDocument,
+      registerDocumentSignature,
+      changeRequests,
+      requestReactivation,
+      requestProgramChange,
+      requestTransfer,
+      resolveChangeRequest,
+      cashClosures,
+      closeCash,
+      reopenCash,
+      pettyFund,
+      updatePettyFund,
+      creditNotes,
+      can,
       addTracking, 
       updateTracking,
       registerPayment, 

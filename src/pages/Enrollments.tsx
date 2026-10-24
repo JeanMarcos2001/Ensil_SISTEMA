@@ -3,7 +3,8 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Bookmark, X } from 'lucide-react';
+import { Search, Bookmark, X } from 'lucide-react';
+import { ClearFilters } from '../components/ui/ClearFilters';
 import { useData } from '../context/DataContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
@@ -21,6 +22,9 @@ import { useTablePagination } from '../hooks/useTablePagination';
 import { EnrollmentFichaModal } from '../components/enrollment/EnrollmentFichaModal';
 import { DropRequestModal } from '../components/enrollment/DropRequestModal';
 import { EditEnrollmentModal } from '../components/enrollment/EditEnrollmentModal';
+import { useChangeActions } from '../components/enrollment/useChangeActions';
+import { planState } from '../utils/planState';
+import type { FichaTab } from '../components/enrollment/EnrollmentFichaModal';
 
 const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
   'sin-inicio': 'neutral',
@@ -32,8 +36,26 @@ const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' |
   finalizada: 'neutral',
 };
 
+/** Vista guardada: los filtros que el usuario dejó aplicados (se recuerda en este navegador). */
+interface SavedView {
+  search: string;
+  branch: string;
+  program: string;
+  status: string;
+  vigencia: string;
+}
+const VIEW_KEY = 'ensil:vista-matriculas';
+function readSavedView(): SavedView | null {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY);
+    return raw ? (JSON.parse(raw) as SavedView) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Enrollments() {
-  const { enrollments, students, branches, programs, schedules, dropRequests, enableExtension, setIsEnrollmentWizardOpen, plans } = useData();
+  const { enrollments, students, branches, programs, schedules, dropRequests, changeRequests, enableExtension, setIsEnrollmentWizardOpen, plans } = useData();
   const today = todayLocalISO();
   const [searchParams, setSearchParams] = useSearchParams();
   const vigenciaFilter = (searchParams.get('vigencia') ?? '') as ValidityState | '';
@@ -41,13 +63,18 @@ export function Enrollments() {
   const [extendError, setExtendError] = useState<string | null>(null);
   // Ficha de la matrícula (también se abre desde otras pantallas con ?ficha=MAT-…) y acciones de la fila
   const [fichaId, setFichaId] = useState<string | null>(searchParams.get('ficha'));
+  const [fichaTab, setFichaTab] = useState<FichaTab>((searchParams.get('tab') as FichaTab) || 'resumen');
   const [dropFor, setDropFor] = useState<string | null>(null);
+  const lifecycle = useChangeActions();
   const [editFor, setEditFor] = useState<string | null>(null);
   // Filtro por alumno (desde Alumnos → Ver matrículas)
   const studentFilter = searchParams.get('alumno') ?? '';
   const filteredStudent = students.find(s => s.id === studentFilter);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const [savedView, setSavedView] = useState<SavedView | null>(readSavedView);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
   const navigate = useNavigate();
@@ -64,8 +91,11 @@ export function Enrollments() {
     const matchesBranch = !selectedBranch || e.sede === selectedBranch;
     const matchesValidity = !vigenciaFilter || validityOf(e)?.state === vigenciaFilter;
     const matchesStudent = !studentFilter || e.studentId === studentFilter || (!!filteredStudent && e.student === filteredStudent.name);
-    return matchesSearch && matchesBranch && matchesValidity && matchesStudent;
+    const matchesProgram = !selectedProgram || e.program === selectedProgram;
+    const matchesStatus = !selectedStatus || e.status === selectedStatus;
+    return matchesSearch && matchesBranch && matchesValidity && matchesStudent && matchesProgram && matchesStatus;
   });
+  const hasFilters = !!(searchTerm || selectedBranch || selectedProgram || selectedStatus || vigenciaFilter || studentFilter);
 
   const totalPages = Math.ceil(filteredEnrollments.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -74,11 +104,11 @@ export function Enrollments() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, vigenciaFilter, studentFilter]);
+  }, [searchTerm, vigenciaFilter, studentFilter, selectedBranch, selectedProgram, selectedStatus]);
 
   useEffect(() => {
     const f = searchParams.get('ficha');
-    if (f) setFichaId(f);
+    if (f) { setFichaId(f); const t = searchParams.get('tab'); if (t) setFichaTab(t as FichaTab); }
   }, [searchParams]);
 
   const setVigencia = (v: string) => {
@@ -87,12 +117,30 @@ export function Enrollments() {
     setSearchParams(next, { replace: true });
   };
 
-  const handleOpenDetail = (id: string) => setFichaId(id);
+  const clearFilters = () => {
+    setSearchTerm(''); setSelectedBranch(''); setSelectedProgram(''); setSelectedStatus('');
+    const next = new URLSearchParams(searchParams);
+    next.delete('vigencia'); next.delete('alumno');
+    setSearchParams(next, { replace: true });
+  };
+  const saveView = () => {
+    const view: SavedView = { search: searchTerm, branch: selectedBranch, program: selectedProgram, status: selectedStatus, vigencia: vigenciaFilter };
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* sin almacenamiento: la vista no se recuerda */ }
+    setSavedView(view);
+  };
+  const applyView = () => {
+    if (!savedView) return;
+    setSearchTerm(savedView.search); setSelectedBranch(savedView.branch); setSelectedProgram(savedView.program); setSelectedStatus(savedView.status);
+    setVigencia(savedView.vigencia);
+  };
+
+  const handleOpenDetail = (id: string) => { setFichaTab('resumen'); setFichaId(id); };
   const closeFicha = () => {
     setFichaId(null);
     if (searchParams.get('ficha')) {
       const next = new URLSearchParams(searchParams);
       next.delete('ficha');
+      next.delete('tab');
       setSearchParams(next, { replace: true });
     }
   };
@@ -110,7 +158,13 @@ export function Enrollments() {
           <p className="text-sm text-text-secondary">Gestión de registros individuales por alumno</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="ghost" className="hidden sm:flex items-center gap-2">
+          {savedView && (
+            <Button variant="ghost" className="hidden sm:flex items-center gap-2" onClick={applyView} title="Aplicar los filtros que guardó">
+              <Bookmark size={16} className="text-primary-accent" />
+              Aplicar vista guardada
+            </Button>
+          )}
+          <Button variant="ghost" className="hidden sm:flex items-center gap-2" onClick={saveView} disabled={!hasFilters} title={hasFilters ? 'Guardar los filtros actuales' : 'Aplique algún filtro para guardar la vista'}>
             <Bookmark size={16} />
             Guardar vista
           </Button>
@@ -144,19 +198,24 @@ export function Enrollments() {
                   <option key={b.id} value={b.name}>{b.name}</option>
                 ))}
               </select>
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={selectedProgram}
+                onChange={(e) => setSelectedProgram(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Programa</option>
-                <option value="kids">Kids</option>
-                <option value="teens">Teens</option>
+                {[...new Set([...programs.map(pr => pr.name), ...enrollments.map(en => en.program)])].filter(Boolean).sort().map(name => <option key={name} value={name}>{name}</option>)}
               </select>
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Estado Matrícula</option>
-                <option value="activa">Activa</option>
-                <option value="caida">Caída</option>
+                <option value="Activa">Activa</option>
+                <option value="Caída">Caída</option>
               </select>
-              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
-                <Filter size={16} />
-              </Button>
+              <ClearFilters active={hasFilters} onClear={clearFilters} className="h-10 rounded-xl" />
             </div>
           </div>
         </div>
@@ -222,6 +281,9 @@ export function Enrollments() {
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activa' ? 'success' : 'danger'}>{row.status}</Badge>
                     {dropRequests.some(r => r.enrollmentId === row.id && r.status === 'Pendiente') && <div className="mt-1"><Badge variant="warning">Caída solicitada</Badge></div>}
+                    {changeRequests.filter(r => r.enrollmentId === row.id && r.status === 'Pendiente').map(r => <div key={r.id} className="mt-1"><Badge variant="warning">{r.kind} solicitada</Badge></div>)}
+                    {row.status === 'Activa' && !row.documents?.contract && <div className="mt-1"><Badge variant="neutral">Sin contrato</Badge></div>}
+                    {row.status === 'Activa' && row.documents?.contract && !row.documents.contract.signedAt && <div className="mt-1"><Badge variant="neutral">Contrato sin firma</Badge></div>}
                   </td>
                   <td className="px-6 py-3">
                     {(() => {
@@ -248,7 +310,12 @@ export function Enrollments() {
                     })()}
                   </td>
                   <td className="px-6 py-3">
-                    <Badge variant={row.plan === 'Al día' ? 'success' : row.plan === 'Parcial' ? 'warning' : 'danger'}>{row.plan}</Badge>
+                    {(() => {
+                      // Estado del plan calculado con las cuotas y la fecha (el texto guardado en la matrícula se desfasa)
+                      const pl = plans.find(p => p.mat === row.id);
+                      const label = row.status === 'Caída' ? 'Caída' : pl ? planState(pl, today) : row.plan;
+                      return <Badge variant={label === 'Al día' || label === 'Completado' ? 'success' : label === 'Parcial' ? 'warning' : 'danger'}>{label}</Badge>;
+                    })()}
                   </td>
                   <td className="px-6 py-3 text-right">
                     <ActionMenu 
@@ -262,6 +329,8 @@ export function Enrollments() {
                         })(),
                         ...(row.status === 'Activa' ? [{ label: 'Corregir datos', onClick: () => setEditFor(row.id) }] : []),
                         { label: 'Ver plan', onClick: () => navigate(`/operacion/planes-y-cartera?plan=${plans.find(p => p.mat === row.id)?.id ?? ''}`) },
+                        { label: 'Contrato y ficha', onClick: () => { setFichaTab('documentos'); setFichaId(row.id); } },
+                        ...lifecycle.items(row),
                         ...(row.status === 'Activa'
                           ? [dropRequests.some(r => r.enrollmentId === row.id && r.status === 'Pendiente')
                             ? { label: 'Resolver caída solicitada', onClick: () => setFichaId(row.id), danger: true }
@@ -339,7 +408,8 @@ export function Enrollments() {
       )}
 
       {/* Ficha de la matrícula */}
-      <EnrollmentFichaModal enrollmentId={fichaId} onClose={() => closeFicha()} />
+      <EnrollmentFichaModal enrollmentId={fichaId} initialTab={fichaTab} onClose={() => closeFicha()} />
+      {lifecycle.modals}
       <DropRequestModal enrollmentId={dropFor} onClose={() => setDropFor(null)} />
       <EditEnrollmentModal enrollmentId={editFor} onClose={() => setEditFor(null)} />
     </div>

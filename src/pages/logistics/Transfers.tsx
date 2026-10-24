@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2 } from 'lucide-react';
 import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, TransferBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
+import { todayLocalISO } from '../../utils/schedule';
 
 export function Transfers() {
   const { 
@@ -40,7 +41,7 @@ export function Transfers() {
   const [destinationId, setDestinationId] = useState('');
   const [reason, setReason] = useState('');
   const [observation, setObservation] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayLocalISO());
   const [eta, setEta] = useState('');
   
   const [selectedShippingMethod, setSelectedShippingMethod] = useState<string>('');

@@ -42,6 +42,25 @@ export function checkPaymentGate(enrollment: Pick<Enrollment, 'id' | 'planId'>, 
     : { ok: false, reason: `${warning} Falta cancelar «${first.name}» del plan ${plan.id} (${plan.type}).` };
 }
 
+// ---------------------------------------------------------------- Receta que le corresponde
+
+/**
+ * Receta de materiales activa y vigente para la matrícula: mismo programa, nivel (o todos los niveles) y sede
+ * (o todas las sedes), con `today` dentro de su rango de fechas (el último día cuenta).
+ */
+export function recipeForEnrollment(
+  enrollment: Pick<Enrollment, 'programId' | 'levelId' | 'branchId'>,
+  recipes: Recipe[],
+  today: string
+): Recipe | undefined {
+  return recipes.find(r => {
+    if (r.status !== 'Activo' || r.programId !== enrollment.programId) return false;
+    if (r.levelId && r.levelId !== enrollment.levelId) return false;
+    if (!r.applyToAllBranches && !(enrollment.branchId && r.branchIds.includes(enrollment.branchId))) return false;
+    return r.startDate.slice(0, 10) <= today && (!r.endDate || today <= r.endDate.slice(0, 10));
+  });
+}
+
 // ---------------------------------------------------------------- Entrega por línea de receta
 
 type Line = Recipe['items'][number];

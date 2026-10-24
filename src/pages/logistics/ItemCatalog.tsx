@@ -10,6 +10,8 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Item, ItemType } from '../../context/DataContext';
 import { ItemPricesModal } from './ItemPricesModal';
 import { getCurrentPrice, todayISO, validateItem } from '../../utils/inventory';
+import { BULK_HEADERS, BULK_TEMPLATE_ROWS, MAX_BYTES, buildBookBatch, parseCsv, type BulkResult } from '../../utils/itemImport';
+import { downloadCsv } from '../../utils/exportCsv';
 
 export function ItemCatalog() {
   const { items, setItems, itemPrices, addItemPrice } = useData();
@@ -23,6 +25,9 @@ export function ItemCatalog() {
   const [formError, setFormError] = useState<string | null>(null);
   const [wizardStep, setWizardStep] = useState<1 | 2>(1);
   const [isBulkUpload, setIsBulkUpload] = useState(false);
+  // Carga masiva: archivo leído y su validación (se guarda todo o nada)
+  const [bulk, setBulk] = useState<{ fileName: string; result: BulkResult } | null>(null);
+  const [showSessionTable, setShowSessionTable] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -106,6 +111,8 @@ export function ItemCatalog() {
       });
       setWizardStep(1);
       setIsBulkUpload(false);
+      setBulk(null);
+      setShowSessionTable(false);
     }
     setSelectedItem(item || null);
     setInitialPrice('');
@@ -128,9 +135,14 @@ export function ItemCatalog() {
 
   const handleSave = () => {
     if (isBulkUpload) {
-      // In a real app we'd show a success toast. For now, let's just close.
+      if (!bulk) { setFormError('Elija el archivo CSV con los libros.'); return; }
+      if (bulk.result.errors.length > 0) { setFormError('El archivo tiene errores: corríjalos y vuelva a cargarlo. No se guardó ningún libro.'); return; }
+      if (bulk.result.items.length === 0) { setFormError('El archivo no tiene libros para guardar.'); return; }
+      setItems([...items, ...bulk.result.items]);
+      bulk.result.prices.forEach(pr => addItemPrice({ itemId: pr.itemId, branchId: 'all', amount: pr.amount, validFrom: todayISO() }));
       setIsFormOpen(false);
       setFormError(null);
+      setBulk(null);
       return;
     }
 
@@ -158,6 +170,17 @@ export function ItemCatalog() {
     }
     setIsFormOpen(false);
     setFormError(null);
+  };
+
+  const readBulkFile = (file: File | undefined) => {
+    setFormError(null);
+    if (!file) return;
+    if (!/\.csv$/i.test(file.name)) { setBulk(null); setFormError('El archivo debe ser .csv (en Excel: Guardar como → CSV).'); return; }
+    if (file.size > MAX_BYTES) { setBulk(null); setFormError('El archivo supera los 5 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setBulk({ fileName: file.name, result: buildBookBatch(parseCsv(String(reader.result ?? '')), items) });
+    reader.onerror = () => setFormError('No se pudo leer el archivo.');
+    reader.readAsText(file, 'utf-8');
   };
 
   const handleOpenDetail = (item: Item) => {
@@ -479,19 +502,40 @@ export function ItemCatalog() {
                     <h3 className="text-lg font-medium text-text-primary">Carga Masiva de Libros</h3>
                     <p className="text-sm text-text-secondary mt-1">Sube un archivo Excel para registrar múltiples libros a la vez.</p>
                   </div>
-                  <Button variant="secondary" className="flex items-center gap-2">
+                  <Button variant="secondary" className="flex items-center gap-2" onClick={() => downloadCsv('plantilla_libros.csv', BULK_HEADERS, BULK_TEMPLATE_ROWS)}>
                     <Download size={16} />
                     Descargar Plantilla
                   </Button>
                 </div>
                 
-                <div className="border-2 border-dashed border-border-soft rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-surface-muted transition-colors cursor-pointer">
+                <label
+                  className="border-2 border-dashed border-border-soft rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-surface-muted transition-colors cursor-pointer"
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); readBulkFile(e.dataTransfer.files?.[0]); }}
+                >
                   <div className="w-16 h-16 rounded-full bg-primary-accent/10 text-primary-accent flex items-center justify-center mb-4">
                     <Upload size={28} />
                   </div>
-                  <h4 className="font-medium text-text-primary mb-1">Haz clic o arrastra tu archivo Excel aquí</h4>
-                  <p className="text-sm text-text-secondary">Formatos soportados: .xlsx, .csv (Máx. 5MB)</p>
-                </div>
+                  <h4 className="font-medium text-text-primary mb-1">{bulk ? bulk.fileName : 'Haz clic o arrastra tu archivo CSV aquí'}</h4>
+                  <p className="text-sm text-text-secondary">Formato soportado: .csv (Máx. 5MB). Si trabaja en Excel: Guardar como → CSV.</p>
+                  <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { readBulkFile(e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+
+                {bulk && (
+                  <div className={`rounded-xl p-4 text-sm border ${bulk.result.errors.length > 0 ? 'bg-danger-tint/40 border-danger-text/20 text-danger-text' : 'bg-success-tint border-success-text/20 text-success-text'}`}>
+                    {bulk.result.errors.length === 0 ? (
+                      <p className="font-medium">{bulk.result.items.length} libro(s) listos para guardar ({bulk.result.prices.length} con precio de venta).</p>
+                    ) : (
+                      <>
+                        <p className="font-medium mb-2">{bulk.result.errors.length} error(es) en el archivo. No se guardará nada hasta corregirlos:</p>
+                        <ul className="list-disc list-inside space-y-0.5 max-h-40 overflow-y-auto">
+                          {bulk.result.errors.slice(0, 20).map((er, i) => <li key={i}>Línea {er.line}: {er.message}</li>)}
+                          {bulk.result.errors.length > 20 && <li>y {bulk.result.errors.length - 20} más…</li>}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 <div className="bg-info-tint/30 border border-info-text/20 rounded-xl p-4 text-sm text-info-text">
                   <p className="font-medium mb-2">Columnas requeridas en el archivo:</p>
@@ -501,8 +545,9 @@ export function ItemCatalog() {
                     <li>Estado (Activo/Inactivo)</li>
                     <li>Unidad de Medida</li>
                     <li>Costo Referencial</li>
-                    <li>Precio de Venta</li>
+                    <li>Precio de Venta (USD; 0 si no se vende)</li>
                     <li>Descripción</li>
+                    <li>Tipo de encuadernado (Anillado/Encolado)</li>
                   </ul>
                 </div>
               </div>
@@ -740,7 +785,39 @@ export function ItemCatalog() {
                       {formData.trainingMode === 'Variable' && (
                         <div className="bg-surface-muted p-4 rounded-xl border border-border-soft">
                           <p className="text-sm text-text-secondary mb-3">Configuración de entrenamientos variables por sesión.</p>
-                          <Button variant="ghost" className="text-xs py-1 h-auto">Configurar tabla de sesiones</Button>
+                          <Button variant="ghost" className="text-xs py-1 h-auto" onClick={() => setShowSessionTable(v => !v)}>
+                            {showSessionTable ? 'Ocultar tabla de sesiones' : 'Configurar tabla de sesiones'}
+                          </Button>
+                          {(formData.sessions ?? 0) > 0 && (formData.variableTrainings ?? []).length === formData.sessions && !showSessionTable && (
+                            <span className="ml-2 text-xs text-success-text">Tabla configurada ({formData.sessions} sesiones)</span>
+                          )}
+                          {showSessionTable && (
+                            (formData.sessions ?? 0) <= 0 ? (
+                              <p className="text-xs text-warning-text mt-3">Indique primero cuántas sesiones tiene el material.</p>
+                            ) : (
+                              <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {Array.from({ length: formData.sessions! }).map((_, i) => (
+                                  <div key={i} className="space-y-1">
+                                    <label className="text-xs font-medium text-text-secondary">Sesión {i + 1}</label>
+                                    <input
+                                      type="number" min="0"
+                                      className="w-full h-9 bg-surface border border-border-soft rounded-lg px-2 text-sm focus:outline-none focus:border-primary-accent"
+                                      value={formData.variableTrainings?.find(v => v.session === i + 1)?.trainings ?? ''}
+                                      placeholder="0"
+                                      onChange={e => {
+                                        const n = Math.max(0, parseInt(e.target.value) || 0);
+                                        const rows = Array.from({ length: formData.sessions! }).map((__, k) => ({
+                                          session: k + 1,
+                                          trainings: k === i ? n : (formData.variableTrainings?.find(v => v.session === k + 1)?.trainings ?? 0),
+                                        }));
+                                        setFormData({ ...formData, variableTrainings: rows });
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )
+                          )}
                         </div>
                       )}
                     </div>

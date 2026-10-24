@@ -271,7 +271,8 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
             <span className="text-sm font-medium">Configuración</span>
           </div>
         </button>
-        <button 
+        <button
+          onClick={() => navigate('/sistema/ayuda')}
           className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
           title={!isOpen ? "Ayuda" : undefined}
         >
@@ -282,9 +283,10 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
             <span className="text-sm font-medium">Ayuda</span>
           </div>
         </button>
-        <button 
-          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text hover:bg-danger-tint transition-colors relative overflow-hidden`}
-          title={!isOpen ? "Cerrar sesión" : undefined}
+        <button
+          disabled
+          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text opacity-50 cursor-not-allowed transition-colors relative overflow-hidden`}
+          title="Disponible cuando se active el inicio de sesión (hoy el sistema no tiene usuarios que ingresen)"
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">
             <LogOut size={20} />

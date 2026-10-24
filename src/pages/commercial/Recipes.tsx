@@ -10,6 +10,7 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Recipe, RecipeItem } from '../../context/DataContext';
 import { getRecipeSelectableItems } from '../../utils/inventory';
 import { DateInput } from '../../components/ui/DateInput';
+import { todayLocalISO } from '../../utils/schedule';
 
 export function Recipes() {
   const { recipes, setRecipes, programs, levels, branches, items } = useData();
@@ -30,7 +31,7 @@ export function Recipes() {
     applyToAllBranches: true,
     status: 'Activo',
     items: [],
-    startDate: new Date().toISOString().split('T')[0],
+    startDate: todayLocalISO(),
     endDate: ''
   });
 
@@ -94,7 +95,7 @@ export function Recipes() {
         applyToAllBranches: true,
         status: 'Activo',
         items: [],
-        startDate: new Date().toISOString().split('T')[0],
+        startDate: todayLocalISO(),
         endDate: ''
       });
     }

@@ -25,6 +25,8 @@ import {
 import { CapacityInput } from './CapacityInput';
 import { ActivityEnrollModal } from './ActivityEnrollModal';
 import { DateInput } from '../../components/ui/DateInput';
+import { csvFileName, downloadCsv } from '../../utils/exportCsv';
+import { downloadTableImage, printTable } from '../../utils/printTable';
 
 interface FormState {
   branchId: string;
@@ -42,6 +44,12 @@ const newActivity = (order: number): ScheduleActivity => ({
 const autoTitle = (mes: string, anio: number) => `Cronograma de Actividades - ${mes} ${anio}`;
 
 const slotText = (t: string) => `${Number(t.split(':')[0]) % 12 || 12}:00 ${Number(t.split(':')[0]) >= 12 ? 'p. m.' : 'a. m.'}`;
+
+const ACTIVITY_HEADERS = ['Fecha', 'Actividad', 'Horario', 'Cupo', 'Inscritos', 'Responsable'];
+const dmy = (iso: string) => (iso ? iso.split('-').reverse().join('/') : '');
+const activityRows = (acts: ScheduleActivity[]) =>
+  [...acts].sort((a, b) => (a.fecha + a.horaInicio).localeCompare(b.fecha + b.horaInicio))
+    .map(a => [dmy(a.fecha), a.actividad, a.horaInicio && a.horaFin ? rangeLabel(a.horaInicio, a.horaFin) : '', a.cupo === null ? 'Sin límite' : a.cupo, a.inscritos.length, a.responsable || 'Por asignar']);
 
 const seats = (a: ScheduleActivity) => (a.cupo === null ? `${a.inscritos.length} inscritos` : `${a.inscritos.length}/${a.cupo} inscritos`);
 
@@ -79,6 +87,21 @@ export function MonthlySchedules() {
     (m.titulo.toLowerCase().includes(searchTerm.toLowerCase()) || m.sede.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const exportAllCsv = () => {
+    downloadCsv(
+      csvFileName('Cronogramas mensuales', today),
+      ['Cronograma', 'Sede', 'Mes', 'Año', ...ACTIVITY_HEADERS],
+      filtered.flatMap(m => activityRows(m.actividades).map(r => [m.titulo, m.sede, m.mes, m.anio, ...r]))
+    );
+  };
+  const exportPdf = (m: MonthlySchedule) => printTable(m.titulo, `${m.sede} · ${m.mes} ${m.anio}`, ACTIVITY_HEADERS, activityRows(m.actividades));
+  const exportImage = (m: MonthlySchedule) => downloadTableImage(csvFileName(m.titulo, today).replace(/\.csv$/, '.png'), m.titulo, `${m.sede} · ${m.mes} ${m.anio}`, ACTIVITY_HEADERS, activityRows(m.actividades));
+  const previewDraftPdf = () => {
+    const sede = branches.find(b => b.id === formState.branchId)?.name ?? '';
+    const ok = printTable(formState.titulo || autoTitle(formState.mes, formState.anio), `${sede} · ${formState.mes} ${formState.anio}`, ACTIVITY_HEADERS, activityRows(formState.actividades.filter(a => a.actividad.trim() || a.fecha)));
+    if (!ok) setError('Agregue al menos una actividad para previsualizar el cronograma.');
+  };
+
   const handleOpenDrawer = (schedule?: MonthlySchedule) => {
     setError(null);
     if (schedule) {
@@ -99,7 +122,11 @@ export function MonthlySchedules() {
   const set = (patch: Partial<FormState>) => { setError(null); setFormState(f => ({ ...f, ...patch })); };
 
   const handleAddActivity = () => set({ actividades: [...formState.actividades, newActivity(formState.actividades.length + 1)] });
-  const handleRemoveActivity = (id: string) => set({ actividades: formState.actividades.filter(a => a.id !== id) });
+  const handleRemoveActivity = (id: string) => {
+    const target = formState.actividades.find(a => a.id === id);
+    if (target && Object.keys(target.asistencia ?? {}).length > 0) { setError(`«${target.actividad || 'La actividad'}» ya tiene asistencia registrada: no se puede quitar.`); return; }
+    set({ actividades: formState.actividades.filter(a => a.id !== id) });
+  };
   const handleActivityChange = (id: string, patch: Partial<ScheduleActivity>) =>
     set({ actividades: formState.actividades.map(a => (a.id === id ? { ...a, ...patch } : a)) });
 
@@ -113,6 +140,12 @@ export function MonthlySchedules() {
     for (const a of formState.actividades) {
       const problem = validateActivity(a, period);
       if (problem) { setError(problem); return; }
+      // Con asistencia ya registrada, la actividad no cambia de fecha ni de horario (la asistencia quedaría en otro día)
+      const before = selectedSchedule?.actividades.find(x => x.id === a.id);
+      if (before && Object.keys(before.asistencia ?? {}).length > 0 && (before.fecha !== a.fecha || before.horaInicio !== a.horaInicio || before.horaFin !== a.horaFin)) {
+        setError(`${a.actividad.trim()}: ya tiene asistencia registrada, no se cambia su fecha ni su horario.`);
+        return;
+      }
       if (a.cupo !== null && a.cupo < a.inscritos.length) { setError(`${a.actividad.trim()}: el cupo (${a.cupo}) es menor que los inscritos (${a.inscritos.length}).`); return; }
     }
     const data = {
@@ -122,7 +155,7 @@ export function MonthlySchedules() {
       anio: formState.anio,
       titulo: formState.titulo.trim(),
       observaciones: formState.observaciones.trim(),
-      actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), responsable: '', orden: i + 1 })),
+      actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), orden: i + 1 })),
     };
     if (selectedSchedule) updateMonthlySchedule(selectedSchedule.id, data);
     else addMonthlySchedule(data);
@@ -137,7 +170,7 @@ export function MonthlySchedules() {
           <p className="text-text-secondary mt-1">Actividades especiales por sede. Bloquean los horarios de asesoría de su fecha y admiten inscripción de alumnos.</p>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
-          <Button variant="outline" className="flex-1 sm:flex-none">
+          <Button variant="outline" className="flex-1 sm:flex-none" onClick={exportAllCsv} disabled={filtered.every(m => m.actividades.length === 0)}>
             <Download size={20} className="mr-2" />
             Exportar Todos
           </Button>
@@ -192,8 +225,8 @@ export function MonthlySchedules() {
                 <ActionMenu
                   items={[
                     { label: 'Editar cronograma', onClick: () => handleOpenDrawer(schedule) },
-                    { label: 'Exportar a PDF', onClick: () => {} },
-                    { label: 'Exportar a Imagen', onClick: () => {} },
+                    { label: 'Exportar a PDF', onClick: () => exportPdf(schedule), disabled: schedule.actividades.length === 0 },
+                    { label: 'Exportar a Imagen', onClick: () => exportImage(schedule), disabled: schedule.actividades.length === 0 },
                     { label: 'Eliminar', onClick: () => setToDelete(schedule), danger: true },
                   ]}
                 />
@@ -262,7 +295,7 @@ export function MonthlySchedules() {
         size="5xl"
         footer={
           <div className="flex justify-between w-full">
-            <Button variant="outline">
+            <Button variant="outline" onClick={previewDraftPdf}>
               <Download size={20} className="mr-2" />
               Previsualizar PDF
             </Button>
@@ -352,7 +385,7 @@ export function MonthlySchedules() {
                     <Plus size={16} className="mr-2" /> Agregar
                   </Button>
                 </div>
-                <p className="text-sm text-text-secondary">Cada actividad ocupa hasta {MAX_ACTIVITY_HOURS} horas consecutivas y bloquea los horarios de asesoría de la sede. El responsable se define después, desde una sesión de Psicopedagogía.</p>
+                <p className="text-sm text-text-secondary">Cada actividad ocupa hasta {MAX_ACTIVITY_HOURS} horas consecutivas y bloquea los horarios de asesoría de la sede. El responsable se asigna después, en Programación → Actividades especiales (donde también se registra la asistencia).</p>
 
                 <div className="space-y-3 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
                   {formState.actividades.length === 0 ? (

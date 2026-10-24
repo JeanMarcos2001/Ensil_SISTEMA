@@ -3,7 +3,9 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, Plus, X, User, GraduationCap, Calendar, FileText, Phone, Mail, MapPin } from 'lucide-react';
+import { Search, Download, Plus, X, User, GraduationCap, Calendar, FileText, Phone, Mail, MapPin } from 'lucide-react';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
@@ -19,6 +21,7 @@ export function Students() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
 
@@ -37,8 +40,20 @@ export function Students() {
     const studentEnrollment = enrollments.find(e => e.studentId === s.id || e.student === s.name);
     const matchesBranch = !selectedBranch || (studentEnrollment && studentEnrollment.sede === selectedBranch);
 
-    return matchesSearch && matchesBranch;
+    const matchesStatus = !selectedStatus || s.status === selectedStatus;
+
+    return matchesSearch && matchesBranch && matchesStatus;
   });
+  const hasFilters = !!(searchTerm || selectedBranch || selectedStatus);
+  const clearFilters = () => { setSearchTerm(''); setSelectedBranch(''); setSelectedStatus(''); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Alumnos', today),
+      ['Código', 'Documento', 'Alumno', 'Edad', 'Programa', 'Titular', 'Estado'],
+      filteredStudents.map(s => [s.id, `${s.docType ?? 'DNI'} ${s.doc}`, s.name, s.age, studentProgramLabel(s, enrollments) || 'Sin matrícula', s.titular, s.status])
+    );
+  };
 
   const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -47,7 +62,7 @@ export function Students() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, selectedBranch, selectedStatus]);
 
   const handleOpenDetail = (id: string) => {
     setSelectedStudentId(id);
@@ -75,7 +90,7 @@ export function Students() {
           <p className="text-sm text-text-secondary">Maestro de beneficiarios y alumnos</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredStudents.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
@@ -110,14 +125,18 @@ export function Students() {
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Estado</option>
-              <option value="activo">Activo</option>
-              <option value="inactivo">Inactivo</option>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los estados</option>
+              <option value="Activo">Activo</option>
+              <option value="Inactivo">Inactivo</option>
+              <option value="Sin matrícula">Sin matrícula</option>
+              <option value="Egresado">Egresado</option>
             </select>
-            <Button variant="secondary" className="shrink-0 px-3">
-              <Filter size={16} />
-            </Button>
+            <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
       </Card>
@@ -310,12 +329,12 @@ export function Students() {
                         <span className="text-[10px] font-medium text-text-muted bg-surface-muted px-1.5 py-0.5 rounded uppercase tracking-wider">{latestTracking.date}</span>
                       </div>
                       <p className="text-sm text-text-secondary line-clamp-3 italic leading-relaxed">"{latestTracking.observations}"</p>
-                      <Button variant="ghost" className="w-full text-xs text-primary-accent h-8">Ver Seguimiento Completo</Button>
+                      <Button variant="ghost" className="w-full text-xs text-primary-accent h-8" onClick={() => navigate(`/psicopedagogia/historial-del-alumno?alumno=${selectedStudent.id}`)}>Ver Seguimiento Completo</Button>
                     </div>
                   ) : (
                     <div className="bg-surface p-4 rounded-xl border border-border-soft border-dashed flex flex-col items-center justify-center py-6 text-center">
                       <p className="text-sm text-text-muted mb-2">No se han registrado seguimientos psicopedagógicos aún.</p>
-                      <Button variant="secondary" className="text-xs h-8">Iniciar Seguimiento</Button>
+                      <Button variant="secondary" className="text-xs h-8" onClick={() => navigate(`/psicopedagogia/historial-del-alumno?alumno=${selectedStudent.id}`)}>Ver historial y programar asesoría</Button>
                     </div>
                   )}
                 </div>

@@ -22,6 +22,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useData, Shipment, Transfer, Item } from '../../context/DataContext';
+import { todayLocalISO } from '../../utils/schedule';
 
 interface ReceivedItem {
   itemId: string;
@@ -184,7 +185,7 @@ export function Receptions() {
       const etaDateTime = new Date(`${etaDate}T${doc.etaTime}:00`);
       return new Date() >= etaDateTime;
     } else {
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayLocalISO();
       return etaDate <= today;
     }
   };

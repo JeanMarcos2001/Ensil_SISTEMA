@@ -1,19 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, Plus, UserPlus, X } from 'lucide-react';
+import { Search, Download, UserPlus } from 'lucide-react';
 import { useData, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { StaffFormModal } from './people/StaffFormModal';
 import { contractStatus } from '../utils/payroll';
-import { todayLocalISO } from '../utils/schedule';
-import { DateInput } from '../components/ui/DateInput';
+import { allActivities, todayLocalISO } from '../utils/schedule';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { ReasonDialog } from '../components/ui/ReasonDialog';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
+import { INACTIVATION_REASONS, inactivationCheck, statusNote } from '../utils/staffStatus';
 
 export function StaffPage() {
-  const { staff, contracts, assignments, branches } = useData();
+  const { staff, contracts, assignments, branches, schedules, monthlySchedules, inactivateStaff, reactivateStaff } = useData();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [toInactivate, setToInactivate] = useState<Staff | null>(null);
+  const [toReactivate, setToReactivate] = useState<Staff | null>(null);
+  const [selectedRole, setSelectedRole] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const today = todayLocalISO();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -33,9 +44,14 @@ export function StaffPage() {
 
     const memberAssignment = assignments.find(a => a.staffId === member.id && a.isMain);
     const matchesBranch = !selectedBranch || memberAssignment?.branch === selectedBranch;
+    const matchesRole = !selectedRole || memberAssignment?.role === selectedRole;
+    const matchesStatus = !selectedStatus || member.status === selectedStatus;
 
-    return matchesSearch && matchesBranch;
+    return matchesSearch && matchesBranch && matchesRole && matchesStatus;
   });
+  const roleOptions = useMemo(() => [...new Set(assignments.filter(a => a.isMain).map(a => a.role))].sort(), [assignments]);
+  const hasFilters = !!(searchTerm || selectedBranch || selectedRole || selectedStatus);
+  const clearFilters = () => { setSearchTerm(''); setSelectedBranch(''); setSelectedRole(''); setSelectedStatus(''); };
 
   const totalPages = Math.ceil(filteredStaff.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -44,7 +60,32 @@ export function StaffPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, selectedBranch, selectedRole, selectedStatus]);
+
+  // ?ficha=ID abre la ficha de ese trabajador (se usa desde Asignaciones y Contratos)
+  useEffect(() => {
+    const id = params.get('ficha');
+    if (!id) return;
+    const member = staff.find(s => s.id === id);
+    if (member) { setSelectedStaff(member); setIsDetailOpen(true); }
+    setParams({}, { replace: true });
+  }, [params, staff, setParams]);
+
+  const inactivation = useMemo(
+    () => (toInactivate ? inactivationCheck(toInactivate, { contracts, assignments, schedules, activities: allActivities(monthlySchedules), today }) : undefined),
+    [toInactivate, contracts, assignments, schedules, monthlySchedules, today]
+  );
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Personal', today),
+      ['Código', 'Nombres', 'Apellido paterno', 'Apellido materno', 'Documento', 'Celular', 'Correo personal', 'Sede', 'Área', 'Cargo', 'Estado', 'Baja / reactivación'],
+      filteredStaff.map(m => {
+        const a = assignments.find(x => x.staffId === m.id && x.isMain);
+        return [m.code, m.names, m.lastNameP, m.lastNameM, `${m.docType} ${m.docNumber}`, m.phone, m.personalEmail ?? '', a?.branch ?? '', a?.area ?? '', a?.role ?? '', m.status, statusNote(m)];
+      })
+    );
+  };
 
   const handleOpenDetail = (member: Staff) => {
     setSelectedStaff(member);
@@ -65,7 +106,7 @@ export function StaffPage() {
           <p className="text-sm text-text-secondary">Administración de trabajadores y colaboradores</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredStaff.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
@@ -100,19 +141,24 @@ export function StaffPage() {
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Cargo</option>
-              <option value="psicologo">Psicólogo</option>
-              <option value="admin">Administrador</option>
+            <select
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los cargos</option>
+              {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Estado</option>
-              <option value="activo">Activo</option>
-              <option value="inactivo">Inactivo</option>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Todos los estados</option>
+              <option value="Activo">Activo</option>
+              <option value="Inactivo">Inactivo</option>
             </select>
-            <Button variant="secondary" className="shrink-0 px-3">
-              <Filter size={16} />
-            </Button>
+            <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
       </Card>
@@ -156,8 +202,11 @@ export function StaffPage() {
                         items={[
                           { label: 'Ver detalle', onClick: () => handleOpenDetail(member) },
                           { label: 'Editar datos', onClick: () => handleOpenForm(member) },
-                          { label: 'Ver contratos', onClick: () => {} },
-                          { label: 'Inactivar', onClick: () => {}, danger: true },
+                          { label: 'Ver contratos', onClick: () => navigate(`/personas/contratos?trabajador=${member.id}`) },
+                          { label: 'Ver asignaciones', onClick: () => navigate(`/personas/asignaciones?trabajador=${member.id}`) },
+                          member.status === 'Activo'
+                            ? { label: 'Inactivar', onClick: () => setToInactivate(member), danger: true }
+                            : { label: 'Reactivar', onClick: () => setToReactivate(member) },
                         ]} 
                       />
                     </td>
@@ -232,6 +281,13 @@ export function StaffPage() {
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Código</label>
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedStaff.code}</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Estado</label>
+                  <p className="text-sm font-medium text-text-primary mt-1">
+                    <Badge variant={selectedStaff.status === 'Activo' ? 'success' : 'danger'}>{selectedStaff.status}</Badge>
+                    {statusNote(selectedStaff) && <span className="ml-2 text-xs font-normal text-text-muted">{statusNote(selectedStaff)}</span>}
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Documento</label>
@@ -338,6 +394,69 @@ export function StaffPage() {
       </Modal>
 
       <StaffFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editingStaff} />
+
+      <ReasonDialog
+        isOpen={!!toInactivate}
+        onClose={() => setToInactivate(null)}
+        title="Inactivar trabajador"
+        confirmLabel="Inactivar"
+        danger
+        reasons={INACTIVATION_REASONS}
+        reasonLabel="Motivo de la baja"
+        detailLabel="Explicación"
+        dateLabel="Fecha de baja"
+        dateMax={today}
+        dateDefault={today}
+        blocked={inactivation?.blocked ? (
+          <ul className="space-y-1 list-disc pl-4">
+            {inactivation.contract && <li>Tiene un contrato vigente ({inactivation.contract.type}). Ciérrelo primero en Personas → Contratos.</li>}
+            {inactivation.sessions.length > 0 && <li>Tiene {inactivation.sessions.length} asesoría(s) futura(s) a su nombre. Reasígnelas en Psicopedagogía → Programación.</li>}
+            {inactivation.activities.length > 0 && <li>Tiene {inactivation.activities.length} actividad(es) especial(es) a su cargo. Asigne otro responsable en Psicopedagogía → Programación → Actividades especiales.</li>}
+          </ul>
+        ) : null}
+        onSubmit={({ reason, detail, date }) => {
+          if (!toInactivate) return;
+          const r = inactivateStaff(toInactivate.id, { reason, detail, date });
+          return r.ok ? null : r.error ?? 'No se pudo inactivar al trabajador.';
+        }}
+      >
+        {toInactivate && inactivation && (
+          <div className="space-y-2 text-sm">
+            <p className="text-text-secondary">
+              Se dará de baja a <span className="font-medium text-text-primary">{toInactivate.names} {toInactivate.lastNameP} {toInactivate.lastNameM}</span>. Su ficha no se borra: queda en el historial.
+            </p>
+            <ul className="space-y-1 text-text-secondary list-disc pl-5">
+              <li>
+                {inactivation.assignmentsToClose.length > 0
+                  ? `Se cerrarán sus ${inactivation.assignmentsToClose.length} asignación(es) activa(s): dejará de aparecer como responsable de entrevistas, asesorías y verificaciones.`
+                  : 'No tiene asignaciones activas.'}
+              </li>
+              <li>Para volver a trabajar con la persona se reactiva y se registran una asignación y un contrato nuevos.</li>
+            </ul>
+          </div>
+        )}
+      </ReasonDialog>
+
+      <ReasonDialog
+        isOpen={!!toReactivate}
+        onClose={() => setToReactivate(null)}
+        title="Reactivar trabajador"
+        confirmLabel="Reactivar"
+        size="md"
+        detailLabel="Motivo de la reactivación"
+        detailPlaceholder="Ej: Reingreso a la institución..."
+        onSubmit={({ detail }) => {
+          if (!toReactivate) return;
+          const r = reactivateStaff(toReactivate.id, detail);
+          return r.ok ? null : r.error ?? 'No se pudo reactivar al trabajador.';
+        }}
+      >
+        {toReactivate && (
+          <p className="text-sm text-text-secondary">
+            <span className="font-medium text-text-primary">{toReactivate.names} {toReactivate.lastNameP}</span> volverá a estar activo. Sus asignaciones anteriores siguen cerradas: registre una nueva en Personas → Asignaciones y un contrato nuevo en Contratos.
+          </p>
+        )}
+      </ReasonDialog>
     </div>
   );
 }

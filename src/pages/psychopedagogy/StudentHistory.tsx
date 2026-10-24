@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, ChevronLeft, ChevronRight, ClipboardList } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -7,21 +8,21 @@ import { useData, type Student } from '../../context/DataContext';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { branchOfStudent, longDayLabel, slotLabel, statusTone, studentProgramLabel } from '../../utils/schedule';
 import { nativeFieldCls } from './formStyles';
+import { METRIC_LABEL } from '../../utils/sessionMetrics';
+import { allActivities } from '../../utils/schedule';
+import { cancellationOf, describeEvent, historyOf, rescheduleCount } from '../../utils/psyHistory';
 
-const METRIC_LABEL: Record<string, string> = {
-  modulo: 'Módulo', nivel: 'Nivel', sesion: 'Sesión', semana: 'Semana', velocidad: 'Velocidad (pxm)',
-  comprension: 'Comprensión (%)', identifica: '¿Identifica?', leeSolo: '¿Lee solo?',
-};
 
 /**
  * Historial del alumno (solo consulta): sus asesorías con el estado de cada una y, cuando asistió, la sesión
  * registrada (avance y métricas). Las sesiones se registran desde Programación.
  */
 export function StudentHistory() {
-  const { students, schedules, trackings, enrollments, branches } = useData();
+  const { students, schedules, trackings, enrollments, branches, psyEvents, monthlySchedules } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   const [selected, setSelected] = useState<Student | null>(null);
+  const [params, setParams] = useSearchParams();
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
 
@@ -44,6 +45,15 @@ export function StudentHistory() {
 
   useEffect(() => { setCurrentPage(1); }, [searchTerm, branchFilter]);
 
+  // ?alumno=ALU-… abre el historial de ese alumno (se usa desde Personas → Alumnos)
+  useEffect(() => {
+    const id = params.get('alumno');
+    if (!id) return;
+    const found = students.find(st => st.id === id);
+    if (found) setSelected(found);
+    setParams({}, { replace: true });
+  }, [params, students, setParams]);
+
   const totalPages = Math.ceil(rows.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -51,7 +61,7 @@ export function StudentHistory() {
 
   // Detalle del alumno elegido
   const detail = useMemo(() => {
-    if (!selected) return { items: [] as any[], legacy: [] as typeof trackings, attended: 0, missed: 0 };
+    if (!selected) return { items: [] as any[], legacy: [] as typeof trackings, attended: 0, missed: 0, activities: [] as ReturnType<typeof allActivities>, activityPresent: 0, activityAbsent: 0 };
     const own = schedules
       .filter(s => s.studentId === selected.id || s.student === selected.name)
       .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
@@ -61,8 +71,12 @@ export function StudentHistory() {
       legacy,
       attended: own.filter(s => s.status === 'Asistió').length,
       missed: own.filter(s => s.status === 'Faltó').length,
+      // Actividades especiales en las que estuvo inscrito, con su asistencia
+      activities: allActivities(monthlySchedules).filter(a => a.enrolled.includes(selected.id)).sort((a, b) => b.date.localeCompare(a.date)),
+      activityPresent: allActivities(monthlySchedules).filter(a => a.attendance[selected.id]?.status === 'Asistió').length,
+      activityAbsent: allActivities(monthlySchedules).filter(a => a.attendance[selected.id]?.status === 'Faltó').length,
     };
-  }, [selected, schedules, trackings]);
+  }, [selected, schedules, trackings, monthlySchedules]);
 
   const MetricsGrid = ({ metrics }: { metrics: Record<string, any> | null }) => {
     const entries = Object.entries(metrics ?? {}).filter(([, v]) => v !== '' && v !== undefined);
@@ -176,6 +190,7 @@ export function StudentHistory() {
               <Badge variant="info">{studentProgramLabel(selected, enrollments)}</Badge>
               <Badge variant="success">{detail.attended} {detail.attended === 1 ? 'asistencia' : 'asistencias'}</Badge>
               {detail.missed > 0 && <Badge variant="danger">{detail.missed} {detail.missed === 1 ? 'falta' : 'faltas'}</Badge>}
+              {detail.activities.length > 0 && <Badge variant="neutral">{detail.activities.length} {detail.activities.length === 1 ? 'actividad' : 'actividades'} · {detail.activityPresent} asistidas{detail.activityAbsent > 0 ? ` · ${detail.activityAbsent} faltas` : ''}</Badge>}
             </div>
 
             {detail.items.length === 0 && detail.legacy.length === 0 && (
@@ -196,8 +211,27 @@ export function StudentHistory() {
                       </p>
                       <p className="text-xs text-text-secondary mt-0.5">{s.program} · {s.level} · {s.responsible}</p>
                     </div>
-                    <Badge variant={statusTone(s.status) as any}>{s.status}</Badge>
+                    <div className="text-right space-y-1">
+                      <Badge variant={statusTone(s.status) as any}>{s.status}</Badge>
+                      {rescheduleCount(psyEvents, s.id) > 0 && <p className="text-xs text-warning-text font-medium">Reprogramada {rescheduleCount(psyEvents, s.id)} {rescheduleCount(psyEvents, s.id) === 1 ? 'vez' : 'veces'}</p>}
+                    </div>
                   </div>
+                  {(() => {
+                    const cancel = s.status === 'Cancelado' ? cancellationOf(psyEvents, s.id) : undefined;
+                    const moves = historyOf(psyEvents, 'asesoria', s.id).filter(e => e.type === 'Reprogramada');
+                    return (
+                      <>
+                        {cancel && (
+                          <p className="text-xs text-danger-text">
+                            {describeEvent(cancel)} · lo pidió: {cancel.initiator ?? 'sin dato'} · {cancel.reason ?? 'sin motivo registrado'} · {cancel.by}
+                          </p>
+                        )}
+                        {moves.map(m => (
+                          <p key={m.id} className="text-xs text-text-muted">{describeEvent(m)} · {m.initiator ?? 'sin dato'}{m.reason ? ` · ${m.reason}` : ''}</p>
+                        ))}
+                      </>
+                    );
+                  })()}
                   {session ? (
                     <>
                       <MetricsGrid metrics={session.metrics} />
@@ -213,6 +247,25 @@ export function StudentHistory() {
                   )}
                 </div>
               ))}
+
+              {detail.activities.length > 0 && (
+                <>
+                  <p className="text-sm font-medium text-text-secondary pt-2">Actividades especiales</p>
+                  {detail.activities.map(a => {
+                    const mark = a.attendance[selected.id];
+                    return (
+                      <div key={a.id} className="p-4 border border-border-soft rounded-xl flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-text-primary">{a.name}</p>
+                          <p className="text-xs text-text-secondary mt-0.5">{longDayLabel(a.date)} · {a.sede}{a.responsible ? ` · ${a.responsible}` : ''}</p>
+                          {mark?.note && <p className="text-xs text-text-muted mt-1">{mark.note}</p>}
+                        </div>
+                        <Badge variant={mark ? (mark.status === 'Asistió' ? 'success' : 'danger') : 'neutral'}>{mark ? mark.status : 'Inscrito'}</Badge>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
 
               {detail.legacy.length > 0 && (
                 <>

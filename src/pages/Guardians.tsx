@@ -1,17 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Download, Plus } from 'lucide-react';
+import { Search, Download, Plus } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { GuardianFormModal } from './people/GuardianFormModal';
-import { studentProgramLabel } from '../utils/schedule';
+import { studentProgramLabel, todayLocalISO } from '../utils/schedule';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { GuardianStatementModal } from '../components/people/GuardianStatementModal';
+import { guardianBalance } from '../utils/guardianStatement';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
 
 export function Guardians() {
-  const { guardians, students, enrollments } = useData();
+  const { guardians, students, enrollments, plans, payments, promotionGroups } = useData();
+  const [statementId, setStatementId] = useState<string | null>(null);
+  const [debtFilter, setDebtFilter] = useState('');
+  const today = todayLocalISO();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedGuardianId, setSelectedGuardianId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,12 +42,33 @@ export function Guardians() {
     setIsFormOpen(true);
   };
 
-  const filteredGuardians = guardians.filter(g => 
-    g.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.doc.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    g.phone.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Saldo, alumnos y matrículas se derivan de los planes y pagos (no del contador guardado en el titular)
+  const figures = useMemo(() => {
+    const ctx = { guardians, students, enrollments, plans, payments, groups: promotionGroups };
+    return new Map(guardians.map(g => [g.id, guardianBalance(ctx, g.id, today)]));
+  }, [guardians, students, enrollments, plans, payments, promotionGroups, today]);
+  const usd = (n: number) => `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const filteredGuardians = guardians.filter(g => {
+    const matchesSearch =
+      g.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      g.doc.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      g.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      g.phone.toLowerCase().includes(searchTerm.toLowerCase());
+    const owes = (figures.get(g.id)?.balanceUSD ?? 0) > 0;
+    const matchesDebt = !debtFilter || (debtFilter === 'si' ? owes : !owes);
+    return matchesSearch && matchesDebt;
+  });
+  const hasFilters = !!(searchTerm || debtFilter);
+  const clearFilters = () => { setSearchTerm(''); setDebtFilter(''); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Titulares', today),
+      ['Titular', 'Documento', 'Teléfono', 'Correo', 'Alumnos', 'Matrículas', 'Saldo pendiente (USD)', 'Deuda vencida (USD)'],
+      filteredGuardians.map(g => { const f = figures.get(g.id); return [g.name, `${g.docType || 'DNI'} ${g.doc}`, g.phone, g.email, f?.students ?? 0, f?.enrollments ?? 0, f?.balanceUSD ?? 0, f?.overdueUSD ?? 0]; })
+    );
+  };
 
   const totalPages = Math.ceil(filteredGuardians.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -49,7 +77,7 @@ export function Guardians() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, debtFilter]);
 
   return (
     <div className="flex flex-col h-full">
@@ -60,7 +88,7 @@ export function Guardians() {
           <p className="text-sm text-text-secondary">Responsables y apoderados</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredGuardians.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
@@ -85,14 +113,16 @@ export function Guardians() {
             />
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
-            <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
-              <option value="">Con deuda</option>
-              <option value="si">Sí</option>
-              <option value="no">No</option>
+            <select
+              value={debtFilter}
+              onChange={(e) => setDebtFilter(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+            >
+              <option value="">Con deuda: todos</option>
+              <option value="si">Con deuda</option>
+              <option value="no">Sin deuda</option>
             </select>
-            <Button variant="secondary" className="shrink-0 px-3">
-              <Filter size={16} />
-            </Button>
+            <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
       </Card>
@@ -122,18 +152,19 @@ export function Guardians() {
                     <div className="text-text-primary">{row.phone}</div>
                     <div className="text-xs text-text-muted">{row.email}</div>
                   </td>
-                  <td className="px-6 py-4 text-center text-text-secondary">{row.students}</td>
-                  <td className="px-6 py-4 text-center text-text-secondary">{row.enrollments}</td>
+                  <td className="px-6 py-4 text-center text-text-secondary">{figures.get(row.id)?.students ?? 0}</td>
+                  <td className="px-6 py-4 text-center text-text-secondary">{figures.get(row.id)?.enrollments ?? 0}</td>
                   <td className="px-6 py-4">
-                    <span className={`font-medium ${row.balance === '$0' ? 'text-text-secondary' : 'text-danger-text'}`}>
-                      {row.balance}
+                    <span className={`font-medium ${(figures.get(row.id)?.balanceUSD ?? 0) > 0 ? 'text-danger-text' : 'text-text-secondary'}`}>
+                      {usd(figures.get(row.id)?.balanceUSD ?? 0)}
                     </span>
+                    {(figures.get(row.id)?.overdueUSD ?? 0) > 0 && <div className="text-xs text-danger-text">Vencido {usd(figures.get(row.id)!.overdueUSD)}</div>}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Ver estado de cuenta', onClick: () => {} },
+                        { label: 'Ver estado de cuenta', onClick: () => setStatementId(row.id) },
                         { label: 'Editar datos', onClick: () => handleOpenForm(row) },
                       ]} 
                     />
@@ -227,9 +258,10 @@ export function Guardians() {
               <div className="space-y-1">
                 <span className="text-xs text-text-muted uppercase tracking-wider">Estado de Cuenta</span>
                 <div className="pt-1">
-                  <Badge variant={selectedGuardian.balance === '$0' ? 'neutral' : 'danger'}>
-                    {selectedGuardian.balance === '$0' ? 'Al día' : `Deuda ${selectedGuardian.balance}`}
+                  <Badge variant={(figures.get(selectedGuardian.id)?.balanceUSD ?? 0) > 0 ? 'danger' : 'neutral'}>
+                    {(figures.get(selectedGuardian.id)?.balanceUSD ?? 0) > 0 ? `Saldo ${usd(figures.get(selectedGuardian.id)!.balanceUSD)}` : 'Al día'}
                   </Badge>
+                  <button className="ml-3 text-xs text-primary-accent hover:underline" onClick={() => { setIsDetailOpen(false); setStatementId(selectedGuardian.id); }}>Ver estado de cuenta</button>
                 </div>
               </div>
             </div>
@@ -253,6 +285,8 @@ export function Guardians() {
           </div>
         )}
       </Modal>
+
+      <GuardianStatementModal guardianId={statementId} onClose={() => setStatementId(null)} />
 
       <GuardianFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editingGuardian} />
     </div>

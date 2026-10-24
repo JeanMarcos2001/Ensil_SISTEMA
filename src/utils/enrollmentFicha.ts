@@ -121,7 +121,7 @@ export function buildFicha(ctx: FichaContext, enrollmentId: string): Ficha | und
     events.push({ date: localDateOf(r.requestedAt), title: 'Caída solicitada', detail: `${r.reason} · por ${r.requestedBy}`, tone: 'warning' });
     if (r.resolvedAt) events.push({ date: localDateOf(r.resolvedAt), title: r.status === 'Aprobada' ? 'Caída aprobada' : 'Caída rechazada', detail: `${r.resolvedBy ?? ''}${r.resolutionNote ? ` · ${r.resolutionNote}` : ''}`.replace(/^ · /, ''), tone: r.status === 'Aprobada' ? 'danger' : 'neutral' });
   }
-  for (const c of changes) events.push({ date: localDateOf(c.at), title: `Corrección: ${c.label}`, detail: `«${c.from}» → «${c.to}» · ${c.reason} · por ${c.by}`, tone: 'neutral' });
+  for (const c of changes) events.push({ date: localDateOf(c.at), title: ['reactivation', 'program', 'branch'].includes(c.field) ? c.label : `Corrección: ${c.label}`, detail: `«${c.from}» → «${c.to}» · ${c.reason} · por ${c.by}`, tone: 'neutral' });
   events.sort((a, b) => b.date.localeCompare(a.date));
 
   return {

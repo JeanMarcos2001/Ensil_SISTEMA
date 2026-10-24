@@ -4,18 +4,22 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { ActionMenu } from '../components/ui/ActionMenu';
-import { Search, Filter, Plus, FileText, Download, AlertTriangle, Image as ImageIcon } from 'lucide-react';
+import { Search, Plus, FileText, Download, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData } from '../context/DataContext';
-import { localDateOf } from '../utils/schedule';
+import { localDateOf, todayLocalISO } from '../utils/schedule';
 import { RegisterPaymentModal } from '../components/payments/RegisterPaymentModal';
 import { ReversePaymentModal } from '../components/payments/ReversePaymentModal';
-import { useNavigate } from 'react-router-dom';
+import { CreditNotesModal } from '../components/payments/CreditNotesModal';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ClearFilters } from '../components/ui/ClearFilters';
+import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { documentLabel, parseReceipt } from '../utils/payments';
+import { PERM } from '../utils/authority';
 
 const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const usd = (n: number) => `$ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = todayLocalISO;
 
 const METHOD_OPTIONS = [
   { value: 'Efectivo', label: 'Efectivo' },
@@ -25,12 +29,16 @@ const METHOD_OPTIONS = [
 ];
 
 export function Payments() {
-  const { payments, plans, currentUser } = useData();
+  const { payments, plans, can, creditNotes } = useData();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [methodFilter, setMethodFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [isNewPaymentOpen, setIsNewPaymentOpen] = useState(false);
 
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [reverseId, setReverseId] = useState<string | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -42,7 +50,7 @@ export function Payments() {
   };
 
   // Solo el superusuario reversa pagos (aún no hay permisos por rol)
-  const canReverse = currentUser.role === 'Superusuario';
+  const canReverse = can(PERM.reversePayment);
 
   // Pagos registrados en el sistema (matrículas y cobros de cuotas), con el formato de la tabla
   const allPayments = payments.map(p => {
@@ -67,11 +75,33 @@ export function Payments() {
     };
   });
 
-  const filteredPayments = allPayments.filter(p => 
-    p.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const filteredPayments = allPayments.filter(p =>
+    (p.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.mat.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    `${p.compSerie}-${p.compNum}`.includes(searchTerm)
+    `${p.compSerie}-${p.compNum}`.includes(searchTerm)) &&
+    (!methodFilter || (methodFilter === 'yape' ? /yape|plin/.test(norm(p.method)) : norm(p.method).includes(methodFilter))) &&
+    (!statusFilter || p.status === statusFilter)
   );
+  const hasFilters = !!(searchTerm || methodFilter || statusFilter);
+  const clearFilters = () => { setSearchTerm(''); setMethodFilter(''); setStatusFilter(''); };
+
+  const handleExport = () => {
+    downloadCsv(
+      csvFileName('Pagos', todayLocalISO()),
+      ['Código', 'Fecha', 'Comprobante', 'Alumno', 'Matrícula(s)', 'Medio', 'Moneda', 'Monto', 'Estado', 'Registró', 'Motivo de la reversa'],
+      filteredPayments.map(p => [p.id, p.date, `${p.compType} ${p.compSerie}-${p.compNum}`, p.student, p.mat, p.method, p.currency, p.amount, p.status, p.user, p.reversal ? `${p.reversal.reason} — ${p.reversal.detail}` : ''])
+    );
+  };
+
+  // ?pago=ID abre el detalle de ese pago (se usa desde Caja)
+  useEffect(() => {
+    const id = params.get('pago');
+    if (!id) return;
+    const row = allPayments.find(p => p.id === id);
+    if (row) { setSelectedPayment(row); setIsDetailOpen(true); }
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   const totalPages = Math.ceil(filteredPayments.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -80,7 +110,7 @@ export function Payments() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, methodFilter, statusFilter]);
 
   return (
     <div className="flex flex-col h-full">
@@ -91,7 +121,8 @@ export function Payments() {
           <p className="text-sm text-text-secondary">Registro y control de comprobantes de pago</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" className="hidden sm:flex items-center gap-2">
+          <Button variant="secondary" className="hidden md:flex" onClick={() => setNotesOpen(true)}>Notas de crédito ({creditNotes.length})</Button>
+          <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredPayments.length === 0}>
             <Download size={16} />
             Exportar
           </Button>
@@ -118,20 +149,28 @@ export function Payments() {
               />
             </div>
             <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={methodFilter}
+                onChange={(e) => setMethodFilter(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Medio de pago</option>
                 <option value="efectivo">Efectivo</option>
                 <option value="transferencia">Transferencia</option>
-                <option value="yape">Yape/Plin</option>
+                <option value="yape">Yape / Plin</option>
+                <option value="deposito">Depósito</option>
+                <option value="tarjeta">Tarjeta</option>
               </select>
-              <select className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
                 <option value="">Estado</option>
-                <option value="aplicado">Aplicado</option>
-                <option value="reversado">Reversado</option>
+                <option value="Aplicado">Aplicado</option>
+                <option value="Anulado">Anulado (reversado)</option>
               </select>
-              <Button variant="secondary" className="shrink-0 px-3 h-10 rounded-xl">
-                <Filter size={16} />
-              </Button>
+              <ClearFilters active={hasFilters} onClear={clearFilters} className="h-10 rounded-xl" />
             </div>
           </div>
         </div>
@@ -342,6 +381,7 @@ export function Payments() {
 
       {/* Reversar pago: anula el pago, repone la cuota y ajusta la caja */}
       <ReversePaymentModal paymentId={reverseId} onClose={() => setReverseId(null)} />
+      <CreditNotesModal isOpen={notesOpen} onClose={() => setNotesOpen(false)} />
     </div>
   );
 }
