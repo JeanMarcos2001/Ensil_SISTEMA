@@ -62,7 +62,7 @@ export function Reminders() {
     <div className="flex flex-col h-full space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-text-primary">Recordatorios</h1>
-        <p className="text-text-secondary mt-1">Avisos al titular de las asesorías próximas, de las actividades en las que está inscrito el alumno y de la vigencia por vencer. Los días se configuran en Configuración → Recordatorios de Psicopedagogía.</p>
+        <p className="text-text-secondary mt-1">Avisos al titular de las asesorías próximas, de las actividades en las que está inscrito el alumno y de la vigencia por vencer. Los días se configuran en Configuración → Psicopedagogía → Recordatorios.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

@@ -1,13 +1,15 @@
 /**
- * Reglas de los contratos y estimación del sueldo neto (funciones puras).
+ * Reglas de los contratos y neto de un mes regular (funciones puras).
  *
  *  - No existe jornada part time: todo contrato es Full time.
- *  - El sueldo neto es una ESTIMACIÓN: sueldo bruto − aportes al sistema de pensiones. No incluye renta de 5.ª categoría
- *    ni descuentos propios de la planilla. Las tasas son referenciales y se mantienen aquí para actualizarlas en un solo lugar.
+ *  - El neto que guarda el contrato es el de un MES REGULAR y sale del mismo motor que la planilla (`payrollEngine.ts`):
+ *    sueldo + asignación familiar − aportes de pensión − renta de 5.ª categoría (o 4.ª en la locación). No incluye
+ *    gratificaciones ni descuentos eventuales; esos aparecen en la planilla del mes. Las tasas son referenciales.
  *  - No hay «tipo de comisión»: de cada AFP se usa su tasa total referencial.
- *  - La locación de servicios no tiene aportes a pensiones: el neto es igual al bruto.
+ *  - La locación de servicios no tiene pensión ni 5.ª; retiene 4.ª categoría (8 %) si el honorario pasa de S/ 3 300.
  */
 import type { Contract, ContractRevisionChange, Staff } from '../context/DataContext';
+import { AFP_RATES as ENGINE_AFP_RATES, ONP_RATE as ENGINE_ONP_RATE, RMV, regularMonth, type RegularMonth } from './payrollEngine';
 
 export const CONTRACT_TYPES = ['Indeterminado', 'Plazo Fijo', 'Locación de servicios'] as const;
 export type ContractType = (typeof CONTRACT_TYPES)[number];
@@ -17,16 +19,11 @@ export const PENSION_SYSTEMS = ['AFP', 'ONP'] as const;
 export const AFP_FUNDS = ['Integra', 'Prima', 'Habitat', 'Profuturo'] as const;
 
 /** Remuneración mínima vital (S/). Aplica a los contratos dependientes (no a la locación de servicios). */
-export const MIN_WAGE = 1130;
+export const MIN_WAGE = RMV;
 export const MAX_GROSS = 100000;
-export const ONP_RATE = 0.13;
-/** AFP: aporte al fondo (10 %) + prima de seguro + comisión de cada AFP. */
-export const AFP_RATES: Record<(typeof AFP_FUNDS)[number], { fund: number; insurance: number; commission: number }> = {
-  Integra: { fund: 0.10, insurance: 0.0137, commission: 0.0155 },
-  Prima: { fund: 0.10, insurance: 0.0137, commission: 0.0160 },
-  Habitat: { fund: 0.10, insurance: 0.0137, commission: 0.0147 },
-  Profuturo: { fund: 0.10, insurance: 0.0137, commission: 0.0169 },
-};
+/** Tasas de pensión: se mantienen en `payrollEngine.ts` (las usa también la planilla) y se reexportan aquí. */
+export const ONP_RATE = ENGINE_ONP_RATE;
+export const AFP_RATES = ENGINE_AFP_RATES as Record<(typeof AFP_FUNDS)[number], { fund: number; insurance: number; commission: number }>;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -41,13 +38,24 @@ export function pensionRate(type: string, system: string, fund: string): number 
   return 0;
 }
 
-/** Aportes y sueldo neto estimados. null si falta el sueldo o el sistema de pensiones lo exige. */
-export function estimateNet(gross: number, type: string, system: string, fund: string): { rate: number; contribution: number; net: number } | null {
-  if (!(gross > 0)) return null;
-  if (type !== 'Locación de servicios' && (!system || (system === 'AFP' && !(fund in AFP_RATES)))) return null;
-  const rate = pensionRate(type, system, fund);
-  const contribution = round2(gross * rate);
-  return { rate, contribution, net: round2(gross - contribution) };
+export interface NetEstimate {
+  rate: number;
+  /** Aporte a pensiones. */
+  contribution: number;
+  /** Renta de 5.ª categoría (dependientes) o 4.ª (locación) de un mes regular. */
+  incomeTax: number;
+  taxKind: RegularMonth['taxKind'];
+  familyAllowance: number;
+  net: number;
+}
+
+/** Neto de un mes regular. null si falta el sueldo o el sistema de pensiones lo exige. */
+export function estimateNet(
+  gross: number, type: string, system: string, fund: string,
+  staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), suspension4ta = false
+): NetEstimate | null {
+  const r = regularMonth({ type, startDate: `${year}-01-01`, grossSalary: gross, pensionSystem: system, pensionFund: fund, suspension4ta }, staff, year);
+  return r ? { rate: r.rate, contribution: r.pension, incomeTax: r.incomeTax, taxKind: r.taxKind, familyAllowance: r.familyAllowance, net: r.net } : null;
 }
 
 export interface ContractForm {
@@ -61,13 +69,15 @@ export interface ContractForm {
   vacationStart: string;
   vacationEnd: string;
   observations: string;
+  /** Locación: el prestador presentó la suspensión de retenciones de 4.ª categoría. */
+  suspension4ta: boolean;
 }
 
 export type ContractErrors = Partial<Record<keyof ContractForm, string>>;
 
 export const emptyContractForm = (): ContractForm => ({
   staffId: '', type: '', startDate: '', endDate: '', grossSalary: '', pensionSystem: '', pensionFund: '',
-  vacationStart: '', vacationEnd: '', observations: '',
+  vacationStart: '', vacationEnd: '', observations: '', suspension4ta: false,
 });
 
 /** El contrato de plazo fijo o la locación necesitan fecha de fin; el indeterminado no la tiene. */
@@ -111,9 +121,9 @@ export function validateContractForm(f: ContractForm, contracts: Contract[], sta
 }
 
 /** Contrato listo para guardar (el neto y los aportes se calculan; nunca se escriben a mano). */
-export function buildContract(f: ContractForm): Omit<Contract, 'id'> {
+export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear()): Omit<Contract, 'id'> {
   const gross = Number(f.grossSalary);
-  const est = estimateNet(gross, f.type, f.pensionSystem, f.pensionFund);
+  const est = estimateNet(gross, f.type, f.pensionSystem, f.pensionFund, staff, year, f.suspension4ta);
   return {
     staffId: f.staffId,
     type: f.type,
@@ -125,7 +135,10 @@ export function buildContract(f: ContractForm): Omit<Contract, 'id'> {
     pensionFund: hasPension(f.type) && f.pensionSystem === 'AFP' ? f.pensionFund : undefined,
     grossSalary: gross,
     contribution: est?.contribution ?? 0,
+    incomeTax: est?.incomeTax ?? 0,
+    familyAllowance: est?.familyAllowance ?? 0,
     netSalary: est?.net ?? gross,
+    suspension4ta: f.type === 'Locación de servicios' && f.suspension4ta ? true : undefined,
     vacationStart: hasVacations(f.type) ? f.vacationStart || undefined : undefined,
     vacationEnd: hasVacations(f.type) ? f.vacationEnd || undefined : undefined,
     observations: f.observations.trim() || undefined,
@@ -137,12 +150,12 @@ export function buildContract(f: ContractForm): Omit<Contract, 'id'> {
 export const contractToForm = (c: Contract): ContractForm => ({
   staffId: c.staffId, type: c.type, startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
   pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '', vacationStart: c.vacationStart ?? '', vacationEnd: c.vacationEnd ?? '',
-  observations: c.observations ?? '',
+  observations: c.observations ?? '', suspension4ta: !!c.suspension4ta,
 });
 
 /** Cambios que se guardan al editar (no toca al trabajador ni el estado del contrato). */
-export function buildContractPatch(f: ContractForm): Partial<Omit<Contract, 'id'>> {
-  const { staffId: _staffId, status: _status, ...patch } = buildContract(f);
+export function buildContractPatch(f: ContractForm, staff: { hasChildren?: boolean } = {}): Partial<Omit<Contract, 'id'>> {
+  const { staffId: _staffId, status: _status, ...patch } = buildContract(f, staff);
   return patch;
 }
 
@@ -160,6 +173,7 @@ export function diffContract(before: Contract, after: Partial<Omit<Contract, 'id
     ['AFP', txt(before.pensionFund), txt(after.pensionFund)],
     ['Vacaciones: inicio', txt(before.vacationStart), txt(after.vacationStart)],
     ['Vacaciones: retorno', txt(before.vacationEnd), txt(after.vacationEnd)],
+    ['Suspensión de retenciones de 4.ª categoría', before.suspension4ta ? 'Sí' : 'No', after.suspension4ta ? 'Sí' : 'No'],
     ['Observaciones', txt(before.observations), txt(after.observations)],
   ];
   return rows.filter(([, from, to]) => from !== to).map(([label, from, to]) => ({ label, from, to }));

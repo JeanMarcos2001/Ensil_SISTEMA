@@ -4,7 +4,7 @@ import { useData } from '../../context/DataContext';
 import { parsePsyPolicy, policyText, validatePsyPolicy } from '../../utils/psyReminders';
 import { Field, inputCls } from '../enrollment/fields';
 
-/** Configuración → Recordatorios de Psicopedagogía: con cuántos días de anticipación se avisa cada cosa. */
+/** Configuración → Psicopedagogía → Recordatorios: con cuántos días de anticipación se avisa cada cosa. */
 export function PsyRemindersConfig() {
   const { psyReminderPolicy, savePsyReminderPolicy } = useData();
   const [form, setForm] = useState(() => policyText(psyReminderPolicy));

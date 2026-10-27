@@ -6,6 +6,9 @@ import { addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, 
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
 import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
+import { deactivationNote, staffDisplayName, syncPatch, validateLinkedUser } from '../utils/staffAccess';
+import { linesOf, runIdOf, validateAdjustment, validateClose, validateGenerate, validatePay, validateReopen as validatePayrollReopen, type BuiltPayroll } from '../utils/payrollRun';
+import { periodLabel, periodOf, round2, type LineCalc } from '../utils/payrollEngine';
 import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
 import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
 import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
@@ -86,7 +89,7 @@ export interface Student {
   workplace?: string;
 }
 
-/** Horario de clases configurable (Configuración → CRUDS Básicos → Horarios de clases). */
+/** Horario de clases configurable (Configuración → Comercial → Horarios de clases). */
 export interface ClassSchedule {
   id: string;
   name: string; // p. ej. «L-M-V 4:00 PM»
@@ -172,7 +175,7 @@ export interface ContractClause {
   body: string;
 }
 
-/** Plantilla del contrato de servicios educativos (Configuración → Plantillas de documentos). */
+/** Plantilla del contrato de servicios educativos (Configuración → Documentos → Plantillas de contrato y ficha). */
 export interface ContractTemplate {
   version: number;
   /** ¿El área legal ya revisó este texto? Mientras no, los contratos se generan con una advertencia. */
@@ -896,8 +899,16 @@ export interface Contract {
   pensionSystem?: string;
   pensionFund?: string;
   grossSalary?: number;
+  /** Aporte a pensiones de un mes regular. */
   contribution?: number;
+  /** Renta de 5.ª categoría (dependientes) o 4.ª (locación) de un mes regular. */
+  incomeTax?: number;
+  /** Asignación familiar que se suma al sueldo (según los hijos declarados del trabajador). */
+  familyAllowance?: number;
+  /** Neto de un mes regular (el de cada mes sale de la planilla). */
   netSalary?: number;
+  /** Locación de servicios: el prestador presentó la suspensión de retenciones de 4.ª categoría. */
+  suspension4ta?: boolean;
   vacationStart?: string;
   vacationEnd?: string;
   terminationReason?: string;
@@ -917,6 +928,63 @@ export interface ContractRevision {
   by: string;
   reason: string;
   changes: ContractRevisionChange[];
+}
+
+/** Ingreso o descuento eventual de una planilla (bono, comisión, adelanto…). */
+export interface PayrollAdjustment {
+  id: string;
+  staffId: string;
+  kind: 'Ingreso' | 'Descuento';
+  concept: string;
+  amount: number;
+  /** Ingreso afecto a aportes de pensión y renta (un bono sí; una movilidad inafecta no). */
+  taxable: boolean;
+  reason: string;
+  by: string;
+  at: string;
+}
+
+/** Línea de un trabajador en una planilla: una foto del contrato y de lo calculado. */
+export interface PayrollLine {
+  staffId: string;
+  staffName: string;
+  docType: string;
+  docNumber: string;
+  contractId: string;
+  contractType: string;
+  branch: string;
+  role: string;
+  pensionSystem?: string;
+  pensionFund?: string;
+  grossSalary: number;
+  calc: LineCalc;
+  adjustments: PayrollAdjustment[];
+  warnings: string[];
+}
+
+export interface PayrollEvent {
+  at: string;
+  by: string;
+  action: 'Generada' | 'Ajuste' | 'Cerrada' | 'Pagada' | 'Reabierta';
+  detail?: string;
+}
+
+/** Planilla de un mes. Borrador = se recalcula con los contratos; Cerrada y Pagada guardan la foto de las líneas. */
+export interface PayrollRun {
+  id: string;
+  /** AAAA-MM. */
+  period: string;
+  status: 'Borrador' | 'Cerrada' | 'Pagada';
+  adjustments: PayrollAdjustment[];
+  lines?: PayrollLine[];
+  createdAt: string;
+  createdBy: string;
+  closedAt?: string;
+  closedBy?: string;
+  payDate?: string;
+  payNote?: string;
+  paidBy?: string;
+  events: PayrollEvent[];
 }
 
 export interface Assignment {
@@ -966,6 +1034,10 @@ export interface User {
   document?: string;
   phone?: string;
   additionalBranches?: string[];
+  /** Ficha de personal a la que pertenece la cuenta (nombre, documento, teléfono y sedes salen de ella). */
+  staffId?: string;
+  /** Por qué y cuándo se desactivó la cuenta (p. ej. el trabajador se inactivó). */
+  statusNote?: string;
 }
 
 export interface Permission {
@@ -1169,8 +1241,21 @@ interface DataContextType {
   deleteRole: (id: string) => void;
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
-  addUser: (user: User) => void;
-  updateUser: (id: string, userData: Partial<User>) => void;
+  /** Crea una cuenta; si viene de una ficha de personal (`staffId`) hereda sus datos y sedes (ver `utils/staffAccess.ts`). */
+  addUser: (user: User) => StockResult;
+  updateUser: (id: string, userData: Partial<User>) => StockResult;
+  payrollRuns: PayrollRun[];
+  /** Líneas de una planilla: la foto si ya se cerró; en borrador, se recalculan con los contratos. */
+  payrollLinesOf: (run: PayrollRun) => BuiltPayroll;
+  generatePayroll: (period: string) => StockResult;
+  deletePayrollDraft: (runId: string) => StockResult;
+  addPayrollAdjustment: (runId: string, input: { staffId: string; kind: 'Ingreso' | 'Descuento'; concept: string; amount: number; taxable: boolean; reason: string }) => StockResult;
+  removePayrollAdjustment: (runId: string, adjustmentId: string) => StockResult;
+  closePayroll: (runId: string) => StockResult;
+  payPayroll: (runId: string, input: { date: string; note: string }) => StockResult;
+  reopenPayroll: (runId: string, reason: string) => StockResult;
+  /** Cierra un contrato vigente (cese); no se permite si una planilla ya cerrada lo pagó en esas fechas. */
+  closeContract: (id: string, date: string, reason: string) => StockResult;
   deleteUser: (id: string) => void;
   permissions: Permission[];
   savePermissions: (roleId: string, newPermissions: string[]) => void;
@@ -2023,9 +2108,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   ]);
 
   const [contracts, setContracts] = useState<Contract[]>([
-    { id: 'CON-001', staffId: '1', type: 'Indeterminado', startDate: '2023-01-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'AFP', pensionFund: 'Integra', grossSalary: 3500, contribution: 450, netSalary: 3050, observations: 'Contrato inicial' },
-    { id: 'CON-002', staffId: '2', type: 'Plazo Fijo', startDate: '2023-06-01', endDate: '2024-06-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'ONP', grossSalary: 2800, contribution: 364, netSalary: 2436, observations: 'Renovación anual' },
+    { id: 'CON-001', staffId: '1', type: 'Indeterminado', startDate: '2023-01-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'AFP', pensionFund: 'Integra', grossSalary: 3500, contribution: 466.8, incomeTax: 84.88, familyAllowance: 113, netSalary: 3061.32, observations: 'Contrato inicial' },
+    { id: 'CON-002', staffId: '2', type: 'Plazo Fijo', startDate: '2023-06-01', endDate: '2027-05-31', status: 'Vigente', shift: 'Full time', pensionSystem: 'ONP', grossSalary: 2800, contribution: 364, incomeTax: 8.03, familyAllowance: 0, netSalary: 2427.97, observations: 'Renovación anual' },
   ]);
+
+  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
 
   const [assignments, setAssignments] = useState<Assignment[]>([
     { id: 'ASG-001', staffId: '1', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicólogo Senior', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
@@ -2168,6 +2255,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'USR-001', name: 'Admin Sistema', email: 'admin@ensil.edu.pe', role: 'Administrador Global', branch: 'Todas', lastAccess: 'Hace 5 min', status: 'Activo' },
     { id: 'USR-002', name: 'Laura Martínez', email: 'lmartinez@ensil.edu.pe', role: 'Director Académico', branch: 'Piura', lastAccess: 'Ayer 14:30', status: 'Activo' },
     { id: 'USR-003', name: 'Jorge Torres', email: 'jtorres@ensil.edu.pe', role: 'Coordinador de Ventas', branch: 'Chiclayo', lastAccess: 'Hace 2 días', status: 'Inactivo' },
+    { id: 'USR-004', name: 'Juan Pérez', email: 'jperez@ensil.edu.pe', role: 'Docente', branch: 'Piura', lastAccess: 'Nunca', status: 'Activo', staffId: '1', document: '12345678', phone: '987654321' },
   ]);
 
   const [permissions, setPermissions] = useState<Permission[]>([
@@ -2760,8 +2848,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return created;
   };
 
+  /** Mantiene las cuentas vinculadas de acuerdo con la ficha (nombre, documento, teléfono) y las asignaciones (sedes). */
+  const syncLinkedUsers = (nextStaff: Staff[], nextAssignments: Assignment[]) => {
+    setUsers(prev => prev.map(u => {
+      const member = u.staffId ? nextStaff.find(s => s.id === u.staffId) : undefined;
+      const patch = member ? syncPatch(u, member, nextAssignments) : null;
+      return patch ? { ...u, ...patch } : u;
+    }));
+  };
+
   const updateStaff = (id: string, staffData: Partial<Staff>) => {
-    setStaff(prev => prev.map(s => s.id === id ? { ...s, ...staffData } : s));
+    const next = staff.map(s => (s.id === id ? { ...s, ...staffData } : s));
+    setStaff(next);
+    syncLinkedUsers(next, assignments);
   };
 
   const deleteStaff = (id: string) => {
@@ -3021,7 +3120,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const errors = validateAssignmentForm(form, assignments, staff, branches, todayLocalISO(), editingId);
     const first = Object.values(errors)[0];
     if (first) return { ok: false, error: first };
-    setAssignments(prev => saveAssignmentIn(prev, form, editingId).assignments);
+    const nextAssignments = saveAssignmentIn(assignments, form, editingId).assignments;
+    setAssignments(nextAssignments);
+    syncLinkedUsers(staff, nextAssignments);
     return { ok: true };
   };
 
@@ -3033,7 +3134,106 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const impact = closeImpact(target, assignments, staff.find(s => s.id === target.staffId), schedules, today, allActivities(monthlySchedules));
     if (impact.blocked) return { ok: false, error: `Es su última asignación de Psicopedagogía y tiene ${impact.futureSessions.length} asesoría(s) y ${impact.futureActivities.length} actividad(es) futura(s): reasígnelas primero.` };
-    setAssignments(prev => closeAssignmentIn(prev, id, date, reason, currentUser.name).assignments);
+    const nextAssignments = closeAssignmentIn(assignments, id, date, reason, currentUser.name).assignments;
+    setAssignments(nextAssignments);
+    syncLinkedUsers(staff, nextAssignments);
+    return { ok: true };
+  };
+
+  // ---- Contratos y planilla
+  const closeContract: DataContextType['closeContract'] = (id, date, reason) => {
+    const contract = contracts.find(x => x.id === id);
+    if (!contract) return { ok: false, error: 'No se encontró el contrato.' };
+    if (contract.status !== 'Vigente') return { ok: false, error: 'Solo se cierra un contrato vigente.' };
+    if (!date) return { ok: false, error: 'Indique la fecha de cese.' };
+    if (date < contract.startDate) return { ok: false, error: 'La fecha de cese no puede ser anterior al inicio del contrato.' };
+    if (reason.trim().length < 5) return { ok: false, error: 'Indique el motivo del cese.' };
+    const paid = payrollRuns.find(r => r.status !== 'Borrador' && r.period >= periodOf(date) && r.lines?.some(l => l.contractId === id));
+    if (paid) return { ok: false, error: paid.status === 'Pagada'
+      ? `La planilla de ${periodLabel(paid.period)} ya está pagada con este contrato: la fecha de cese debe ser de un mes posterior.`
+      : `La planilla de ${periodLabel(paid.period)} ya está cerrada con este contrato: reábrala o elija una fecha de cese posterior.` };
+    setContracts(prev => prev.map(x => (x.id === id ? { ...x, status: 'Cesado', endDate: date, terminationReason: reason.trim() } : x)));
+    return { ok: true };
+  };
+
+  const payrollContext = () => ({ contracts, staff, assignments, runs: payrollRuns });
+  const payrollLinesOf: DataContextType['payrollLinesOf'] = run => linesOf(run, payrollContext());
+  const patchRun = (id: string, fn: (r: PayrollRun) => PayrollRun) => setPayrollRuns(prev => prev.map(r => (r.id === id ? fn(r) : r)));
+  const payrollEvent = (action: PayrollEvent['action'], detail?: string): PayrollEvent => ({ at: new Date().toISOString(), by: currentUser.name, action, detail });
+
+  const generatePayroll: DataContextType['generatePayroll'] = period => {
+    if (!can(PERM.payrollGenerate)) return { ok: false, error: 'Su rol no puede generar planillas.' };
+    const problems = validateGenerate(period, payrollRuns, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const run: PayrollRun = { id: runIdOf(period), period, status: 'Borrador', adjustments: [], createdAt: new Date().toISOString(), createdBy: currentUser.name, events: [payrollEvent('Generada')] };
+    setPayrollRuns(prev => [run, ...prev].sort((a, b) => b.period.localeCompare(a.period)));
+    return { ok: true };
+  };
+
+  const deletePayrollDraft: DataContextType['deletePayrollDraft'] = runId => {
+    if (!can(PERM.payrollGenerate)) return { ok: false, error: 'Su rol no puede eliminar planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
+    if (run.status !== 'Borrador') return { ok: false, error: 'Solo se elimina una planilla en borrador.' };
+    setPayrollRuns(prev => prev.filter(r => r.id !== runId));
+    return { ok: true };
+  };
+
+  const addPayrollAdjustment: DataContextType['addPayrollAdjustment'] = (runId, input) => {
+    if (!can(PERM.payrollAdjust)) return { ok: false, error: 'Su rol no puede ajustar planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
+    const inLines = payrollLinesOf(run).lines.some(l => l.staffId === input.staffId);
+    const problems = validateAdjustment(run, input, inLines);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const adjustment: PayrollAdjustment = {
+      id: nextSequentialId('AJU', payrollRuns.flatMap(r => r.adjustments.map(a => a.id))), staffId: input.staffId, kind: input.kind, concept: input.concept.trim(),
+      amount: round2(input.amount), taxable: input.kind === 'Ingreso' ? input.taxable : true, reason: input.reason.trim(), by: currentUser.name, at: new Date().toISOString(),
+    };
+    const who = staff.find(s => s.id === input.staffId);
+    patchRun(runId, r => ({ ...r, adjustments: [...r.adjustments, adjustment], events: [...r.events, payrollEvent('Ajuste', `${adjustment.kind}: ${adjustment.concept} S/ ${adjustment.amount.toFixed(2)}${who ? ` (${staffDisplayName(who)})` : ''}`)] }));
+    return { ok: true };
+  };
+
+  const removePayrollAdjustment: DataContextType['removePayrollAdjustment'] = (runId, adjustmentId) => {
+    if (!can(PERM.payrollAdjust)) return { ok: false, error: 'Su rol no puede ajustar planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    const adjustment = run?.adjustments.find(a => a.id === adjustmentId);
+    if (!run || !adjustment) return { ok: false, error: 'No se encontró el ajuste.' };
+    if (run.status !== 'Borrador') return { ok: false, error: 'Solo se ajusta una planilla en borrador.' };
+    patchRun(runId, r => ({ ...r, adjustments: r.adjustments.filter(a => a.id !== adjustmentId), events: [...r.events, payrollEvent('Ajuste', `Se quitó: ${adjustment.concept} S/ ${adjustment.amount.toFixed(2)}`)] }));
+    return { ok: true };
+  };
+
+  const closePayroll: DataContextType['closePayroll'] = runId => {
+    if (!can(PERM.payrollClose)) return { ok: false, error: 'Su rol no puede cerrar planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
+    const built = payrollLinesOf(run);
+    const problems = validateClose(run, built, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const net = round2(built.lines.reduce((s, l) => s + l.calc.net, 0));
+    patchRun(runId, r => ({ ...r, status: 'Cerrada', lines: built.lines, closedAt: new Date().toISOString(), closedBy: currentUser.name, events: [...r.events, payrollEvent('Cerrada', `${built.lines.length} trabajador(es) · neto S/ ${net.toFixed(2)}`)] }));
+    return { ok: true };
+  };
+
+  const payPayroll: DataContextType['payPayroll'] = (runId, input) => {
+    if (!can(PERM.payrollPay)) return { ok: false, error: 'Su rol no puede registrar el pago de planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
+    const problems = validatePay(run, input.date, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    patchRun(runId, r => ({ ...r, status: 'Pagada', payDate: input.date, payNote: input.note.trim() || undefined, paidBy: currentUser.name, events: [...r.events, payrollEvent('Pagada', `${input.date}${input.note.trim() ? ` · ${input.note.trim()}` : ''}`)] }));
+    return { ok: true };
+  };
+
+  const reopenPayroll: DataContextType['reopenPayroll'] = (runId, reason) => {
+    if (!can(PERM.payrollReopen)) return { ok: false, error: 'Su rol no puede reabrir planillas.' };
+    const run = payrollRuns.find(r => r.id === runId);
+    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
+    const problems = validatePayrollReopen(run, payrollRuns, reason);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    patchRun(runId, r => ({ ...r, status: 'Borrador', lines: undefined, closedAt: undefined, closedBy: undefined, events: [...r.events, payrollEvent('Reabierta', reason.trim())] }));
     return { ok: true };
   };
 
@@ -3044,7 +3244,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const errors = validateContractForm(form, contracts, staff, todayLocalISO(), id);
     const first = Object.values(errors)[0];
     if (first) return { ok: false, error: first };
-    const patch = buildContractPatch(form);
+    const patch = buildContractPatch(form, staff.find(s => s.id === current.staffId) ?? {});
     const changes = diffContract(current, patch);
     const problems = validateContractEdit(current, changes, reason);
     if (problems.length > 0) return { ok: false, error: problems[0] };
@@ -3063,6 +3263,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const note = `${input.reason} — ${input.detail.trim()}`;
     setStaff(prev => prev.map(s => (s.id === id ? { ...s, status: 'Inactivo', statusDate: input.date, statusReason: note } : s)));
     setAssignments(prev => closeAllOf(prev, id, input.date, note, currentUser.name));
+    // Su cuenta de acceso se desactiva sola: un trabajador dado de baja no puede seguir entrando
+    setUsers(prev => prev.map(u => (u.staffId === id && u.status === 'Activo' ? { ...u, status: 'Inactivo', statusNote: deactivationNote(input.date, note) } : u)));
     return { ok: true };
   };
 
@@ -3605,12 +3807,30 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setRoles(prev => prev.filter(r => r.id !== id));
   };
 
-  const addUser = (user: User) => {
-    setUsers(prev => [...prev, user]);
+  const addUser: DataContextType['addUser'] = user => {
+    if (!can(PERM.userCreate)) return { ok: false, error: 'Su rol no puede crear usuarios.' };
+    const problems = validateLinkedUser(user, staff, assignments, users);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    // Una cuenta de personal toma sus datos de la ficha
+    const member = user.staffId ? staff.find(s => s.id === user.staffId) : undefined;
+    const base = member ? { ...user, ...(syncPatch(user, member, assignments) ?? {}) } : user;
+    setUsers(prev => [...prev, base]);
+    return { ok: true };
   };
 
-  const updateUser = (id: string, userData: Partial<User>) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, ...userData } : u));
+  const updateUser: DataContextType['updateUser'] = (id, userData) => {
+    const current = users.find(u => u.id === id);
+    if (!current) return { ok: false, error: 'No se encontró el usuario.' };
+    const merged: User = { ...current, ...userData };
+    const deactivating = current.status === 'Activo' && merged.status === 'Inactivo';
+    if (!can(deactivating ? PERM.userDeactivate : PERM.userEdit)) return { ok: false, error: deactivating ? 'Su rol no puede desactivar usuarios.' : 'Su rol no puede editar usuarios.' };
+    const problems = validateLinkedUser(merged, staff, assignments, users, id);
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const member = merged.staffId ? staff.find(s => s.id === merged.staffId) : undefined;
+    const synced = member ? { ...merged, ...(syncPatch(merged, member, assignments) ?? {}) } : merged;
+    const note = deactivating ? `Desactivado por ${currentUser.name} el ${todayLocalISO()}.` : merged.status === 'Activo' ? undefined : current.statusNote;
+    setUsers(prev => prev.map(u => (u.id === id ? { ...synced, statusNote: note } : u)));
+    return { ok: true };
   };
 
   const deleteUser = (id: string) => {
@@ -3701,6 +3921,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
       users,
       addUser,
       updateUser,
+      payrollRuns,
+      payrollLinesOf,
+      generatePayroll,
+      deletePayrollDraft,
+      addPayrollAdjustment,
+      removePayrollAdjustment,
+      closePayroll,
+      payPayroll,
+      reopenPayroll,
+      closeContract,
       deleteUser,
       permissions,
       savePermissions,

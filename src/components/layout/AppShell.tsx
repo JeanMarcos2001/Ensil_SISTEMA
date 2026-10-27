@@ -37,13 +37,14 @@ import { Closures, Reopenings } from '../../pages/system/Closures';
 import { PortfolioReport } from '../../pages/reports/PortfolioReport';
 import { MonthlySchedules } from '../../pages/psychopedagogy/MonthlySchedules';
 import { Reminders } from '../../pages/psychopedagogy/Reminders';
+import { Payroll } from '../../pages/people/Payroll';
 import { PsychopedagogyReport } from '../../pages/reports/PsychopedagogyReport';
 import { StaffPage } from '../../pages/Staff';
 import { ContractsPage } from '../../pages/Contracts';
 import { AssignmentsPage } from '../../pages/Assignments';
 import { SettingsPage } from '../../pages/settings/SettingsPage';
 import { slugify, unslugify } from '../../utils/string';
-import { getAllItemsForModule } from '../../config/modules';
+import { MODULE_DATA, getAllItemsForModule } from '../../config/modules';
 import { Drawer } from '../ui/Drawer';
 import { Modal } from '../ui/Modal';
 import { NewEnrollmentWizard } from '../../pages/NewEnrollmentWizard';
@@ -95,6 +96,7 @@ export function AppShell() {
     if (activeItem === 'Personal') return <StaffPage />;
     if (activeItem === 'Contratos') return <ContractsPage />;
     if (activeItem === 'Asignaciones') return <AssignmentsPage />;
+    if (activeItem === 'Planilla') return <Payroll />;
     
     // Organization Module
     if (activeItem === 'Empresas') return <Companies onNavigate={handleNavigate} />;
@@ -144,7 +146,7 @@ export function AppShell() {
     <div className="flex flex-col h-screen w-full bg-surface overflow-hidden font-sans">
       <Topbar 
         title={activeItem} 
-        breadcrumb={['ENSIL', activeModule.charAt(0).toUpperCase() + activeModule.slice(1), activeItem]} 
+        breadcrumb={['ENSIL', MODULE_DATA[activeModule]?.title ?? (activeModule === 'mensajeria' ? 'Mensajería' : activeModule.charAt(0).toUpperCase() + activeModule.slice(1)), activeItem]} 
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
       />

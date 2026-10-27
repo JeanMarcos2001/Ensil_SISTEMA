@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -7,6 +8,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Search, Plus, Shield, Users as UsersIcon, Settings, Mail, Phone, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
+import { accessAssignments, accessCheck, defaultsFromStaff, staffDisplayName, userOfStaff } from '../../utils/staffAccess';
 
 export function Users() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -14,8 +16,11 @@ export function Users() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
+  const [activationNote, setActivationNote] = useState<string | null>(null);
 
-  const { users, branches, addUser, updateUser } = useData();
+  const { users, branches, roles, staff, assignments, addUser, updateUser } = useData();
+  const [params, setParams] = useSearchParams();
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
@@ -23,6 +28,8 @@ export function Users() {
   const [statusFilter, setStatusFilter] = useState('');
 
   const [formData, setFormData] = useState({
+    /** Ficha de personal vinculada ('' = usuario externo, sin ficha). */
+    staffId: '',
     firstName: '',
     lastName: '',
     document: '',
@@ -74,13 +81,31 @@ export function Users() {
     setIsDeactivateModalOpen(true);
   };
 
-  const handleOpenForm = (id?: string) => {
+  const handleOpenForm = (id?: string, fromStaffId?: string) => {
     setSelectedUser(id || null);
+    setServerError(null);
+    if (!id && fromStaffId) {
+      // Cuenta nueva de un trabajador: nace de su ficha y de sus asignaciones
+      const member = staff.find(s => s.id === fromStaffId);
+      if (member) {
+        const d = defaultsFromStaff(member, assignments, users);
+        const [firstName, ...rest] = d.name.split(' ');
+        setFormData({
+          staffId: member.id, firstName, lastName: rest.join(' '), document: d.document, phone: d.phone, email: '', role: d.role, mainBranch: d.branch,
+          additionalBranches: d.additionalBranches, passwordType: 'auto', password: '', status: 'Activo',
+        });
+        setErrors({});
+        setIsDetailOpen(false);
+        setIsFormOpen(true);
+        return;
+      }
+    }
     if (id) {
       const user = users.find(u => u.id === id);
       if (user) {
         const [firstName, ...lastNameParts] = user.name.split(' ');
         setFormData({
+          staffId: user.staffId ?? '',
           firstName: firstName || '',
           lastName: lastNameParts.join(' ') || '',
           document: user.document || '45678912', // Mock data fallback
@@ -96,6 +121,7 @@ export function Users() {
       }
     } else {
       setFormData({
+        staffId: '',
         firstName: '',
         lastName: '',
         document: '',
@@ -116,9 +142,12 @@ export function Users() {
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.firstName.trim()) newErrors.firstName = 'El nombre es obligatorio';
-    if (!formData.lastName.trim()) newErrors.lastName = 'El apellido es obligatorio';
-    if (!formData.document.trim()) newErrors.document = 'El documento es obligatorio';
+    // Con ficha de personal, nombre, documento y teléfono salen de ella
+    if (!formData.staffId) {
+      if (!formData.firstName.trim()) newErrors.firstName = 'El nombre es obligatorio';
+      if (!formData.lastName.trim()) newErrors.lastName = 'El apellido es obligatorio';
+      if (!formData.document.trim()) newErrors.document = 'El documento es obligatorio';
+    }
     
     if (!formData.email.trim()) {
       newErrors.email = 'El correo es obligatorio';
@@ -146,37 +175,52 @@ export function Users() {
 
   const handleSave = () => {
     if (validateForm()) {
+      const member = formData.staffId ? staff.find(s => s.id === formData.staffId) : undefined;
       const newUserData = {
-        name: `${formData.firstName} ${formData.lastName}`,
+        staffId: formData.staffId || undefined,
+        name: member ? staffDisplayName(member) : `${formData.firstName} ${formData.lastName}`,
         email: formData.email,
         role: formData.role,
         branch: formData.mainBranch,
         status: formData.status as 'Activo' | 'Inactivo',
-        document: formData.document,
-        phone: formData.phone,
+        document: member ? member.docNumber : formData.document,
+        phone: member ? member.phone : formData.phone,
         additionalBranches: formData.additionalBranches,
         lastAccess: selectedUser ? (users.find(u => u.id === selectedUser)?.lastAccess || 'Nunca') : 'Nunca'
       };
 
-      if (selectedUser) {
-        updateUser(selectedUser, newUserData);
-      } else {
-        addUser({
-          ...newUserData,
-          id: `USR-${Date.now().toString().slice(-3)}`
-        });
-      }
+      const result = selectedUser
+        ? updateUser(selectedUser, newUserData)
+        : addUser({ ...newUserData, id: `USR-${String(users.length + 1).padStart(3, '0')}` });
+      if (!result.ok) { setServerError(result.error ?? 'No se pudo guardar el usuario.'); return; }
       setIsFormOpen(false);
     }
   };
 
   const confirmDeactivate = () => {
-    if (selectedUser) {
-      updateUser(selectedUser, { status: 'Inactivo' });
-      setIsDeactivateModalOpen(false);
-      setSelectedUser(null);
-    }
+    if (!selectedUser) return;
+    const result = updateUser(selectedUser, { status: 'Inactivo' });
+    if (!result.ok) { setServerError(result.error ?? 'No se pudo desactivar.'); return; }
+    setServerError(null);
+    setIsDeactivateModalOpen(false);
+    setSelectedUser(null);
   };
+
+  const handleActivate = (id: string) => {
+    const result = updateUser(id, { status: 'Activo' });
+    setActivationNote(result.ok ? null : result.error ?? 'No se pudo activar.');
+  };
+
+  // ?personal=ID abre la cuenta nueva de ese trabajador; ?usuario=ID abre el perfil de esa cuenta
+  useEffect(() => {
+    const personal = params.get('personal');
+    const usuario = params.get('usuario');
+    if (!personal && !usuario) return;
+    if (personal) handleOpenForm(undefined, personal);
+    else if (usuario) handleOpenDetail(usuario);
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   const handleAdditionalBranchToggle = (branch: string) => {
     setFormData(prev => ({
@@ -202,6 +246,13 @@ export function Users() {
           </Button>
         </div>
       </div>
+
+      {activationNote && (
+        <div className="mb-4 bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <p>{activationNote}</p>
+        </div>
+      )}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -276,7 +327,10 @@ export function Users() {
                       <div className="w-8 h-8 rounded-full bg-primary-accent/10 text-primary-accent flex items-center justify-center font-medium">
                         {row.name.substring(0, 2).toUpperCase()}
                       </div>
-                      <span className="font-medium text-text-primary">{row.name}</span>
+                      <div>
+                        <span className="font-medium text-text-primary">{row.name}</span>
+                        {row.staffId && <div className="text-[10px] text-text-muted uppercase tracking-wider">Personal vinculado</div>}
+                      </div>
                     </div>
                   </td>
                   <td className="px-6 py-3 text-text-secondary">{row.email}</td>
@@ -290,6 +344,7 @@ export function Users() {
                   <td className="px-6 py-3 text-text-secondary">{row.lastAccess}</td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
+                    {row.status === 'Inactivo' && row.statusNote && <div className="text-[10px] text-text-muted mt-1 max-w-[180px]">{row.statusNote}</div>}
                   </td>
                   <td className="px-6 py-3 text-right">
                     <ActionMenu 
@@ -297,7 +352,9 @@ export function Users() {
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
                         { label: 'Editar usuario', onClick: () => handleOpenForm(row.id) },
                         { label: 'Restablecer contraseña', onClick: () => handleResetPassword(row.id) },
-                        { label: 'Desactivar', onClick: () => handleDeactivate(row.id), danger: true },
+                        row.status === 'Activo'
+                          ? { label: 'Desactivar', onClick: () => handleDeactivate(row.id), danger: true }
+                          : { label: 'Activar', onClick: () => handleActivate(row.id) },
                       ]} 
                     />
                   </td>
@@ -370,6 +427,18 @@ export function Users() {
             </div>
           </div>
 
+          {(() => {
+            const account = users.find(x => x.id === selectedUser);
+            const member = account?.staffId ? staff.find(s => s.id === account.staffId) : undefined;
+            return member ? (
+              <div className="bg-surface-muted p-3 rounded-xl border border-border-soft text-sm">
+                <span className="text-xs text-text-muted uppercase tracking-wider">Personal vinculado</span>
+                <p className="font-medium text-text-primary mt-1">{staffDisplayName(member)} · {member.code} · {member.status}</p>
+                <p className="text-xs text-text-muted mt-0.5">Nombre, documento, teléfono y sedes salen de su ficha y de sus asignaciones (Personas).</p>
+              </div>
+            ) : <p className="text-xs text-text-muted">Cuenta sin ficha de personal (usuario externo).</p>;
+          })()}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Rol Principal</span>
@@ -379,8 +448,8 @@ export function Users() {
               </p>
             </div>
             <div className="space-y-1">
-              <span className="text-xs text-text-muted uppercase tracking-wider">Sede Principal</span>
-              <p className="text-sm font-medium text-text-primary">{users.find(u => u.id === selectedUser)?.branch}</p>
+              <span className="text-xs text-text-muted uppercase tracking-wider">Sedes</span>
+              <p className="text-sm font-medium text-text-primary">{[users.find(u => u.id === selectedUser)?.branch, ...(users.find(u => u.id === selectedUser)?.additionalBranches ?? [])].filter(Boolean).join(', ')}</p>
             </div>
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Último Acceso</span>
@@ -426,16 +495,49 @@ export function Users() {
         }
       >
         <div className="space-y-6">
+          {serverError && (
+            <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <p>{serverError}</p>
+            </div>
+          )}
           {/* Bloque 1: Identidad */}
           <div>
             <h4 className="text-sm font-bold text-text-primary mb-3">1. Identidad</h4>
             <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-primary">Personal vinculado</label>
+                <select
+                  value={formData.staffId}
+                  disabled={!!selectedUser && !!users.find(x => x.id === selectedUser)?.staffId}
+                  onChange={(e) => {
+                    const member = staff.find(s => s.id === e.target.value);
+                    if (!member) { setFormData({ ...formData, staffId: '' }); return; }
+                    const d = defaultsFromStaff(member, assignments, users);
+                    const [firstName, ...rest] = d.name.split(' ');
+                    setFormData({ ...formData, staffId: member.id, firstName, lastName: rest.join(' '), document: d.document, phone: d.phone, role: formData.role || d.role, mainBranch: d.branch, additionalBranches: d.additionalBranches });
+                    setServerError(null);
+                  }}
+                  className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent disabled:bg-surface-muted"
+                >
+                  <option value="">Sin ficha (usuario externo)</option>
+                  {staff
+                    .filter(s => s.id === formData.staffId || accessCheck(s, assignments, users).ok)
+                    .map(s => <option key={s.id} value={s.id}>{staffDisplayName(s)} · {s.code}</option>)}
+                </select>
+                <p className="text-xs text-text-muted">
+                  {formData.staffId
+                    ? 'Nombre, documento y teléfono salen de su ficha (se editan en Personas → Personal) y las sedes, de sus asignaciones. Si el trabajador se inactiva, esta cuenta se desactiva sola.'
+                    : 'Solo aparece el personal activo, con una asignación con acceso y sin cuenta. Elija «sin ficha» para administradores externos.'}
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-text-primary">Nombres <span className="text-error">*</span></label>
                   <input 
                     type="text" 
                     value={formData.firstName}
+                    disabled={!!formData.staffId}
                     onChange={(e) => setFormData({...formData, firstName: e.target.value})}
                     className={`w-full h-10 bg-surface border ${errors.firstName ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
                     placeholder="Ej. Juan" 
@@ -447,6 +549,7 @@ export function Users() {
                   <input 
                     type="text" 
                     value={formData.lastName}
+                    disabled={!!formData.staffId}
                     onChange={(e) => setFormData({...formData, lastName: e.target.value})}
                     className={`w-full h-10 bg-surface border ${errors.lastName ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
                     placeholder="Ej. Pérez" 
@@ -461,6 +564,7 @@ export function Users() {
                   <input 
                     type="text" 
                     value={formData.document}
+                    disabled={!!formData.staffId}
                     onChange={(e) => setFormData({...formData, document: e.target.value})}
                     className={`w-full h-10 bg-surface border ${errors.document ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
                     placeholder="Número de documento" 
@@ -472,6 +576,7 @@ export function Users() {
                   <input 
                     type="tel" 
                     value={formData.phone}
+                    disabled={!!formData.staffId}
                     onChange={(e) => setFormData({...formData, phone: e.target.value})}
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
                     placeholder="+51 999 999 999" 
@@ -506,10 +611,7 @@ export function Users() {
                     className={`w-full h-10 bg-surface border ${errors.role ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
                   >
                     <option value="">Seleccionar rol...</option>
-                    <option value="Administrador Global">Administrador Global</option>
-                    <option value="Director Académico">Director Académico</option>
-                    <option value="Coordinador de Ventas">Coordinador de Ventas</option>
-                    <option value="Docente">Docente</option>
+                    {roles.filter(r => r.status === 'Activo' || r.name === formData.role).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
                   </select>
                   {errors.role && <p className="text-xs text-error">{errors.role}</p>}
                 </div>
@@ -522,8 +624,8 @@ export function Users() {
                     className={`w-full h-10 bg-surface border ${errors.mainBranch ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
                   >
                     <option value="">Seleccionar sede...</option>
-                    <option value="Todas">Todas</option>
-                    {branches.map(b => (
+                    {!formData.staffId && <option value="Todas">Todas</option>}
+                    {(formData.staffId ? branches.filter(b => accessAssignments(formData.staffId, assignments).some(a => a.branch === b.name)) : branches).map(b => (
                       <option key={b.id} value={b.name}>{b.name}</option>
                     ))}
                   </select>
@@ -534,7 +636,7 @@ export function Users() {
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-text-primary">Sedes Adicionales (Opcional)</label>
                 <div className="flex flex-wrap gap-2 p-3 border border-border-soft rounded-lg bg-surface-muted/30">
-                  {branches.filter(b => b.name !== formData.mainBranch).map(branch => (
+                  {(formData.staffId ? branches.filter(b => accessAssignments(formData.staffId, assignments).some(a => a.branch === b.name)) : branches).filter(b => b.name !== formData.mainBranch).map(branch => (
                     <label key={branch.id} className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
                       <input 
                         type="checkbox" 
@@ -645,7 +747,7 @@ export function Users() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDeactivateModalOpen(false)}>Cancelar</Button>
-            <Button variant="danger" onClick={() => setIsDeactivateModalOpen(false)}>Desactivar Usuario</Button>
+            <Button variant="danger" onClick={confirmDeactivate}>Desactivar Usuario</Button>
           </div>
         }
       >
@@ -657,6 +759,7 @@ export function Users() {
           <p className="text-sm text-text-secondary">
             El usuario ya no podrá acceder al sistema. Sus registros y actividades previas se mantendrán en el historial.
           </p>
+          {serverError && <p className="text-sm text-danger-text">{serverError}</p>}
         </div>
       </Modal>
     </div>

@@ -26,11 +26,11 @@ export const MODULE_DATA: Record<string, { title: string, groups: { title?: stri
   personas: {
     title: 'Personas',
     groups: [
-      { items: ['Alumnos', 'Titulares', 'Personal', 'Contratos', 'Asignaciones'] }
+      { items: ['Alumnos', 'Titulares', 'Personal', 'Contratos', 'Asignaciones', 'Planilla'] }
     ]
   },
   configuracion: {
-    title: 'Configuración comercial',
+    title: 'Oferta comercial',
     groups: [
       { items: ['Programas', 'Niveles', 'Tipos de pago', 'Tarifarios', 'Promociones', 'Recetas de materiales'] }
     ]

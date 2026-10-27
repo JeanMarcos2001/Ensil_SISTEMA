@@ -60,7 +60,7 @@ Leyenda: ✅ funcional sobre datos en memoria · 🟡 parcial · ❌ maqueta / n
 | Roles | ✅ | CRUD, duplicar. El contador de usuarios por rol (`users`) es un número fijo, no se calcula. |
 | Permisos | 🟡 | La matriz se guarda, pero **ningún componente la consulta**. Los botones superiores no tienen acción. Faltan las excepciones por usuario que muestra el diagrama. |
 
-### Configuración comercial
+### Oferta comercial (antes «Configuración comercial»)
 | Pantalla | Estado |
 |---|---|
 | Programas, Niveles, Tipos de pago, Tarifarios, Promociones | ✅ CRUD completos con validaciones y confirmación. |
@@ -161,7 +161,7 @@ Leyenda: ✅ funcional sobre datos en memoria · 🟡 parcial · ❌ maqueta / n
 
 ### Terminado (a nivel de interfaz y lógica en memoria)
 - Estructura de navegación, layout, selector de filial global y notificaciones.
-- Todo el módulo **Configuración comercial** (programas, niveles, tipos de pago, tarifarios, promociones, recetas).
+- Todo el módulo **Oferta comercial** (antes «Configuración comercial») (programas, niveles, tipos de pago, tarifarios, promociones, recetas).
 - Todo el módulo de **Organización** salvo permisos efectivos y credenciales.
 - **Logística completa en pantalla**: catálogo, stock, kits, envíos, recepciones con incidencias, kardex, ajustes (con la excepción del doble descuento en transferencias).
 - Cobranza por cuotas (registrar pago, refinanciar) y verificación con entrega de materiales.
@@ -424,7 +424,7 @@ Crea en una sola operación y solo si todo valida: una matrícula por alumno con
 |---|---|
 | Alumno **existente o nuevo** | Cada tarjeta de alumno (y de titular) tiene un interruptor deslizante **Existente \| Nuevo**. *Existente*: solo el buscador (nombre o documento); al elegir, queda una tarjeta resumen con «Cambiar». *Nuevo*: solo los campos de datos, sin buscador. Al alternar se parte de una ficha limpia para no mezclar datos. Si queda en «Existente» sin elegir a nadie, no se avanza. |
 | **Situación del alumno** (reemplaza grado + colegio sueltos) | Estudiando → tipo de institución (Colegio / Instituto / Universidad / Otro), institución y **grado** (lista de Inicial a 5.° Secundaria si es colegio) o **ciclo**. Trabajando → ocupación y centro de trabajo (opcional). Estudiando y trabajando → ambos bloques. Ninguna por el momento → nada más. Solo se guarda lo que corresponde a la situación elegida. El parentesco y la situación aparecen cuando ya hay una persona definida. |
-| **Horario de clases** | Antes era una lista fija dentro del código. Ahora sale de **Configuración → CRUDS Básicos → Horarios de clases** (nombre, todas las sedes o sedes específicas, estado). El asistente ofrece los activos de la sede; es opcional («Por definir»). Un horario en uso no se puede eliminar (se inactiva); no se permiten nombres duplicados. |
+| **Horario de clases** | Antes era una lista fija dentro del código. Ahora sale de **Configuración → Comercial → Horarios de clases** (nombre, todas las sedes o sedes específicas, estado). El asistente ofrece los activos de la sede; es opcional («Por definir»). Un horario en uso no se puede eliminar (se inactiva); no se permiten nombres duplicados. |
 | **Fecha de inicio de clases** | Se renombró y se explicó: es el primer día de clases del alumno (opcional, no anterior a la matrícula). **No afecta** los vencimientos de las cuotas, que se cuentan desde la fecha de matrícula. |
 
 Verificación: `tsc` 0 errores · `check-enrollment.ts` 66/66 (se agregaron casos de existente sin elegir, cada situación, datos sobrantes descartados y horarios por sede/estado) · en navegador: interruptor Existente/Nuevo, búsqueda y selección, bloques condicionales de situación, selector de horarios y CRUD de horarios (alta por sede, duplicado rechazado).
@@ -443,7 +443,7 @@ No cambiado: la pantalla **Personas → Alumnos** (edición manual) sigue con «
 | Corrección | En «Contado en 2 partes», la Parte 1 quedaba con un monto inflado (tope del total + lo cobrado); ahora queda fijada en lo realmente cobrado y la Parte 2 es el saldo. |
 
 Verificación: `tsc` 0 errores · `check-enrollment.ts` 74/74 (casos nuevos de primera asesoría) · en navegador: matrícula Contado en 2 partes con asesoría → aparece en Primera asesoría; Pagos → búsqueda por alumno, matrícula y titular; errores de monto, TC y serie; Parte 1 en PEN (S/ 950 a TC 3.8 = $ 250, ingreso en Caja PEN) y Parte 2 en USD → plan *Completado*.
-Sin cambios (a pedido): «Reversar pago» sigue sin acción; **Configuración → Horarios de clases** se mantiene aunque el asistente ya no lo use.
+Sin cambios (a pedido): «Reversar pago» sigue sin acción; **Configuración → Comercial → Horarios de clases** se mantiene aunque el asistente ya no lo use.
 
 ---
 

@@ -6,7 +6,7 @@ import { DEFAULT_CONTRACT_TEMPLATE, TEMPLATE_TOKENS, validateTemplate } from '..
 
 const areaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-y';
 
-/** Configuración → Plantillas de documentos: texto del contrato de servicios educativos (con campos entre llaves dobles). */
+/** Configuración → Documentos → Plantillas de contrato y ficha: texto del contrato de servicios educativos (con campos entre llaves dobles). */
 export function DocumentTemplatesConfig() {
   const { contractTemplate, updateContractTemplate } = useData();
   const [intro, setIntro] = useState(contractTemplate.intro);

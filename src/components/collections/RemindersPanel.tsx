@@ -68,7 +68,7 @@ export function RemindersPanel() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
-              {reminders.length === 0 && <tr><td colSpan={6} className="px-6 py-10 text-center text-text-muted">No hay recordatorios por atender hoy. Se generan según la política de cobranza (Configuración → Política de cobranza).</td></tr>}
+              {reminders.length === 0 && <tr><td colSpan={6} className="px-6 py-10 text-center text-text-muted">No hay recordatorios por atender hoy. Se generan según la política de cobranza (Configuración → Cobranza → Política de cobranza).</td></tr>}
               {reminders.map(r => (
                 <tr key={r.key} className="hover:bg-surface-muted/50 align-top">
                   <td className="px-6 py-3"><div className="font-medium text-text-primary">{r.studentName}</div><div className="text-xs text-text-muted">{r.recipient}{r.phone ? ` · ${r.phone}` : ' · sin teléfono'}</div></td>

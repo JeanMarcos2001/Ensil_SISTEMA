@@ -15,9 +15,11 @@ import { ClearFilters } from '../components/ui/ClearFilters';
 import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { INACTIVATION_REASONS, inactivationCheck, statusNote } from '../utils/staffStatus';
+import { accessCheck, userOfStaff } from '../utils/staffAccess';
+import { PERM } from '../utils/authority';
 
 export function StaffPage() {
-  const { staff, contracts, assignments, branches, schedules, monthlySchedules, inactivateStaff, reactivateStaff } = useData();
+  const { staff, contracts, assignments, branches, schedules, monthlySchedules, users, inactivateStaff, reactivateStaff, can } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [toInactivate, setToInactivate] = useState<Staff | null>(null);
@@ -175,12 +177,15 @@ export function StaffPage() {
                 <th className="px-6 py-4 font-medium">Sede / Área</th>
                 <th className="px-6 py-4 font-medium">Cargo</th>
                 <th className="px-6 py-4 font-medium">Estado</th>
+                <th className="px-6 py-4 font-medium">Acceso</th>
                 <th className="px-6 py-4 font-medium text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-soft">
               {paginatedStaff.map((member) => {
                 const mainAssignment = assignments.find(a => a.staffId === member.id && a.isMain);
+                const account = userOfStaff(member.id, users);
+                const access = accessCheck(member, assignments, users);
                 return (
                   <tr key={member.id} className="hover:bg-surface-muted/50 transition-colors">
                     <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{member.code}</td>
@@ -197,6 +202,11 @@ export function StaffPage() {
                     <td className="px-6 py-4">
                       <Badge variant={member.status === 'Activo' ? 'success' : 'danger'}>{member.status}</Badge>
                     </td>
+                    <td className="px-6 py-4">
+                      {account
+                        ? <><Badge variant={account.status === 'Activo' ? 'success' : 'neutral'}>{account.status === 'Activo' ? 'Con acceso' : 'Cuenta inactiva'}</Badge><div className="text-xs text-text-muted mt-1">{account.id} · {account.role}</div></>
+                        : <><Badge variant="neutral">Sin cuenta</Badge>{!access.ok && member.status === 'Activo' && <div className="text-xs text-text-muted mt-1">{access.reasons[0]}</div>}</>}
+                    </td>
                     <td className="px-6 py-4 text-right">
                       <ActionMenu 
                         items={[
@@ -204,6 +214,10 @@ export function StaffPage() {
                           { label: 'Editar datos', onClick: () => handleOpenForm(member) },
                           { label: 'Ver contratos', onClick: () => navigate(`/personas/contratos?trabajador=${member.id}`) },
                           { label: 'Ver asignaciones', onClick: () => navigate(`/personas/asignaciones?trabajador=${member.id}`) },
+                          account
+                            ? { label: `Ver usuario (${account.id})`, onClick: () => navigate(`/organizacion/usuarios?usuario=${account.id}`) }
+                            : { label: 'Crear usuario de acceso', onClick: () => navigate(`/organizacion/usuarios?personal=${member.id}`), disabled: !access.ok || !can(PERM.userCreate) },
+                          { label: 'Ver planillas', onClick: () => navigate(`/personas/planilla?trabajador=${member.id}`) },
                           member.status === 'Activo'
                             ? { label: 'Inactivar', onClick: () => setToInactivate(member), danger: true }
                             : { label: 'Reactivar', onClick: () => setToReactivate(member) },
@@ -361,6 +375,26 @@ export function StaffPage() {
               </div>
             </section>
 
+            {/* Acceso al sistema */}
+            <section>
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Acceso al Sistema</h3>
+              {(() => {
+                const account = userOfStaff(selectedStaff.id, users);
+                if (!account) {
+                  const check = accessCheck(selectedStaff, assignments, users);
+                  return <p className="text-sm text-text-muted italic">{check.ok ? 'Todavía no tiene una cuenta. Se puede crear desde el menú de acciones.' : `Sin cuenta: ${check.reasons[0]}`}</p>;
+                }
+                return (
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 bg-surface-muted p-4 rounded-xl border border-border-soft">
+                    <div><label className="text-xs text-text-muted uppercase tracking-wider">Cuenta</label><p className="text-sm font-medium text-text-primary mt-1">{account.id}</p></div>
+                    <div><label className="text-xs text-text-muted uppercase tracking-wider">Rol</label><p className="text-sm font-medium text-text-primary mt-1">{account.role}</p></div>
+                    <div><label className="text-xs text-text-muted uppercase tracking-wider">Sedes</label><p className="text-sm font-medium text-text-primary mt-1">{[account.branch, ...(account.additionalBranches ?? [])].join(', ')}</p></div>
+                    <div><label className="text-xs text-text-muted uppercase tracking-wider">Estado</label><p className="text-sm font-medium text-text-primary mt-1">{account.status}</p>{account.statusNote && <p className="text-xs text-text-muted mt-1">{account.statusNote}</p>}</div>
+                  </div>
+                );
+              })()}
+            </section>
+
             {/* Current Contract */}
             <section>
               <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Contrato Vigente</h3>
@@ -431,6 +465,12 @@ export function StaffPage() {
                   ? `Se cerrarán sus ${inactivation.assignmentsToClose.length} asignación(es) activa(s): dejará de aparecer como responsable de entrevistas, asesorías y verificaciones.`
                   : 'No tiene asignaciones activas.'}
               </li>
+              {(() => {
+                const account = userOfStaff(toInactivate.id, users);
+                return account && account.status === 'Activo'
+                  ? <li>Su cuenta de acceso ({account.id}, {account.role}) se desactivará sola: ya no podrá entrar al sistema.</li>
+                  : null;
+              })()}
               <li>Para volver a trabajar con la persona se reactiva y se registran una asignación y un contrato nuevos.</li>
             </ul>
           </div>
@@ -454,6 +494,7 @@ export function StaffPage() {
         {toReactivate && (
           <p className="text-sm text-text-secondary">
             <span className="font-medium text-text-primary">{toReactivate.names} {toReactivate.lastNameP}</span> volverá a estar activo. Sus asignaciones anteriores siguen cerradas: registre una nueva en Personas → Asignaciones y un contrato nuevo en Contratos.
+            {userOfStaff(toReactivate.id, users)?.status === 'Inactivo' && ' Su cuenta de acceso sigue desactivada: se reactiva a propósito en Organización → Usuarios.'}
           </p>
         )}
       </ReasonDialog>

@@ -55,17 +55,18 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
     setServerError(null);
   }, [isOpen, editing]);
 
+  const member = staff.find(s => s.id === form.staffId);
   const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id), [form, contracts, staff, today, editing?.id]);
   const changes = useMemo(
-    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form)) : []),
-    [editing, errors, form]
+    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {})) : []),
+    [editing, errors, form, member]
   );
   const set = (patch: Partial<ContractForm>) => { setForm(f => ({ ...f, ...patch })); setServerError(null); };
   const err = (k: keyof ContractForm) => (submitted ? errors[k] : undefined);
   const cls = (k: keyof ContractForm) => `${inputCls} ${err(k) ? errorCls : ''}`;
 
   const pension = hasPension(form.type) && !!form.type;
-  const estimate = estimateNet(Number(form.grossSalary), form.type, form.pensionSystem, form.pensionFund);
+  const estimate = estimateNet(Number(form.grossSalary), form.type, form.pensionSystem, form.pensionFund, member ?? {}, new Date().getFullYear(), form.suspension4ta);
 
   const changeType = (type: string) => {
     // Al cambiar de tipo se limpian los datos que ya no aplican
@@ -86,7 +87,7 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
       const r = editContract(editing.id, form, reason);
       if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar el contrato.'); return; }
     } else {
-      addContract(buildContract(form));
+      addContract(buildContract(form, member ?? {}));
     }
     onClose();
   };
@@ -162,7 +163,7 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
             >
               <input type="number" min={0} step="0.01" className={cls('grossSalary')} value={form.grossSalary} onChange={e => set({ grossSalary: e.target.value })} placeholder="Ej: 3500" />
             </Field>
-            <Field label="Sueldo neto estimado (S/)" hint="Se calcula solo: sueldo bruto menos los aportes a pensiones.">
+            <Field label="Sueldo neto de un mes regular (S/)" hint="Se calcula solo con las reglas de la planilla: sueldo y asignación familiar menos aportes y renta. Las gratificaciones y descuentos eventuales aparecen en la planilla del mes.">
               <div className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm flex items-center font-semibold text-primary-accent">
                 {estimate ? money(estimate.net) : <span className="font-normal text-text-muted">—</span>}
               </div>
@@ -187,14 +188,21 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
                 </Field>
                 <div className="md:col-span-2 text-xs text-text-muted">
                   {estimate
-                    ? `Aportes estimados: ${money(estimate.contribution)} (${(estimate.rate * 100).toFixed(2)} % del bruto). Es una estimación: no incluye renta de 5.ª categoría ni otros descuentos de planilla.`
+                    ? `Aporte a pensiones: ${money(estimate.contribution)} (${(estimate.rate * 100).toFixed(2)} %) · Renta de ${estimate.taxKind ?? '5.ª categoría'}: ${money(estimate.incomeTax)}${estimate.familyAllowance > 0 ? ` · Asignación familiar: ${money(estimate.familyAllowance)}` : ''}. Referencial: se proyecta con el sueldo del contrato; contabilidad valida la retención.`
                     : 'Elija el sistema de pensiones para estimar los aportes.'}
                 </div>
               </>
             ) : (
-              <p className="md:col-span-2 text-sm text-text-secondary bg-surface-muted rounded-xl px-3 py-2.5">
-                La locación de servicios no tiene aportes a pensiones: el neto es igual al bruto.
-              </p>
+              <div className="md:col-span-2 space-y-2">
+                <p className="text-sm text-text-secondary bg-surface-muted rounded-xl px-3 py-2.5">
+                  La locación de servicios no tiene aportes a pensiones ni beneficios. Si el honorario del mes pasa de S/ 3 300 se retiene el 8 % (renta de 4.ª categoría), salvo que el prestador tenga suspensión de retenciones.
+                </p>
+                <label className="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
+                  <input type="checkbox" className="rounded border-border-soft" checked={form.suspension4ta} onChange={e => set({ suspension4ta: e.target.checked })} />
+                  Presentó la suspensión de retenciones de 4.ª categoría
+                </label>
+                {estimate && estimate.incomeTax > 0 && <p className="text-xs text-text-muted">Retención estimada: {money(estimate.incomeTax)} al mes.</p>}
+              </div>
             )}
           </div>
         </section>

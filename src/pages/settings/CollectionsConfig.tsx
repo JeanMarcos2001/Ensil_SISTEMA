@@ -4,7 +4,7 @@ import { useData } from '../../context/DataContext';
 import { stagesOf, validatePolicy } from '../../utils/collections';
 import { Field, inputCls } from '../enrollment/fields';
 
-/** Configuración → Política de cobranza: días de gracia, mora y cuándo se recuerda cada cuota. */
+/** Configuración → Cobranza → Política de cobranza: días de gracia, mora y cuándo se recuerda cada cuota. */
 export function CollectionsConfig() {
   const { collectionPolicy, updateCollectionPolicy } = useData();
   const toForm = () => ({

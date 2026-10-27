@@ -44,7 +44,7 @@ export function EnrollmentDocumentsPanel({ enrollmentId }: { enrollmentId: strin
       {!data.contractTemplate.reviewed && (
         <div className="flex gap-2 text-sm bg-warning-tint/60 border border-warning-text/20 rounded-xl px-4 py-2.5 text-text-primary">
           <AlertTriangle size={16} className="shrink-0 mt-0.5 text-warning-text" />
-          <p>La plantilla del contrato aún es un <strong>texto modelo</strong>: el área legal debe revisarla y marcarla como revisada en Configuración → Plantillas de documentos antes de firmar contratos reales.</p>
+          <p>La plantilla del contrato aún es un <strong>texto modelo</strong>: el área legal debe revisarla y marcarla como revisada en Configuración → Documentos → Plantillas de contrato y ficha antes de firmar contratos reales.</p>
         </div>
       )}
       {error && <div className="text-sm bg-danger-tint border border-danger-text/20 text-danger-text rounded-xl px-4 py-2.5">{error}</div>}

@@ -15,9 +15,10 @@ import { CONTRACT_TYPES, contractStatus } from '../utils/payroll';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { todayLocalISO } from '../utils/schedule';
+import { periodLabel } from '../utils/payrollEngine';
 
 export function ContractsPage() {
-  const { contracts, staff, updateContract } = useData();
+  const { contracts, staff, closeContract, payrollRuns } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';
@@ -280,14 +281,40 @@ export function ContractsPage() {
                   <p className="text-sm font-medium text-text-primary mt-1">S/ {selectedContract.contribution?.toLocaleString()}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-text-muted uppercase tracking-wider">Sueldo Neto</label>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Renta ({selectedContract.type === 'Locación de servicios' ? '4.ª' : '5.ª'} categoría)</label>
+                  <p className="text-sm font-medium text-text-primary mt-1">S/ {(selectedContract.incomeTax ?? 0).toLocaleString()}</p>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Neto de un mes regular</label>
                   <p className="text-sm font-medium text-text-primary mt-1 font-bold text-primary-accent">S/ {selectedContract.netSalary?.toLocaleString()}</p>
+                  {!!selectedContract.familyAllowance && <p className="text-xs text-text-muted">Incluye asignación familiar de S/ {selectedContract.familyAllowance}</p>}
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Sistema de Pensión</label>
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedContract.pensionSystem} {selectedContract.pensionFund ? `(${selectedContract.pensionFund})` : ''}</p>
                 </div>
               </div>
+            </section>
+
+            {/* Planilla: lo que este contrato ya pagó */}
+            <section>
+              <div className="flex items-center justify-between mb-4 border-b border-border-soft pb-2">
+                <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Planilla</h3>
+                <button type="button" className="text-xs text-primary-accent hover:underline" onClick={() => navigate(`/personas/planilla?trabajador=${selectedContract.staffId}`)}>Ver planillas del trabajador</button>
+              </div>
+              {(() => {
+                const paid = payrollRuns
+                  .filter(r => r.status !== 'Borrador')
+                  .flatMap(r => (r.lines ?? []).filter(l => l.contractId === selectedContract.id).map(l => ({ run: r, line: l })));
+                if (paid.length === 0) return <p className="text-sm text-text-muted italic">Todavía no figura en una planilla cerrada. El neto de arriba es el de un mes regular; el de cada mes sale de la planilla (con gratificaciones, ajustes y días trabajados).</p>;
+                return (
+                  <ul className="divide-y divide-border-soft text-sm">
+                    {paid.slice(0, 6).map(({ run: r, line: l }) => (
+                      <li key={r.id} className="py-2 flex justify-between"><span className="text-text-secondary">{periodLabel(r.period)} · {r.status}</span><span className="font-medium text-text-primary">S/ {l.calc.net.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span></li>
+                    ))}
+                  </ul>
+                );
+              })()}
             </section>
 
             {/* Vacations */}
@@ -346,10 +373,8 @@ export function ContractsPage() {
               variant="primary"
               onClick={() => {
                 if (!toClose) return;
-                if (!closeDate) { setCloseError('Indique la fecha de cese.'); return; }
-                if (closeDate < toClose.startDate) { setCloseError('La fecha de cese no puede ser anterior al inicio del contrato.'); return; }
-                if (closeReason.trim().length < 5) { setCloseError('Indique el motivo del cese.'); return; }
-                updateContract(toClose.id, { status: 'Cesado', endDate: closeDate, terminationReason: closeReason.trim() });
+                const res = closeContract(toClose.id, closeDate, closeReason);
+                if (!res.ok) { setCloseError(res.error ?? 'No se pudo cerrar el contrato.'); return; }
                 setToClose(null);
               }}
             >

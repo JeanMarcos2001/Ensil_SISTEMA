@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { id: 'logistica', icon: Package, label: 'Logística' },
   { id: 'psicopedagogia', icon: Brain, label: 'Psicopedagogía' },
   { id: 'personas', icon: Users, label: 'Personas' },
-  { id: 'configuracion', icon: Settings2, label: 'Configuración' },
+  { id: 'configuracion', icon: Settings2, label: 'Oferta comercial' },
   { id: 'organizacion', icon: Building2, label: 'Organización' },
   { id: 'reportes', icon: FileBarChart, label: 'Reportes' },
   { id: 'sistema', icon: ShieldCheck, label: 'Sistema' },
@@ -50,6 +50,8 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
   const [expandedSections, setExpandedSections] = useState<string[]>([activeModule]);
 
   const canShowItem = (moduleId: string, itemName: string) => {
+    // «Ayuda» se abre desde el botón inferior (no se repite en el menú)
+    if (moduleId === 'sistema' && itemName === 'Ayuda') return false;
     const isGlobal = currentBranchId === 'all';
     const role = currentUser.role;
     

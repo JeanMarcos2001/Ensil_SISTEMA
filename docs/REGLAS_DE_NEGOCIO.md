@@ -121,7 +121,7 @@ Cada cambio aprobado queda en la **línea de tiempo** de la ficha («Reactivaci�
 - **Numeración y versión:** `CTR-2026-001` / `FIC-2026-001`. Si los datos cambian después (precio, cuotas, titular…) el documento queda **«Desactualizado»**: se regenera (versión siguiente, mismo número) y hay que firmarlo de nuevo.
 - **Firma:** se registra la fecha y el archivo escaneado (el sistema guarda el nombre; aún no almacena archivos). No se firma un documento desactualizado ni dos veces.
 - **Imprimir / guardar PDF** desde la vista previa. En Matrículas se ven los avisos «Sin contrato» y «Contrato sin firma».
-- **Plantilla del contrato editable** en *Configuración → Plantillas de documentos*: texto con campos entre llaves dobles (`{{alumno}}`, `{{precio}}`…; se ven todos), cláusulas que se agregan o quitan y versión. **Importante:** el texto que trae el sistema es un **modelo, no asesoría legal**; debe revisarlo el área legal y marcarlo «revisado» (mientras no, cada contrato muestra una advertencia). Cambiar el texto quita la marca de revisado.
+- **Plantilla del contrato editable** en *Configuración → Documentos → Plantillas de contrato y ficha*: texto con campos entre llaves dobles (`{{alumno}}`, `{{precio}}`…; se ven todos), cláusulas que se agregan o quitan y versión. **Importante:** el texto que trae el sistema es un **modelo, no asesoría legal**; debe revisarlo el área legal y marcarlo «revisado» (mientras no, cada contrato muestra una advertencia). Cambiar el texto quita la marca de revisado.
 - ❓ El contrato no es obligatorio para verificar o cobrar (solo avisa). Si se quiere exigirlo hay que decidir en qué paso.
 
 ---
@@ -131,7 +131,7 @@ Cada cambio aprobado queda en la **línea de tiempo** de la ficha («Reactivaci�
 ### Estados siempre al día
 El estado de cada **cuota** y de cada **plan** ya no se confía al texto guardado: se calcula con lo cobrado y la fecha (`utils/planState.ts`). Una cuota «Pendiente» de ayer se ve «Vencida»; el plan pasa a «Atrasado» solo. Lo usan Planes, el detalle de la cuota y la columna «Plan» de Matrículas.
 
-### Política de cobranza (Configuración → Política de cobranza)
+### Política de cobranza (Configuración → Cobranza → Política de cobranza)
 Días de gracia (3 por defecto), **tasa de mora mensual** (0 % por defecto = sin interés) y los **días de recordatorio** antes (3 y el día del vencimiento) y después (1, 7, 15 y 30). Todo editable con vista previa del calendario.
 
 ### Mora
@@ -225,10 +225,47 @@ Asignar el responsable de una actividad · Registrar asistencia a actividades ·
 
 ---
 
-## 9. Qué se probó
+## 9. Personal: acceso al sistema, contrato y planilla ✅
+
+**La inconsistencia:** Personal, Usuarios y Contratos eran islas. Una persona podía tener cuenta sin ficha (o ficha inactiva con la cuenta abierta), el contrato guardaba un «neto» que ignoraba la renta de 5.ª categoría y no había planilla donde se pagara.
+**La solución:** una cadena **Ficha → Cuenta** y **Contrato → Planilla → Boleta**, con un solo motor de cálculo.
+
+### 9.1 Personal ↔ Usuarios
+- La cuenta **nace de la ficha**. Se crea desde Personal («Crear usuario de acceso») o desde Usuarios eligiendo «Personal vinculado»; hereda **nombre, documento y teléfono** de la ficha (no se editan en Usuarios: se editan en Personal y la cuenta se actualiza sola) y las **sedes** de sus asignaciones (la principal = la de su asignación principal; las demás, adicionales).
+- Quién puede tener cuenta: personal **activo**, con una asignación **activa** cuyo «rol del sistema» no sea *Sin acceso*, y **sin cuenta previa** (una por trabajador). El rol se sugiere según el rol del sistema (Psicopedagogía → Docente, Ventas → Coordinador de Ventas) pero lo elige quien crea la cuenta.
+- **Inactivar al trabajador desactiva su cuenta sola**, con constancia («Se desactivó al inactivar al trabajador el …»); el aviso se muestra antes de confirmar. **Reactivarlo no reactiva la cuenta**: se hace a propósito en Usuarios (y se rechaza mientras la ficha esté inactiva).
+- Si cambian sus asignaciones, la sede de la cuenta se corrige para no quedar en una sede donde ya no trabaja.
+- Las cuentas sin ficha (administradores externos) siguen igual, sin estas restricciones.
+- Arreglos de paso: el botón «Desactivar Usuario» **no hacía nada**; ahora desactiva (con permiso) y hay «Activar». Los roles del formulario salen del catálogo de Roles (antes faltaba *Cajero*). Crear, editar y desactivar usuarios pide los permisos del catálogo.
+
+### 9.2 El neto del contrato = el de la planilla
+El contrato guarda el **neto de un mes regular** calculado por el mismo motor de la planilla: sueldo + asignación familiar − aporte de pensión − **renta de 5.ª categoría** (o 4.ª en la locación). Por eso cambió la cifra (p. ej. S/ 3 500 con AFP Integra y sin hijos: antes S/ 3 047.80, ahora S/ 2 973.60).
+- **Asignación familiar:** 10 % de la RMV (S/ 113) si el trabajador declaró hijos (se asume que cumplen la edad o estudian).
+- **Renta de 5.ª (método de proyección):** ingreso anual proyectado (12 sueldos + 2 gratificaciones con su bonificación del 9 %) − 7 UIT (UIT 2026 = S/ 5 500, referencial) → escala 8 % / 14 % / 17 % / 20 % / 30 %. Se retiene 1/12 de enero a marzo y desde abril lo que falta entre 9, 8, 5, 4 y el saldo en diciembre (las 12 retenciones suman el impuesto anual).
+- **Locación:** sin pensión ni beneficios; retención de 4.ª (8 %) si el honorario del mes pasa de S/ 3 300, salvo que el prestador tenga **suspensión** (casilla nueva en el contrato).
+
+### 9.3 Planilla mensual (Personas → Planilla)
+1. **Generar** un mes (no futuro, uno por mes; el mes anterior del año debe estar cerrado porque la renta depende de él). Una línea por **contrato que cubre algún día del mes**: se paga por **días** (ingreso o cese a mitad de mes), con asignación familiar, pensión, renta, gratificación (julio y diciembre: 1/6 por mes completo del semestre + 9 % de bonificación; **no paga pensión**), **CTS** (mayo y noviembre: se *deposita* en el banco, se informa aparte y no es parte del neto) y **EsSalud 9 %** del empleador (costo, no descuento).
+2. **Ajustar** (solo en borrador): ingresos (bono, comisión, horas extra; *afectos* o *inafectos*) y descuentos (adelanto, tardanza), cada uno con concepto y motivo. En borrador la planilla **se recalcula con los contratos**.
+3. **Avisos y errores:** personal activo sin contrato ese mes, contrato que vence dentro del mes, sin asignación (sede vacía) → avisos; falta de sistema de pensiones o neto negativo → **errores que impiden cerrar**.
+4. **Cerrar:** guarda una **foto** de cada línea. Después, cambiar un contrato no la altera, y lo cobrado y retenido alimenta la renta de los meses siguientes.
+5. **Pagar:** fecha (no futura, no anterior al mes) y referencia. **Una planilla pagada no se reabre.**
+6. **Reabrir** (solo cerrada y no pagada, con motivo; no si ya hay una posterior cerrada del año): vuelve a ser borrador.
+7. **Boleta de pago** por trabajador (imprimir o guardar como PDF), PDF y CSV de la planilla, e historial de cada acción (quién y cuándo).
+- **Conexión con Contratos:** el detalle del contrato muestra los meses que ya pagó; **no se cierra un contrato** con fecha que toque una planilla cerrada que lo pagó (pagada: el cese debe ser de un mes posterior). Personal tiene «Ver planillas» por trabajador.
+- Permisos nuevos (Organización → Permisos → Personas → Planilla): ver, generar, ajustar, cerrar, pagar y reabrir.
+
+### 9.4 Supuestos y lo que no cubre
+Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/payrollEngine.ts` para actualizarlas en un solo lugar; la retención la valida contabilidad. No incluye: liquidación de beneficios al cese (gratificación, CTS y vacaciones truncas), PLAME / T-Registro, ingresos de otros empleadores, deducción adicional de 3 UIT, ni el egreso en Caja o bancos al pagar.
+
+---
+
+## 10. Qué se probó
+Personal, usuarios y planilla: `check-payroll.ts` (motor, flujo, boleta y acceso del personal); en el navegador: generar la planilla de octubre (Juan Pérez S/ 3 077.96 y María Torres S/ 2 429.55 de neto), agregar un ajuste (sin motivo se rechaza), cerrar, reabrir con motivo, volver a cerrar y registrar el pago (desaparece «Reabrir»); cerrar un contrato ya pagado (se rechaza); crear la cuenta de María desde Personal (formulario prellenado con sus datos y sede); inactivar a Juan (aviso previo, y su cuenta queda inactiva con constancia; activarla se rechaza mientras la ficha siga inactiva).
+
 Psicopedagogía: `check-psychopedagogy.ts` (84 casos: responsable y cruces, asistencia, motivos y 24 h, eventos del historial, métricas, recordatorios y reporte); en el navegador: cancelar con un motivo del alumno a menos de 24 h (se rechaza), cancelarla por la institución (queda en el historial), asignar el responsable de una actividad (Juan Pérez aparece bloqueado por una asesoría suya a esa hora), marcar asistencia, el formulario de la sesión con sus obligatorias, los recordatorios (registrar un envío), el reporte, y reprogramar un cambio de responsable sin motivo (se rechaza) y con motivo (queda «Reprogramada 1 vez»).
 
 Verificación antes de la primera asesoría: `check-first-session.ts` (42 casos: cuándo aplica, niveles de urgencia, pago vs. verificación, bloqueo, acciones sin las 24 horas, orden y receta vigente); en el navegador, Valentina Silva (asesoría en 3 días): sale primera en Verificación como «Urgente», la agenda muestra el aviso y el menú deshabilitado, la ventana de reprogramación explica el motivo, la confirmación pide la casilla y, al confirmar, el aviso desaparece.
 
-`tsc` sin errores · `vite build` · los 14 scripts `check-*` pasan (`check-business`: 97 casos; `check-first-session`: 42; `check-psychopedagogy`: 84) · en el navegador: ficha de matrícula y su vista previa, cambio de programa (solicitar → aprobar → plan y programa actualizados), caída y reactivación, vista previa del traslado, arqueo y cierre de caja (con diferencia, bloqueo de reversa en día cerrado, reapertura y su registro), reversa de un pago con nota de crédito `BC01-000001`, política de cobranza con mora del 2 %, cobro de mora (USD 122.40 sobre una cuota de USD 200 con 921 días de atraso), recordatorios, reporte de cartera y renovación (el asistente abre con los datos y la observación).
+`tsc` sin errores · `vite build` · los 15 scripts `check-*` pasan (`check-business`: 97; `check-first-session`: 42; `check-psychopedagogy`: 84; `check-payroll`: 64) · en el navegador: ficha de matrícula y su vista previa, cambio de programa (solicitar → aprobar → plan y programa actualizados), caída y reactivación, vista previa del traslado, arqueo y cierre de caja (con diferencia, bloqueo de reversa en día cerrado, reapertura y su registro), reversa de un pago con nota de crédito `BC01-000001`, política de cobranza con mora del 2 %, cobro de mora (USD 122.40 sobre una cuota de USD 200 con 921 días de atraso), recordatorios, reporte de cartera y renovación (el asistente abre con los datos y la observación).
 No se probó en el navegador la generación del **contrato** (los datos de ejemplo no tienen dirección del titular, y el sistema lo avisa); sí está cubierta por el script de reglas.

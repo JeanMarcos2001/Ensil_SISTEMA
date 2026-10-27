@@ -49,6 +49,15 @@ export const PERM = {
   psiRemind: 'psi-recordatorios:remind',
   psiConfig: 'psi-recordatorios:config',
   psiReport: 'rep-general:view',
+  userCreate: 'org-usuarios:create',
+  userEdit: 'org-usuarios:edit',
+  userDeactivate: 'org-usuarios:deactivate',
+  payrollView: 'per-planilla:view',
+  payrollGenerate: 'per-planilla:generate',
+  payrollAdjust: 'per-planilla:adjust',
+  payrollClose: 'per-planilla:close',
+  payrollPay: 'per-planilla:pay',
+  payrollReopen: 'per-planilla:reopen',
 } as const;
 
 export type ChangeKind = 'Caída' | 'Reactivación' | 'Cambio de programa' | 'Traslado de sede';

@@ -3,7 +3,7 @@
  *
  *  - Los documentos se ARMAN con los datos de la matrícula (alumno, titular, programa, precio, plan, sede, empresa, vigencia);
  *    nada se digita dos veces. El contrato sale de una plantilla con campos entre llaves dobles (`{{alumno}}`) que se edita en
- *    Configuración → Plantillas de documentos.
+ *    Configuración → Documentos → Plantillas de contrato y ficha.
  *  - Antes de generar el contrato se comprueba que existan los datos que lo hacen válido (titular con documento y dirección,
  *    mayoría de edad si el alumno es su propio titular, empresa de la sede con RUC, plan de pagos). Si falta algo, se dice qué.
  *  - Cada documento generado tiene NÚMERO (CTR-2026-001 / FIC-2026-001) y VERSIÓN. Si los datos cambian después (precio,

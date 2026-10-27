@@ -82,10 +82,10 @@ check('Ida y vuelta ficha → formulario', staffToForm({ ...existing[0], hasChil
 // ================================================================ Contratos y sueldo neto
 check('No existe la jornada part time: todos los contratos son Full time', buildContract({ ...emptyContractForm(), staffId: '1', type: 'Indeterminado', startDate: '2026-11-01', grossSalary: '3000', pensionSystem: 'ONP' }).shift === 'Full time');
 check('Tipos de contrato', CONTRACT_TYPES.join() === 'Indeterminado,Plazo Fijo,Locación de servicios');
-check('ONP: 13 % del bruto', pensionRate('Indeterminado', 'ONP', '') === 0.13 && estimateNet(2800, 'Plazo Fijo', 'ONP', '')?.net === 2436 && estimateNet(2800, 'Plazo Fijo', 'ONP', '')?.contribution === 364);
+check('ONP: 13 % del bruto', pensionRate('Indeterminado', 'ONP', '') === 0.13 && estimateNet(2800, 'Plazo Fijo', 'ONP', '', {}, 2026)?.net === 2427.97 && estimateNet(2800, 'Plazo Fijo', 'ONP', '', {}, 2026)?.contribution === 364 && estimateNet(2800, 'Plazo Fijo', 'ONP', '', {}, 2026)?.incomeTax === 8.03);
 check('AFP: fondo 10 % + seguro + comisión de la AFP elegida (sin «tipo de comisión»)', Math.abs(pensionRate('Indeterminado', 'AFP', 'Integra') - 0.1292) < 1e-9 && Math.abs(pensionRate('Indeterminado', 'AFP', 'Habitat') - 0.1284) < 1e-9);
 check('Cada AFP tiene su tasa', AFP_FUNDS.every(f => pensionRate('Indeterminado', 'AFP', f) > 0.12 && pensionRate('Indeterminado', 'AFP', f) < 0.14));
-check('Neto estimado AFP Integra sobre 3500', estimateNet(3500, 'Indeterminado', 'AFP', 'Integra')?.net === 3047.8 && estimateNet(3500, 'Indeterminado', 'AFP', 'Integra')?.contribution === 452.2);
+check('Neto de un mes regular, AFP Integra sobre 3500 (aporte 452.20 y renta de 5.ª 74.20)', estimateNet(3500, 'Indeterminado', 'AFP', 'Integra', {}, 2026)?.net === 2973.6 && estimateNet(3500, 'Indeterminado', 'AFP', 'Integra', {}, 2026)?.contribution === 452.2 && estimateNet(3500, 'Indeterminado', 'AFP', 'Integra', {}, 2026)?.incomeTax === 74.2);
 check('Locación de servicios: sin aportes, neto = bruto', estimateNet(2000, 'Locación de servicios', '', '')?.net === 2000 && pensionRate('Locación de servicios', 'ONP', '') === 0);
 check('Sin sueldo, sin sistema o AFP sin fondo → sin estimación', estimateNet(0, 'Indeterminado', 'ONP', '') === null && estimateNet(2000, 'Indeterminado', '', '') === null && estimateNet(2000, 'Indeterminado', 'AFP', '') === null);
 

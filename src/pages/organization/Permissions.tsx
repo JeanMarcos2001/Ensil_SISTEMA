@@ -126,6 +126,24 @@ const MODULES: Module[] = [
     ]
   },
   {
+    id: 'mod-personas',
+    name: 'Personas',
+    functionalities: [
+      {
+        id: 'per-planilla',
+        name: 'Planilla',
+        actions: [
+          { id: 'view', label: 'Ver planillas y boletas' },
+          { id: 'generate', label: 'Generar y eliminar borradores de planilla' },
+          { id: 'adjust', label: 'Agregar ajustes (bonos, descuentos)' },
+          { id: 'close', label: 'Cerrar planilla' },
+          { id: 'pay', label: 'Registrar el pago de la planilla' },
+          { id: 'reopen', label: 'Reabrir planilla cerrada' },
+        ]
+      }
+    ]
+  },
+  {
     id: 'mod-psico',
     name: 'Psicopedagogía',
     functionalities: [

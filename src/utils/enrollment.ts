@@ -297,7 +297,7 @@ export function getInterviewers(c: Pick<EnrollmentCatalogs, 'staff' | 'assignmen
   return getInterviewerOptions(c, branchId).map(o => o.staff);
 }
 
-/** Horarios de clases activos y disponibles en la sede (configurados en Configuración → Horarios de clases). */
+/** Horarios de clases activos y disponibles en la sede (configurados en Configuración → Comercial → Horarios de clases). */
 export function getAvailableSchedules(schedules: ClassSchedule[], branchId: string): ClassSchedule[] {
   return schedules.filter(h => h.status === 'Activo' && (h.allBranches || h.branchIds.includes(branchId)));
 }

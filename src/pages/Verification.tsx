@@ -467,7 +467,7 @@ export function Verification() {
                   <h4 className="text-sm font-semibold text-danger">No se encontró una receta vigente</h4>
                   <p className="text-xs text-danger/80 mt-1">
                     No existe una receta de materiales activa para este programa, nivel y sede en la fecha actual. 
-                    Debe configurar una receta en "Configuración comercial" para proceder.
+                    Debe configurar una receta en «Oferta comercial → Recetas de materiales» para proceder.
                   </p>
                 </div>
               </div>

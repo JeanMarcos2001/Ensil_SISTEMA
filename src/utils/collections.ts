@@ -1,7 +1,7 @@
 /**
  * Cobranza y cartera (funciones puras): mora, recordatorios y reportes.
  *
- * Política de cobranza (editable en Configuración → Política de cobranza):
+ * Política de cobranza (editable en Configuración → Cobranza → Política de cobranza):
  *  - Días de gracia: una cuota vencida no genera mora hasta pasados estos días.
  *  - Tasa de mora mensual: 0 % por defecto (sin interés); si se define, la mora se calcula sobre el saldo vencido,
  *    proporcional a los días fuera de gracia (tasa × días / 30). Se COBRA generando una cuota «Mora» (ver `chargeMoraOn`),
@@ -82,7 +82,7 @@ export function validateMoraCharge(plan: Plan, installmentId: string, policy: Co
   if (!inst) return ['No se encontró la cuota.'];
   if (inst.isMora) return ['La mora no genera más mora.'];
   if (!isOpen(inst)) return ['La cuota no tiene saldo por cobrar.'];
-  if (policy.moraMonthlyRate <= 0) return ['La política de cobranza no cobra mora (tasa 0 %). Defínala en Configuración → Política de cobranza.'];
+  if (policy.moraMonthlyRate <= 0) return ['La política de cobranza no cobra mora (tasa 0 %). Defínala en Configuración → Cobranza → Política de cobranza.'];
   const mora = moraOf(inst, policy, today);
   if (mora.daysOverdue === 0) return ['La cuota aún no venció.'];
   if (mora.chargeableDays === 0) return [`La cuota está dentro de los ${policy.graceDays} días de gracia.`];

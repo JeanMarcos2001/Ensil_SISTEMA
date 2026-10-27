@@ -15,7 +15,7 @@ interface FormState {
 const emptyForm: FormState = { name: '', allBranches: true, branchIds: [] };
 
 /**
- * Configuración → CRUDS Básicos → Horarios de clases.
+ * Configuración → Comercial → Horarios de clases.
  * Alimenta el selector «Horario de clases» del asistente de matrícula (filtrado por sede).
  */
 export function ClassSchedulesConfig() {
