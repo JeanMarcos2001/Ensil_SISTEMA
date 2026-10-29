@@ -19,9 +19,12 @@
  *  - No aplica a matrículas de grupo promocional ni a cronogramas de monto variable.
  *
  * TRASLADO DE SEDE (matrícula activa)
- *  - El programa debe estar habilitado en la sede destino y el horario del alumno existir allí (si no, se elige otro).
+ *  - El programa debe estar habilitado en la sede destino.
  *  - El precio y el plan NO cambian; los pagos y la caja quedan en la sede donde se cobraron. Las asesorías y actividades
  *    futuras de la sede anterior se cancelan para reprogramarlas en la nueva.
+ *  - No hay «horario de clases»: el único horario es el de las asesorías (Psicopedagogía). Si el traslado cancela su PRIMERA
+ *    asesoría (de la que depende la vigencia), la solicitud lleva la fecha y la hora de la nueva primera asesoría en la sede
+ *    destino (un bloque vacío, con personal de Psicopedagogía allí) y, al aprobarse, se programa sola.
  *
  * RENOVAR (matrícula nueva)
  *  - Cuando la base terminó (o la matrícula cayó hace más del plazo de reactivación) se abre el asistente de matrícula con
@@ -29,12 +32,12 @@
  *    cuál viene (`renewsId`).
  */
 import type {
-  Branch, ChangeRequest, ClassSchedule, Enrollment, Level, MonthlySchedule, Payment, Plan, PromotionGroup, Program, Schedule, Student, Tariff, PaymentType, Guardian,
+  Assignment, Branch, ChangeRequest, Enrollment, Level, MonthlySchedule, Payment, Plan, PromotionGroup, Program, Schedule, Student, Tariff, PaymentType, Guardian,
 } from '../context/DataContext';
 import { enrollmentPaidUSD, installmentDueISO, MIN_DETAIL } from './enrollmentDrop';
-import { emptyDraft, emptyStudent, getAvailablePrograms, getAvailableSchedules, getProgramLevels, type DraftPerson, type EnrollmentDraft } from './enrollment';
+import { INTERVIEWER_AREA, emptyDraft, emptyStudent, getAvailablePrograms, getProgramLevels, type DraftPerson, type EnrollmentDraft } from './enrollment';
 import { isClosed, isOpen, recomputePlan } from './planState';
-import { addDaysISO } from './schedule';
+import { addDaysISO, allActivities, checkFirstSessionBlock, findScheduleConflict, longDayLabel, slotLabel, slotsForDate, type SchedulingContext } from './schedule';
 import { findTariff, formatDisplayDate, roundMoney, tariffTotal } from './tariffs';
 import { daysBetween, enrollmentValidity, programOf } from './validity';
 
@@ -43,7 +46,7 @@ export const MAX_START_AHEAD_DAYS = 30;
 
 export const REACTIVATION_REASONS = ['El alumno retomó el pago', 'Se resolvió el motivo de la caída', 'La caída fue un error', 'Otro'];
 export const PROGRAM_CHANGE_REASONS = ['Nivel mal asignado', 'Cambio de objetivos del alumno', 'Recomendación de Psicopedagogía', 'Otro'];
-export const TRANSFER_REASONS = ['Cambio de domicilio', 'Cambio de trabajo o de estudios', 'Horario no disponible en su sede', 'Otro'];
+export const TRANSFER_REASONS = ['Cambio de domicilio', 'Cambio de trabajo o de estudios', 'Atención no disponible en su sede', 'Otro'];
 
 export interface ChangeContext {
   enrollments: Enrollment[];
@@ -56,11 +59,27 @@ export interface ChangeContext {
   tariffs: Tariff[];
   paymentTypes: PaymentType[];
   branches: Branch[];
-  classSchedules: ClassSchedule[];
   payments: Payment[];
   groups: PromotionGroup[];
   requests: ChangeRequest[];
+  /** Personal de Psicopedagogía por sede (id de sede → nombres): quien atenderá la primera asesoría nueva. */
+  responsibles?: Record<string, string[]>;
   today: string;
+}
+
+const fold = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+
+/** Personal activo con una asignación activa en Psicopedagogía en cada sede (id de sede → nombres). */
+export function responsiblesByBranch(
+  staff: { id: string; names: string; lastNameP: string; status: string }[], assignments: Assignment[], branches: Branch[]
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const b of branches) {
+    out[b.id] = staff
+      .filter(s => s.status === 'Activo' && assignments.some(a => a.staffId === s.id && a.status === 'Activa' && fold(a.area) === fold(INTERVIEWER_AREA) && a.branch === b.name))
+      .map(s => `${s.names} ${s.lastNameP}`.trim());
+  }
+  return out;
 }
 
 const sameStudent = (a: Enrollment, b: Enrollment) => (a.studentId && b.studentId ? a.studentId === b.studentId : a.student === b.student);
@@ -308,13 +327,52 @@ export function applyProgramChangeToPlan(plan: Plan, preview: ProgramChangePrevi
 
 export interface TransferInput {
   branchId: string;
-  /** Horario de clases en la sede destino (si el actual no existe allí). */
-  schedule: string;
+  /** Fecha y hora de la nueva primera asesoría en la sede destino (solo si el traslado cancela la actual). */
+  firstDate: string;
+  firstTime: string;
   reason: string;
   detail: string;
 }
 
-export function transferProblems(e: Enrollment, input: Pick<TransferInput, 'branchId' | 'schedule'>, c: ChangeContext): string[] {
+type TransferSlot = Pick<TransferInput, 'branchId' | 'firstDate' | 'firstTime'>;
+
+/** Qué agenda de la sede anterior se cancela con el traslado (y si incluye la primera asesoría). */
+export function transferAgenda(e: Enrollment, c: ChangeContext) {
+  const student = studentOf(e, c);
+  const otherHere = c.enrollments.some(o => o.id !== e.id && o.status === 'Activa' && sameStudent(e, o) && o.branchId === e.branchId);
+  const mine = (s: Schedule) => (student?.id && s.studentId ? s.studentId === student.id : s.student === e.student);
+  const scheduleIds = c.schedules
+    .filter(s => ['Reservado', 'Reprogramado'].includes(s.status) && s.date >= c.today && (!s.branchId || s.branchId === e.branchId))
+    .filter(s => (otherHere ? s.isFirst && s.enrollmentId === e.id : mine(s)))
+    .map(s => s.id);
+  const activityRemovals: { monthlyId: string; activityId: string; studentId: string }[] = [];
+  if (!otherHere && student) {
+    for (const m of c.monthly) {
+      if (m.branchId !== e.branchId) continue;
+      for (const a of m.actividades) if (a.fecha >= c.today && a.inscritos.includes(student.id)) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId: student.id });
+    }
+  }
+  const firstSessionLost = c.schedules.some(s => scheduleIds.includes(s.id) && s.isFirst && s.enrollmentId === e.id);
+  return { student, scheduleIds, activityRemovals, firstSessionLost };
+}
+
+/** Problemas de la nueva primera asesoría en la sede destino (fecha, bloque vacío y cruces del alumno). */
+function newFirstSessionProblems(e: Enrollment, input: TransferSlot, targetName: string, cancelled: string[], c: ChangeContext): string[] {
+  if (!input.firstDate) return [`Elija la fecha de la nueva primera asesoría en ${targetName}: la actual se cancela con el traslado.`];
+  if (input.firstDate < c.today) return ['La fecha de la primera asesoría no puede ser anterior a hoy.'];
+  if (slotsForDate(input.firstDate).length === 0) return ['Los domingos no hay atención. Elija de lunes a sábado.'];
+  if (!input.firstTime) return [`Elija el horario de la nueva primera asesoría en ${targetName}.`];
+  const alive = c.schedules.filter(s => !cancelled.includes(s.id));
+  const scheduling: SchedulingContext = { schedules: alive, capacity: { defaultCapacity: null, byBranch: {}, overrides: [] }, activities: allActivities(c.monthly) };
+  const problem = checkFirstSessionBlock(scheduling, input.branchId, input.firstDate, input.firstTime);
+  if (problem) return [problem];
+  const student = studentOf(e, c);
+  const clash = findScheduleConflict(alive, { student: e.student, studentId: student?.id, responsible: '', date: input.firstDate, time: input.firstTime, status: 'Reservado' });
+  if (clash) return [`El alumno ya tiene una asesoría ese día de ${slotLabel(clash.schedule.time)}.`];
+  return [];
+}
+
+export function transferProblems(e: Enrollment, input: TransferSlot, c: ChangeContext): string[] {
   const out: string[] = [];
   if (e.status !== 'Activa') return [`La matrícula ${e.id} no está activa (${e.status}).`];
   if (pendingChangeOf(e.id, c.requests)) out.push('Ya hay una solicitud pendiente para esta matrícula.');
@@ -322,12 +380,11 @@ export function transferProblems(e: Enrollment, input: Pick<TransferInput, 'bran
   if (!target) { out.push('Seleccione la sede destino.'); return out; }
   if (target.id === e.branchId) out.push('La sede destino es la misma de la matrícula.');
   if (!getAvailablePrograms(c.programs, target.id).some(p => p.id === e.programId)) out.push(`El programa ${e.program} no está habilitado en ${target.name}.`);
-  const student = studentOf(e, c);
-  const options = getAvailableSchedules(c.classSchedules, target.id).map(h => h.name);
-  const current = student?.horario;
-  if (!current || !options.includes(current)) {
-    if (!input.schedule) out.push(`El horario del alumno${current ? ` (${current})` : ''} no existe en ${target.name}: elija uno de esa sede.`);
-    else if (!options.includes(input.schedule)) out.push(`El horario elegido no está disponible en ${target.name}.`);
+  const agenda = transferAgenda(e, c);
+  if (agenda.firstSessionLost) {
+    // La vigencia empieza con la primera asesoría: no se deja al alumno sin ella
+    if (c.responsibles && (c.responsibles[target.id] ?? []).length === 0) out.push(`No hay personal de Psicopedagogía en ${target.name}: asígnelo en Personas → Asignaciones antes del traslado.`);
+    out.push(...newFirstSessionProblems(e, input, target.name, agenda.scheduleIds, c));
   }
   return out;
 }
@@ -339,49 +396,36 @@ export function validateTransferRequest(e: Enrollment, input: TransferInput, c: 
 export interface TransferPreview {
   fromName: string;
   toName: string;
-  /** Horario del alumno después del traslado. */
-  schedule: string;
-  scheduleChanged: boolean;
   /** Asesorías futuras de la sede anterior que se cancelan. */
   scheduleIds: string[];
   /** Inscripciones en actividades de la sede anterior que se quitan. */
   activityRemovals: { monthlyId: string; activityId: string; studentId: string }[];
   firstSessionLost: boolean;
+  /** Nueva primera asesoría que se programa en la sede destino al aprobar. */
+  newFirst?: { date: string; time: string };
   verificationPending: boolean;
   notes: string[];
 }
 
-export function previewTransfer(e: Enrollment, input: Pick<TransferInput, 'branchId' | 'schedule'>, c: ChangeContext): TransferPreview | undefined {
+export function previewTransfer(e: Enrollment, input: TransferSlot, c: ChangeContext): TransferPreview | undefined {
   const target = c.branches.find(b => b.id === input.branchId);
   if (!target) return undefined;
-  const student = studentOf(e, c);
-  const options = getAvailableSchedules(c.classSchedules, target.id).map(h => h.name);
-  const keep = !!student?.horario && options.includes(student.horario);
-  const schedule = keep ? student!.horario! : input.schedule;
-  const otherHere = c.enrollments.some(o => o.id !== e.id && o.status === 'Activa' && sameStudent(e, o) && o.branchId === e.branchId);
-  const mine = (s: Schedule) => (student?.id && s.studentId ? s.studentId === student.id : s.student === e.student);
-  const scheduleIds = c.schedules
-    .filter(s => ['Reservado', 'Reprogramado'].includes(s.status) && s.date >= c.today && (!s.branchId || s.branchId === e.branchId))
-    .filter(s => (otherHere ? s.isFirst && s.enrollmentId === e.id : mine(s)))
-    .map(s => s.id);
-  const activityRemovals: TransferPreview['activityRemovals'] = [];
-  if (!otherHere && student) {
-    for (const m of c.monthly) {
-      if (m.branchId !== e.branchId) continue;
-      for (const a of m.actividades) if (a.fecha >= c.today && a.inscritos.includes(student.id)) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId: student.id });
-    }
-  }
-  const firstSessionLost = c.schedules.some(s => scheduleIds.includes(s.id) && s.isFirst && s.enrollmentId === e.id);
+  const { scheduleIds, activityRemovals, firstSessionLost } = transferAgenda(e, c);
+  const newFirst = firstSessionLost && input.firstDate && input.firstTime ? { date: input.firstDate, time: input.firstTime } : undefined;
   const verificationPending = !e.verificationStatus || e.verificationStatus === 'Pendiente';
   const notes = [
     'El precio y el plan de pagos no cambian; los pagos y la caja quedan registrados en la sede donde se cobraron.',
-    'Las asesorías y actividades que se cancelan hay que programarlas de nuevo en la sede destino (Psicopedagogía → Programación).',
+    `Las asesorías y actividades que se cancelan hay que programarlas de nuevo en la sede destino (Psicopedagogía → Programación)${firstSessionLost ? ', salvo la primera asesoría, que se programa con esta solicitud' : ''}.`,
   ];
-  if (firstSessionLost) notes.push('Se cancela su primera asesoría: la vigencia no empieza a contar hasta programar la nueva.');
+  if (firstSessionLost) {
+    notes.push(newFirst
+      ? `Se cancela su primera asesoría y se programa la nueva en ${target.name}: ${longDayLabel(newFirst.date)} a las ${slotLabel(newFirst.time).split(' – ')[0]} (la vigencia cuenta desde esa fecha).`
+      : 'Se cancela su primera asesoría: elija la fecha y la hora de la nueva en la sede destino.');
+  }
   if (verificationPending) notes.push('Los materiales aún no se entregaron: se entregarán con el stock de la sede destino.');
   return {
-    fromName: e.sede ?? c.branches.find(b => b.id === e.branchId)?.name ?? '', toName: target.name, schedule, scheduleChanged: !!student && schedule !== student.horario,
-    scheduleIds, activityRemovals, firstSessionLost, verificationPending, notes,
+    fromName: e.sede ?? c.branches.find(b => b.id === e.branchId)?.name ?? '', toName: target.name,
+    scheduleIds, activityRemovals, firstSessionLost, newFirst, verificationPending, notes,
   };
 }
 
@@ -460,7 +504,6 @@ export function buildRenewalDraft(
       programId: check.suggestedProgramId,
       levelId: check.suggestedLevelId,
       paymentTypeId,
-      schedule: student.horario ?? '',
     }],
     renewsId: e.id,
   };

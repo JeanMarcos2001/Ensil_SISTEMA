@@ -148,7 +148,7 @@ const input = (over: Partial<StudentInput> = {}, studentOver: Record<string, unk
   student: {
     key: 'k', person: { ...emptyPerson(), docNumber: '70555666', names: 'Luz', lastNameP: 'Ruiz', lastNameM: 'Soto', birthDate: '2016-05-05' },
     relationship: 'Hijo(a)', situation: 'estudiando', institutionType: 'Colegio', school: 'I.E. San Martín', grade: '4° Primaria', occupation: '', workplace: '',
-    programId: '', levelId: '', paymentTypeId: '', schedule: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
+    programId: '', levelId: '', paymentTypeId: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
     ...studentOver,
   },
   ...over,
@@ -169,7 +169,7 @@ check('Alumno nuevo: queda «Sin matrícula», con su titular principal, parente
 check('Situación guardada solo lo que corresponde', sb.colegio === 'I.E. San Martín' && sb.grado === '4° Primaria' && sb.occupation === undefined && sb.occupationStatus === 'estudiando');
 const sbi = buildStudent(input({ mode: 'independiente', guardianIds: ['1'] }, { relationship: 'Hijo(a)', person: { ...emptyPerson(), docNumber: '70555666', names: 'Luz', lastNameP: 'Ruiz', birthDate: '1999-05-05', phone: '987654321' } }), guardians, TODAY);
 check('Independiente: es su propio titular, sin vínculos y con su teléfono', sbi.titular === 'Luz Ruiz' && sbi.guardianIds?.length === 0 && sbi.relationship === '' && sbi.phone === '987654321');
-check('Editar conserva programa, horario y estado', (() => { const b = buildStudent(input(), guardians, TODAY, { program: 'Kids - Nivel 1', horario: 'L-M-V 4:00 PM', status: 'Activo' }); return b.program === 'Kids - Nivel 1' && b.horario === 'L-M-V 4:00 PM' && b.status === 'Activo'; })());
+check('Editar conserva programa y estado', (() => { const b = buildStudent(input(), guardians, TODAY, { program: 'Kids - Nivel 1', status: 'Activo' }); return b.program === 'Kids - Nivel 1' && b.status === 'Activo'; })());
 check('Ida y vuelta alumno → formulario', (() => { const i = studentToInput(students[0], guardians); return i.mode === 'apoderado' && i.guardianIds.join() === '1' && i.student.relationship === 'Hijo(a)' && i.student.person.names === 'Mateo'; })());
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

@@ -59,7 +59,7 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
   const catalogs: EnrollmentCatalogs = {
     branches: data.branches, leadSources: data.leadSources, staff: data.staff, assignments: data.assignments,
     programs: data.programs, levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes,
-    promotions: data.promotions, guardians: data.guardians, students: data.students, classSchedules: data.classSchedules,
+    promotions: data.promotions, guardians: data.guardians, students: data.students,
     scheduling: { schedules: data.schedules, capacity: data.capacityConfig, activities: allActivities(data.monthlySchedules) },
   };
 

@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { useData } from '../../context/DataContext';
 import { canResolve } from '../../utils/authority';
-import { programChangeProblems, reactivationProblems, transferProblems, previewProgramChange, type ChangeContext } from '../../utils/enrollmentChange';
+import { programChangeProblems, reactivationProblems, responsiblesByBranch, transferProblems, previewProgramChange, type ChangeContext } from '../../utils/enrollmentChange';
 import { localDateOf } from '../../utils/schedule';
 import { Blocked, ChangePreviewPanel } from './ChangePreviewPanel';
 
@@ -27,10 +27,10 @@ export function ResolveChangeModal({ requestId, onClose }: Props) {
     if (!request) return undefined;
     return {
       enrollments: data.enrollments, plans: data.plans, students: data.students, schedules: data.schedules, monthly: data.monthlySchedules, programs: data.programs,
-      levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes, branches: data.branches, classSchedules: data.classSchedules,
-      payments: data.payments, groups: data.promotionGroups, requests: data.changeRequests.filter(r => r.id !== request.id), today: localDateOf(new Date().toISOString()),
+      levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes, branches: data.branches,
+      payments: data.payments, groups: data.promotionGroups, requests: data.changeRequests.filter(r => r.id !== request.id), responsibles: responsiblesByBranch(data.staff, data.assignments, data.branches), today: localDateOf(new Date().toISOString()),
     };
-  }, [request, data.enrollments, data.plans, data.students, data.schedules, data.monthlySchedules, data.programs, data.levels, data.tariffs, data.paymentTypes, data.branches, data.classSchedules, data.payments, data.promotionGroups, data.changeRequests]);
+  }, [request, data.enrollments, data.plans, data.students, data.schedules, data.monthlySchedules, data.programs, data.levels, data.tariffs, data.paymentTypes, data.branches, data.staff, data.assignments, data.payments, data.promotionGroups, data.changeRequests]);
 
   if (!request || !enrollment || !ctx) return null;
   const pending = request.status === 'Pendiente';
@@ -38,7 +38,7 @@ export function ResolveChangeModal({ requestId, onClose }: Props) {
     : request.kind === 'Cambio de programa'
       ? [...programChangeProblems(enrollment, { programId: request.payload.programId, levelId: request.payload.levelId }, ctx),
          ...(() => { const pv = previewProgramChange(enrollment, { programId: request.payload.programId, levelId: request.payload.levelId }, ctx); return pv && pv.remaining < 0 ? [`Se cobró USD ${(-pv.remaining).toFixed(2)} más que el precio nuevo: devuelva la diferencia primero.`] : []; })()]
-      : transferProblems(enrollment, { branchId: request.payload.branchId, schedule: request.payload.schedule }, ctx);
+      : transferProblems(enrollment, { branchId: request.payload.branchId, firstDate: request.payload.firstDate ?? '', firstTime: request.payload.firstTime ?? '' }, ctx);
   const authority = canResolve({ user: data.currentUser, roles: data.roles, permissions: data.permissions }, request.kind, request.requestedBy);
 
   const resolve = (decision: 'Aprobada' | 'Rechazada') => {

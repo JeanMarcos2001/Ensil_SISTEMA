@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Shipping } from '../logistics/Shipping';
 import { LeadsConfig } from './LeadsConfig';
-import { ClassSchedulesConfig } from './ClassSchedulesConfig';
 import { DocumentTemplatesConfig } from './DocumentTemplatesConfig';
 import { CollectionsConfig } from './CollectionsConfig';
 import { PsyRemindersConfig } from './PsyRemindersConfig';
@@ -25,7 +24,6 @@ interface Group {
 export const SETTINGS_GROUPS: Group[] = [
   { id: 'comercial', title: 'Comercial', sections: [
     { id: 'leads', label: 'Orígenes de leads', render: () => <LeadsConfig /> },
-    { id: 'schedules', label: 'Horarios de clases', render: () => <ClassSchedulesConfig /> },
   ] },
   { id: 'documentos', title: 'Documentos', sections: [
     { id: 'templates', label: 'Plantillas de contrato y ficha', render: () => <DocumentTemplatesConfig /> },

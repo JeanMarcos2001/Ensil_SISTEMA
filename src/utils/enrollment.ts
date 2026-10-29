@@ -10,7 +10,6 @@ import type {
   Assignment,
   Branch,
   CashMovement,
-  ClassSchedule,
   Enrollment,
   Guardian,
   LeadSource,
@@ -118,7 +117,6 @@ export interface DraftStudent {
   programId: string;
   levelId: string;
   paymentTypeId: string;
-  schedule: string;
   startDate: string;
   /** Fecha y hora específicas de la primera asesoría. */
   counselingDate: string;
@@ -163,7 +161,7 @@ export const newStudentKey = () => `S${Date.now().toString(36)}${(keyCounter++).
 export const emptyStudent = (): DraftStudent => ({
   key: newStudentKey(), person: emptyPerson(), relationship: '',
   situation: '', institutionType: '', school: '', grade: '', occupation: '', workplace: '',
-  programId: '', levelId: '', paymentTypeId: '', schedule: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
+  programId: '', levelId: '', paymentTypeId: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
 });
 
 export const emptyDraft = (today: string, branchId = ''): EnrollmentDraft => ({
@@ -247,7 +245,6 @@ export interface EnrollmentCatalogs {
   promotions: Promotion[];
   guardians: Guardian[];
   students: Student[];
-  classSchedules: ClassSchedule[];
   /** Agenda de Psicopedagogía (asesorías, cupos y actividades); permite validar la primera asesoría. */
   scheduling?: SchedulingContext;
 }
@@ -295,11 +292,6 @@ export function getInterviewerOptions(
 
 export function getInterviewers(c: Pick<EnrollmentCatalogs, 'staff' | 'assignments' | 'branches'>, branchId: string): Staff[] {
   return getInterviewerOptions(c, branchId).map(o => o.staff);
-}
-
-/** Horarios de clases activos y disponibles en la sede (configurados en Configuración → Comercial → Horarios de clases). */
-export function getAvailableSchedules(schedules: ClassSchedule[], branchId: string): ClassSchedule[] {
-  return schedules.filter(h => h.status === 'Activo' && (h.allBranches || h.branchIds.includes(branchId)));
 }
 
 /** Programas activos y habilitados para la sede. */
@@ -567,9 +559,6 @@ export function validateProgram(draft: EnrollmentDraft, c: EnrollmentCatalogs, q
     if (!s.paymentTypeId) { e.push(`${label}: seleccione el tipo de pago.`); return; }
     if (!q.tariff) e.push(`${label}: no hay un tarifario vigente para el tipo de pago elegido.`);
     if (s.startDate && s.startDate < draft.context.date) e.push(`${label}: la fecha de inicio de clases no puede ser anterior a la matrícula.`);
-    if (s.schedule && !getAvailableSchedules(c.classSchedules, draft.context.branchId).some(h => h.name === s.schedule)) {
-      e.push(`${label}: el horario elegido no está disponible en la sede.`);
-    }
     if (q.mode === 'fechas_manuales' && q.tariff) {
       const needed = q.tariff.installments.filter(l => l.variable).length;
       const dates = s.dueDates.slice(0, needed);
@@ -736,7 +725,7 @@ export function buildEnrollmentBatch(
       studentUpdates.push({
         id: studentId,
         patch: {
-          program: programLabel, horario: ds.schedule || undefined, fechaInicio: ds.startDate || undefined,
+          program: programLabel, fechaInicio: ds.startDate || undefined,
           titular: titularName, status: 'Activo',
           ...situationData(ds),
         },
@@ -745,7 +734,7 @@ export function buildEnrollmentBatch(
       studentId = nextSequentialId('ALU', [...studentIdPool, ...newStudents.map(s => s.id)]);
       newStudents.push({
         id: studentId, doc: person.docNumber.trim(), name, age: birth ? (ageOn(birth, draft.context.date) ?? 0) : 0,
-        program: programLabel, horario: ds.schedule || undefined, fechaInicio: ds.startDate || undefined,
+        program: programLabel, fechaInicio: ds.startDate || undefined,
         ...situationData(ds),
         titular: titularName, status: 'Activo',
         docType: person.docType, names: person.names.trim(), lastNameP: person.lastNameP.trim(), lastNameM: person.lastNameM.trim(),

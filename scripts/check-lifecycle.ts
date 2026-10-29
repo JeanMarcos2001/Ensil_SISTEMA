@@ -55,7 +55,7 @@ const payment = (id: string, over: Partial<Payment> = {}): Payment => ({
   id, date: '01 Sep 2026', student: 'Mateo Ruiz', concept: 'Pago de Cuota 1', amount: 200, method: 'Efectivo', receipt: 'B001-1', status: 'Aprobado',
   enrollmentIds: ['MAT-1'], currency: 'USD', parts: [{ id: 'p', currency: 'USD', amount: 200, method: 'Efectivo' }], ...over,
 });
-const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', age: 9, program: 'Kids - Nivel 1', titular: 'Juan', status: 'Activo', guardianIds: ['G1'], horario: 'L-M-V 4:00 PM', ...over });
+const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', age: 9, program: 'Kids - Nivel 1', titular: 'Juan', status: 'Activo', guardianIds: ['G1'], ...over });
 const sch = (id: string, over: Partial<Schedule> = {}): Schedule => ({
   id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over,
 });
@@ -162,16 +162,16 @@ check('Contado en 2 partes: reversar la parte 1 repone el esquema inicial (parte
 
 // ================================================================ Corrección de datos
 const names = { origin: (id: string) => ({ '1': 'Facebook', '2': 'Referido' } as Record<string, string>)[id] ?? '', advisor: (id: string) => ({ E1: 'Ana Quispe', E2: 'Luis Mamani' } as Record<string, string>)[id] ?? '' };
-const before = currentEditValues(enrollment('MAT-1', { observation: 'Nota' }), student());
-check('Valores actuales editables', before.observation === 'Nota' && before.originId === '1' && before.advisorId === 'E1' && before.schedule === 'L-M-V 4:00 PM');
-check('Solo cuatro datos administrativos son corregibles', Object.keys(EDIT_LABELS).join() === 'observation,originId,advisorId,schedule');
-const afterEdit = { ...before, originId: '2', schedule: 'M-J 5:00 PM' };
+const before = currentEditValues(enrollment('MAT-1', { observation: 'Nota' }));
+check('Valores actuales editables', before.observation === 'Nota' && before.originId === '1' && before.advisorId === 'E1');
+check('Solo tres datos administrativos son corregibles (ya no hay horario de clases)', Object.keys(EDIT_LABELS).join() === 'observation,originId,advisorId');
+const afterEdit = { ...before, originId: '2', advisorId: 'E2' };
 const diff = diffEnrollmentEdit(before, afterEdit, names);
-check('El historial guarda qué había y qué quedó (con nombres legibles)', diff.length === 2 && diff[0].from === 'Facebook' && diff[0].to === 'Referido' && diff[1].label === 'Horario de clases');
+check('El historial guarda qué había y qué quedó (con nombres legibles)', diff.length === 2 && diff[0].from === 'Facebook' && diff[0].to === 'Referido' && diff[1].to === 'Luis Mamani');
 check('Sin cambios no se guarda', validateEnrollmentEdit(enrollment('MAT-1'), before, [], 'x').some(m => /No hay cambios/.test(m)));
 check('Con cambios el motivo es obligatorio', validateEnrollmentEdit(enrollment('MAT-1'), afterEdit, diff, '').some(m => /motivo/.test(m)) && validateEnrollmentEdit(enrollment('MAT-1'), afterEdit, diff, 'Corrección de origen').length === 0);
 check('Solo se corrige una matrícula activa; origen y responsable son obligatorios', validateEnrollmentEdit(enrollment('MAT-1', { status: 'Caída' }), afterEdit, diff, 'Motivo válido').length === 1 && validateEnrollmentEdit(enrollment('MAT-1'), { ...afterEdit, originId: '' }, diff, 'Motivo válido').some(m => /origen/.test(m)));
-check('La corrección actualiza los nombres junto con los ids', (() => { const p = buildEnrollmentPatch(afterEdit, names); return p.origenId === '2' && p.origen === 'Referido' && p.asesor === 'Ana Quispe'; })());
+check('La corrección actualiza los nombres junto con los ids', (() => { const p = buildEnrollmentPatch(afterEdit, names); return p.origenId === '2' && p.origen === 'Referido' && p.asesorId === 'E2' && p.asesor === 'Luis Mamani'; })());
 
 // ================================================================ Ficha de la matrícula
 const g: Guardian = { id: 'G1', name: 'Juan Ruiz', doc: '4', phone: '9', email: '', students: 1, enrollments: 1, balance: '$0' };

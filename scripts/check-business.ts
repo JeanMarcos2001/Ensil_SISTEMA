@@ -3,7 +3,7 @@
  * cambio de programa, traslado de sede, renovación, contrato y ficha, mora, recordatorios y cartera.
  * Ejecutar: npx tsx scripts/check-business.ts
  */
-import type { Branch, CashClosure, CashMovement, ChangeRequest, ClassSchedule, ContractTemplate, Enrollment, Guardian, Level, Payment, PettyCashMovement, Plan, Program, Role, Schedule, Student, Tariff, PaymentType } from '../src/context/DataContext';
+import type { Branch, CashClosure, CashMovement, ChangeRequest, ContractTemplate, Enrollment, Guardian, Level, Payment, PettyCashMovement, Plan, Program, Role, Schedule, Student, Tariff, PaymentType } from '../src/context/DataContext';
 import { APPROVAL_POLICY, PERM, canRequest, canResolve, can } from '../src/utils/authority';
 import { NOTE_SERIES, allowedNoteModes, buildCreditNote, documentOf, nextNoteNumber, noteLabel, parseNoteNumber, validateNoteChoice } from '../src/utils/creditNotes';
 import { buildClosure, closedMessage, closedUntil, closureDrift, expectedAt, isDateClosed, validateClosure, validateReopen } from '../src/utils/cashClosure';
@@ -119,17 +119,14 @@ const tariff = (id: string, programId: string, levelId: string | undefined, tota
   id, name: `Tarifa ${id}`, programId, levelId, paymentTypeId: 'PT-4', branchId: 'all', currency: 'USD', basePrice: total, installments: [{ number: 1, concept: 'Pago', amount: total, dueDays: 0 }], startDate: '2026-01-01', status: 'Activo', ...over,
 });
 const tariffs = [tariff('T-K1', 'P-K', 'L-K1', 800), tariff('T-K2', 'P-K', 'L-K2', 900), tariff('T-T1', 'P-T', 'L-T1', 1000), tariff('T-A', 'P-A', undefined, 300)];
-const classSchedules: ClassSchedule[] = [
-  { id: 'H1', name: 'L-M-V 4:00 PM', allBranches: false, branchIds: ['FIL-PIU'], status: 'Activo' }, { id: 'H2', name: 'Sábados 9:00 AM', allBranches: true, branchIds: [], status: 'Activo' },
-];
-const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '12345678', name: 'Mateo Ruiz', age: 9, program: 'Kids', titular: 'Juan Ruiz', status: 'Activo', guardianIds: ['G1'], horario: 'L-M-V 4:00 PM', ...over });
+const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '12345678', name: 'Mateo Ruiz', age: 9, program: 'Kids', titular: 'Juan Ruiz', status: 'Activo', guardianIds: ['G1'], ...over });
 const enrollment = (over: Partial<Enrollment> = {}): Enrollment => ({
   id: 'MAT-1', date: '01 Sep 2026', dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', programId: 'P-K', level: 'Nivel 1', levelId: 'L-K1', status: 'Activa', plan: 'Al día',
   branchId: 'FIL-PIU', sede: 'Piura', paymentTypeId: 'PT-4', paymentTypeName: 'Plan 4 cuotas', assignedPrice: 800, planId: 'PLN-1', verificationStatus: 'Pendiente', ...over,
 });
 const schedule = (id: string, over: Partial<Schedule> = {}): Schedule => ({ id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over });
 const ctxOf = (over: Partial<ChangeContext> = {}): ChangeContext => ({
-  enrollments: [enrollment()], plans: [basePlan()], students: [student()], schedules: [], monthly: [], programs, levels, tariffs, paymentTypes, branches, classSchedules, payments: [], groups: [], requests: [], today: TODAY, ...over,
+  enrollments: [enrollment()], plans: [basePlan()], students: [student()], schedules: [], monthly: [], programs, levels, tariffs, paymentTypes, branches, payments: [], groups: [], requests: [], responsibles: { 'FIL-CHI': ['Rosa Díaz'], 'FIL-PIU': ['Ana'] }, today: TODAY, ...over,
 });
 
 // --- Reactivación
@@ -210,15 +207,23 @@ check('Cambio: con precio igual al cobrado, las cuotas libres se anulan', (() =>
 check('Cambio: una verificación hecha vuelve a pendiente', previewProgramChange(enrollment({ verificationStatus: 'Verificado Completo' }), pcInput(), ctxOf())!.verificationReset && !previewProgramChange(enrollment(), pcInput(), ctxOf())!.verificationReset);
 
 // --- Traslado de sede
-const tInput = (over = {}) => ({ branchId: 'FIL-CHI', schedule: 'Sábados 9:00 AM', reason: 'Cambio de domicilio', detail: 'La familia se mudó a Chiclayo', ...over });
-check('Traslado: válido eligiendo un horario de la sede destino', transferProblems(enrollment(), tInput(), ctxOf()).length === 0 && validateTransferRequest(enrollment(), tInput(), ctxOf()).length === 0);
-check('Traslado: el horario actual no existe allí → hay que elegir otro', transferProblems(enrollment(), tInput({ schedule: '' }), ctxOf()).some(p => /elija uno/.test(p)) && transferProblems(enrollment(), tInput({ schedule: 'Martes 8 PM' }), ctxOf()).some(p => /no está disponible/.test(p)));
-check('Traslado: si el horario existe en la sede destino se conserva', (() => { const pv = previewTransfer(enrollment(), tInput({ schedule: '' }), ctxOf({ students: [student({ horario: 'Sábados 9:00 AM' })] }))!; return pv.schedule === 'Sábados 9:00 AM' && !pv.scheduleChanged; })());
+const tInput = (over = {}) => ({ branchId: 'FIL-CHI', firstDate: '', firstTime: '', reason: 'Cambio de domicilio', detail: 'La familia se mudó a Chiclayo', ...over });
+const firstS = schedule('S3', { isFirst: true, enrollmentId: 'MAT-1', date: '2026-10-30' });
+const withFirst = (over: Partial<ChangeContext> = {}) => ctxOf({ schedules: [firstS], ...over });
+check('Traslado: sin primera asesoría pendiente no se pide horario (ya no hay horario de clases)', transferProblems(enrollment(), tInput(), ctxOf()).length === 0 && validateTransferRequest(enrollment(), tInput(), ctxOf()).length === 0);
+check('Traslado: si se cancela su primera asesoría hay que elegir la nueva fecha y hora en la sede destino', transferProblems(enrollment(), tInput(), withFirst()).some(p => /Elija la fecha de la nueva primera asesoría/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-03' }), withFirst()).some(p => /Elija el horario/.test(p)));
+check('Traslado: con fecha y horario libres de la sede destino es válido', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst()).length === 0 && validateTransferRequest(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst()).length === 0);
+check('Traslado: no el pasado ni los domingos ni una hora fuera de la atención', transferProblems(enrollment(), tInput({ firstDate: '2026-10-20', firstTime: '16:00' }), withFirst()).some(p => /anterior a hoy/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-01', firstTime: '16:00' }), withFirst()).some(p => /domingos/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '03:00' }), withFirst()).some(p => /no está disponible/.test(p)));
+check('Traslado: el bloque de la sede destino debe estar vacío (ni asesorías ni otra primera asesoría)', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ schedules: [firstS, schedule('X1', { studentId: 'ALU-9', student: 'Otro', branchId: 'FIL-CHI', date: '2026-11-03', time: '16:00' })] })).some(p => /ya tiene asesorías/.test(p)));
+check('Traslado: la agenda que se cancela no estorba a la nueva (mismo día y hora en la sede anterior)', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ schedules: [firstS, schedule('S1', { date: '2026-11-03', time: '16:00' })] })).length === 0);
+check('Traslado: sin personal de Psicopedagogía en la sede destino no se traslada su primera asesoría', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ responsibles: { 'FIL-CHI': [] } })).some(p => /No hay personal de Psicopedagogía/.test(p)));
+check('Traslado: la vista previa dice cuál será la nueva primera asesoría', (() => { const pv = previewTransfer(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst())!; return pv.firstSessionLost && pv.newFirst?.date === '2026-11-03' && pv.notes.some(n => /se programa la nueva en Chiclayo/.test(n)) && !pv.notes.some(n => /\.\./.test(n)); })());
+check('Traslado: sin primera asesoría pendiente no hay nueva primera asesoría', previewTransfer(enrollment(), tInput(), ctxOf())!.newFirst === undefined);
 check('Traslado: no a la misma sede, ni a una sede donde el programa no está', transferProblems(enrollment(), tInput({ branchId: 'FIL-PIU' }), ctxOf()).some(p => /misma/.test(p)) && transferProblems(enrollment({ programId: 'P-T', program: 'Teens' }), tInput(), ctxOf({ enrollments: [enrollment({ programId: 'P-T', program: 'Teens' })] })).some(p => /no está habilitado/.test(p)));
 check('Traslado: se cancelan las asesorías y actividades futuras de la sede anterior', (() => {
   const monthly = [{ id: 'M1', branchId: 'FIL-PIU', actividades: [{ id: 'A1', fecha: '2026-11-05', inscritos: ['ALU-1'] }, { id: 'A2', fecha: '2026-09-05', inscritos: ['ALU-1'] }] }, { id: 'M2', branchId: 'FIL-CHI', actividades: [{ id: 'A3', fecha: '2026-11-05', inscritos: ['ALU-1'] }] }] as any;
   const pv = previewTransfer(enrollment(), tInput(), ctxOf({ schedules: [schedule('S1'), schedule('S2', { date: '2026-09-01', status: 'Asistió' }), schedule('S3', { isFirst: true, enrollmentId: 'MAT-1', date: '2026-10-30' })], monthly }))!;
-  return pv.scheduleIds.sort().join() === 'S1,S3' && pv.activityRemovals.length === 1 && pv.activityRemovals[0].activityId === 'A1' && pv.firstSessionLost && pv.scheduleChanged;
+  return pv.scheduleIds.sort().join() === 'S1,S3' && pv.activityRemovals.length === 1 && pv.activityRemovals[0].activityId === 'A1' && pv.firstSessionLost;
 })());
 check('Traslado: con otra matrícula activa en la sede solo se cancela la primera asesoría de esta', (() => {
   const pv = previewTransfer(enrollment(), tInput(), ctxOf({ enrollments: [enrollment(), enrollment({ id: 'MAT-2', programId: 'P-A', program: 'Adultos' })], schedules: [schedule('S1'), schedule('S3', { isFirst: true, enrollmentId: 'MAT-1', date: '2026-10-30' })] }))!;

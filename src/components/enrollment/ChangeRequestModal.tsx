@@ -6,13 +6,14 @@ import { Modal } from '../ui/Modal';
 import { useData, type ChangeKindName } from '../../context/DataContext';
 import {
   MAX_START_AHEAD_DAYS, PROGRAM_CHANGE_REASONS, REACTIVATION_REASONS, TRANSFER_REASONS,
-  programChangeProblems, reactivationProblems, transferProblems, validateProgramChangeRequest, validateReactivationRequest, validateTransferRequest,
+  programChangeProblems, reactivationProblems, responsiblesByBranch, transferAgenda, transferProblems, validateProgramChangeRequest, validateReactivationRequest, validateTransferRequest,
   type ChangeContext,
 } from '../../utils/enrollmentChange';
-import { getAvailablePrograms, getAvailableSchedules, getProgramLevels } from '../../utils/enrollment';
-import { addDaysISO, todayLocalISO } from '../../utils/schedule';
+import { getAvailablePrograms, getProgramLevels } from '../../utils/enrollment';
+import { addDaysISO, allActivities, todayLocalISO } from '../../utils/schedule';
 import { Field, inputCls } from '../../pages/enrollment/fields';
 import { Blocked, ChangePreviewPanel } from './ChangePreviewPanel';
+import { FirstSessionPicker } from './FirstSessionPicker';
 
 interface Props {
   /** Tipo de solicitud; `null` cierra la ventana. */
@@ -38,42 +39,45 @@ export function ChangeRequestModal({ kind, enrollmentId, onClose }: Props) {
   const [programId, setProgramId] = useState('');
   const [levelId, setLevelId] = useState('');
   const [branchId, setBranchId] = useState('');
-  const [schedule, setSchedule] = useState('');
+  const [firstDate, setFirstDate] = useState('');
+  const [firstTime, setFirstTime] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setReason(''); setDetail(''); setStartDate(todayLocalISO()); setProgramId(''); setLevelId(''); setBranchId(''); setSchedule(''); setError(null);
+    setReason(''); setDetail(''); setStartDate(todayLocalISO()); setProgramId(''); setLevelId(''); setBranchId(''); setFirstDate(''); setFirstTime(''); setError(null);
   }, [kind, enrollmentId]);
 
   const ctx: ChangeContext = useMemo(() => ({
     enrollments: data.enrollments, plans: data.plans, students: data.students, schedules: data.schedules, monthly: data.monthlySchedules, programs: data.programs,
-    levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes, branches: data.branches, classSchedules: data.classSchedules,
-    payments: data.payments, groups: data.promotionGroups, requests: data.changeRequests, today,
-  }), [data.enrollments, data.plans, data.students, data.schedules, data.monthlySchedules, data.programs, data.levels, data.tariffs, data.paymentTypes, data.branches, data.classSchedules, data.payments, data.promotionGroups, data.changeRequests, today]);
+    levels: data.levels, tariffs: data.tariffs, paymentTypes: data.paymentTypes, branches: data.branches,
+    payments: data.payments, groups: data.promotionGroups, requests: data.changeRequests, responsibles: responsiblesByBranch(data.staff, data.assignments, data.branches), today,
+  }), [data.enrollments, data.plans, data.students, data.schedules, data.monthlySchedules, data.programs, data.levels, data.tariffs, data.paymentTypes, data.branches, data.staff, data.assignments, data.payments, data.promotionGroups, data.changeRequests, today]);
 
   if (!kind || !enrollment) return null;
   const student = data.students.find(s => s.id === enrollment.studentId) ?? data.students.find(s => s.name === enrollment.student);
-  const payload: Record<string, string> = kind === 'Reactivación' ? { startDate } : kind === 'Cambio de programa' ? { programId, levelId } : { branchId, schedule };
+  const payload: Record<string, string> = kind === 'Reactivación' ? { startDate } : kind === 'Cambio de programa' ? { programId, levelId } : { branchId, firstDate, firstTime };
 
   // Impedimentos de fondo (los que no dependen de lo que se escribe)
   const blockers = kind === 'Reactivación' ? reactivationProblems(enrollment, ctx)
     : kind === 'Cambio de programa' ? (programId ? programChangeProblems(enrollment, { programId, levelId }, ctx) : programChangeProblems(enrollment, { programId: '', levelId: '' }, ctx).filter(p => !/Seleccione el programa/.test(p)))
-    : (branchId ? transferProblems(enrollment, { branchId, schedule }, ctx) : transferProblems(enrollment, { branchId: '', schedule: '' }, ctx).filter(p => !/Seleccione la sede/.test(p)));
+    : (branchId ? transferProblems(enrollment, { branchId, firstDate, firstTime }, ctx) : transferProblems(enrollment, { branchId: '', firstDate: '', firstTime: '' }, ctx).filter(p => !/Seleccione la sede/.test(p)));
   const allProblems = kind === 'Reactivación' ? validateReactivationRequest(enrollment, { startDate, reason, detail }, ctx)
     : kind === 'Cambio de programa' ? validateProgramChangeRequest(enrollment, { programId, levelId, reason, detail }, ctx)
-    : validateTransferRequest(enrollment, { branchId, schedule, reason, detail }, ctx);
+    : validateTransferRequest(enrollment, { branchId, firstDate, firstTime, reason, detail }, ctx);
 
   const programs = getAvailablePrograms(data.programs, enrollment.branchId ?? '');
   const program = data.programs.find(p => p.id === programId);
   const levels = getProgramLevels(data.levels, program);
   const targetBranch = data.branches.find(b => b.id === branchId);
-  const targetSchedules = targetBranch ? getAvailableSchedules(data.classSchedules, targetBranch.id).map(h => h.name) : [];
-  const needsSchedule = !!targetBranch && !(student?.horario && targetSchedules.includes(student.horario));
+  // Si el traslado cancela su primera asesoría, la solicitud lleva la fecha y la hora de la nueva en la sede destino
+  const agenda = kind === 'Traslado de sede' ? transferAgenda(enrollment, ctx) : undefined;
+  const needsFirst = !!targetBranch && !!agenda?.firstSessionLost;
+  const targetSchedules = agenda ? data.schedules.filter(s => !agenda.scheduleIds.includes(s.id)) : data.schedules;
 
   const submit = () => {
     const r = kind === 'Reactivación' ? data.requestReactivation(enrollment.id, { startDate, reason, detail })
       : kind === 'Cambio de programa' ? data.requestProgramChange(enrollment.id, { programId, levelId, reason, detail })
-      : data.requestTransfer(enrollment.id, { branchId, schedule, reason, detail });
+      : data.requestTransfer(enrollment.id, { branchId, firstDate, firstTime, reason, detail });
     if (!r.ok) { setError(r.error ?? 'No se pudo enviar la solicitud.'); return; }
     onClose();
   };
@@ -138,18 +142,26 @@ export function ChangeRequestModal({ kind, enrollmentId, onClose }: Props) {
           {kind === 'Traslado de sede' && (
             <>
               <Field label="Sede destino" required>
-                <select className={inputCls} value={branchId} onChange={e => { setBranchId(e.target.value); setSchedule(''); setError(null); }}>
+                <select className={inputCls} value={branchId} onChange={e => { setBranchId(e.target.value); setFirstDate(''); setFirstTime(''); setError(null); }}>
                   <option value="">Seleccionar...</option>
                   {data.branches.filter(b => b.status === 'Activo' && b.id !== enrollment.branchId).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </Field>
-              {needsSchedule && (
-                <Field label="Horario de clases en la sede destino" required hint={student?.horario ? `El actual (${student.horario}) no existe allí.` : undefined}>
-                  <select className={inputCls} value={schedule} onChange={e => { setSchedule(e.target.value); setError(null); }}>
-                    <option value="">Seleccionar...</option>
-                    {targetSchedules.map(h => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </Field>
+              {needsFirst && targetBranch && (
+                <>
+                  <p className="md:col-span-2 text-sm text-text-secondary bg-surface-muted rounded-xl px-3 py-2.5">
+                    El traslado cancela su primera asesoría (la vigencia cuenta desde ella). Elija la nueva en {targetBranch.name}: al aprobar la solicitud se programa sola.
+                  </p>
+                  <FirstSessionPicker
+                    branchId={targetBranch.id}
+                    schedules={targetSchedules}
+                    activities={allActivities(data.monthlySchedules)}
+                    date={firstDate}
+                    time={firstTime}
+                    min={today}
+                    onChange={(d, t) => { setFirstDate(d); setFirstTime(t); setError(null); }}
+                  />
+                </>
               )}
             </>
           )}

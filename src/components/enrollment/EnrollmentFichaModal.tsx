@@ -203,7 +203,6 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
                   </Item>
                   <Item label="Institución / grado">{[student?.colegio, student?.grado].filter(Boolean).join(' · ')}</Item>
                   {student?.occupation && <Item label="Ocupación">{[student.occupation, student.workplace].filter(Boolean).join(' · ')}</Item>}
-                  <Item label="Horario de clases">{student?.horario}</Item>
                   {student && (!student.guardianIds || student.guardianIds.length === 0) && <Item label="Teléfono">{student.phone}</Item>}
                 </div>
               </Card>

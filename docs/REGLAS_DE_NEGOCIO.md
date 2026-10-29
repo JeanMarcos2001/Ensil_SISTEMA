@@ -87,9 +87,12 @@ Los tres primeros son **solicitudes** (las pide quien atiende y las resuelve qui
 - No aplica a matrículas de grupo promocional ni a cronogramas de monto variable.
 
 ### Traslado de sede
-- El programa debe estar habilitado en la sede destino y el **horario** del alumno existir allí (si no, se elige otro).
+- El programa debe estar habilitado en la sede destino.
+- **No hay «horario de clases»:** el único horario del alumno es el de sus asesorías (Psicopedagogía). El catálogo «Horarios de clases» y el campo del alumno se **retiraron**; el texto `{{horario}}` del contrato ahora muestra el día y la hora de la primera asesoría.
 - **El precio y el plan no cambian**; los pagos y la caja quedan registrados en la sede donde se cobraron.
-- Las asesorías y actividades futuras de la sede anterior se **cancelan** para reprogramarlas en la nueva (si se cancela la primera asesoría, la vigencia no cuenta hasta programar la nueva).
+- Las asesorías y actividades futuras de la sede anterior se **cancelan** para reprogramarlas en la nueva.
+- **Si se cancela su primera asesoría** (la vigencia cuenta desde ella), la solicitud lleva la **fecha y la hora de la nueva primera asesoría** en la sede destino: de lunes a sábado, en un bloque **vacío** (sin asesorías, otra primera asesoría ni actividades), sin cruce con otra asesoría del alumno y con **personal de Psicopedagogía** en esa sede. Al aprobar, se programa sola (con su responsable) y la vigencia cuenta desde esa fecha. Si el bloque se ocupó mientras tanto, la aprobación avisa y hay que pedir de nuevo.
+- Si el traslado no cancela su primera asesoría (ya se dio), no se pide horario: las asesorías canceladas se reservan después en Programación.
 
 ### Renovación
 - **Cuándo:** matrícula activa **por vencer** o con la base terminada, o caída hace más de 90 días; y no renovada antes.

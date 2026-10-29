@@ -17,6 +17,7 @@ import type {
 import { nextSequentialId } from './ids';
 import { escapeHtml } from './printTable';
 import { installmentDueISO } from './enrollmentDrop';
+import { to12h } from './schedule';
 import { formatDisplayDate } from './tariffs';
 import type { Validity } from './validity';
 
@@ -52,7 +53,7 @@ export const TEMPLATE_TOKENS: { token: string; description: string }[] = [
   { token: 'inicio', description: 'Fecha de la primera asesoría (inicio de la vigencia)' },
   { token: 'fin_base', description: 'Último día de la duración base' },
   { token: 'fin_extension', description: 'Último día con la extensión' },
-  { token: 'horario', description: 'Horario de clases del alumno' },
+  { token: 'horario', description: 'Día y hora de la primera asesoría (no hay horario de clases fijo)' },
   { token: 'precio', description: 'Precio total asignado' },
   { token: 'tipo_pago', description: 'Tipo de pago contratado' },
   { token: 'plan_pagos', description: 'Resumen del cronograma de pagos' },
@@ -194,7 +195,7 @@ export function templateVars(ctx: DocContext): Record<string, string> {
     duracion: months(program?.durationBase ?? 0),
     garantia: warrantyMonths > 0 ? `El programa incluye una garantía de ${months(warrantyMonths)} adicionales (extensión), que se habilita a solicitud cuando la duración base está por terminar o ya terminó${v.extensionEnd ? `, hasta el ${longDate(v.extensionEnd)}` : ''}.` : 'El programa no incluye período de extensión.',
     inicio: v.start ? longDate(v.start) : 'fecha por definir (primera asesoría)', fin_base: v.baseEnd ? longDate(v.baseEnd) : 'fecha por definir', fin_extension: v.extensionEnd ? longDate(v.extensionEnd) : 'fecha por definir',
-    horario: student?.horario || 'por definir', precio: usd(e.assignedPrice ?? plan?.total ?? 0), tipo_pago: e.paymentTypeName ?? plan?.type ?? '—',
+    horario: ctx.firstSession ? `${longDate(ctx.firstSession.date)} a las ${to12h(ctx.firstSession.time)}` : 'por definir (primera asesoría)', precio: usd(e.assignedPrice ?? plan?.total ?? 0), tipo_pago: e.paymentTypeName ?? plan?.type ?? '—',
     plan_pagos: planSummary(plan, e.paymentTypeName ?? plan?.type ?? ''), fecha_matricula: e.dateISO ? longDate(e.dateISO) : e.date, fecha_contrato: longDate(ctx.today), matricula: e.id,
   };
 }
@@ -228,7 +229,7 @@ export function buildFichaDocument(ctx: DocContext): BuiltDocument {
     ] },
     { title: 'Alumno', rows: [
       ['Nombre', student?.name ?? e.student], ['Documento', studentDocText(student)], ['Edad', student ? `${student.age} años` : '—'], ['Nacimiento', student?.birthDate ?? '—'],
-      ['Institución / grado', [student?.colegio, student?.grado].filter(Boolean).join(' · ') || '—'], ['Horario de clases', student?.horario ?? '—'],
+      ['Institución / grado', [student?.colegio, student?.grado].filter(Boolean).join(' · ') || '—'],
       ['Teléfono', student?.phone || '—'], ['Dirección', student?.address || '—'],
     ] },
     { title: guardians.length > 1 ? 'Titulares' : 'Titular', rows: guardians.length === 0

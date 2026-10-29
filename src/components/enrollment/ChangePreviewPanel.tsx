@@ -60,12 +60,11 @@ export function ChangePreviewPanel({ kind, enrollment, payload, ctx }: Props) {
       </div>
     );
   }
-  const pv = previewTransfer(enrollment, { branchId: payload.branchId, schedule: payload.schedule }, ctx);
+  const pv = previewTransfer(enrollment, { branchId: payload.branchId, firstDate: payload.firstDate ?? '', firstTime: payload.firstTime ?? '' }, ctx);
   if (!pv) return <p className="text-sm text-text-muted">Elija la sede destino para ver el efecto.</p>;
   return (
     <div className="border border-border-soft rounded-xl divide-y divide-border-soft overflow-hidden text-sm">
       <Row label="Sede">{pv.fromName} → <strong className="text-text-primary">{pv.toName}</strong></Row>
-      <Row label="Horario de clases">{pv.scheduleChanged ? `cambia a ${pv.schedule || '—'}` : `se mantiene (${pv.schedule || '—'})`}.</Row>
       <Row label="Agenda" tone={pv.scheduleIds.length + pv.activityRemovals.length > 0 ? 'warn' : undefined}>
         {pv.scheduleIds.length} asesoría(s) futura(s) y {pv.activityRemovals.length} inscripción(es) en actividades de {pv.fromName} se cancelan.
       </Row>

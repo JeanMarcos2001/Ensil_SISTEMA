@@ -8,7 +8,7 @@
  *    principal) + `relationship` (parentesco con el titular). El parentesco es del vínculo alumno–titular, por eso vive en el alumno.
  *  - Un alumno independiente es su propio titular: `guardianIds` vacío, `titular` = su nombre y su teléfono es obligatorio.
  *  - Un alumno dependiente no tiene teléfono propio: el contacto es el del titular.
- *  - Programa, nivel, horario y sede salen de su matrícula; el alumno creado aquí queda «Sin matrícula» hasta matricularse.
+ *  - Programa, nivel y sede salen de su matrícula; el alumno creado aquí queda «Sin matrícula» hasta matricularse.
  */
 import type { Guardian, Student } from '../context/DataContext';
 import {
@@ -93,7 +93,7 @@ export function studentToInput(s: Student, guardians: Guardian[]): StudentInput 
       situation: (s.occupationStatus ?? (s.colegio || s.grado ? 'estudiando' : '')) as Situation | '',
       institutionType: s.institutionType ?? (s.colegio ? 'Colegio' : ''),
       school: s.colegio ?? '', grade: s.grado ?? '', occupation: s.occupation ?? '', workplace: s.workplace ?? '',
-      programId: '', levelId: '', paymentTypeId: '', schedule: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
+      programId: '', levelId: '', paymentTypeId: '', startDate: '', counselingDate: '', counselingTime: '', dueDates: [],
     },
   };
 }
@@ -116,9 +116,9 @@ export function validateStudentInput(input: StudentInput, students: Student[], g
   return e;
 }
 
-/** Alumno listo para guardar (sin id). Al crearlo queda «Sin matrícula»; al editarlo se conservan programa, horario y estado. */
+/** Alumno listo para guardar (sin id). Al crearlo queda «Sin matrícula»; al editarlo se conservan programa y estado. */
 export function buildStudent(
-  input: StudentInput, guardians: Guardian[], today: string, existing?: Pick<Student, 'program' | 'horario' | 'fechaInicio' | 'status'>
+  input: StudentInput, guardians: Guardian[], today: string, existing?: Pick<Student, 'program' | 'fechaInicio' | 'status'>
 ): Omit<Student, 'id'> {
   const { mode, student: ds, guardianIds } = input;
   const p = ds.person;
@@ -132,7 +132,7 @@ export function buildStudent(
     guardianIds: ids, relationship: mode === 'apoderado' ? ds.relationship : '',
     titular: mode === 'apoderado' ? principal?.name ?? '' : fullName(p),
     ...situationData(ds),
-    program: existing?.program ?? '', horario: existing?.horario, fechaInicio: existing?.fechaInicio,
+    program: existing?.program ?? '', fechaInicio: existing?.fechaInicio,
     status: existing?.status ?? NO_ENROLLMENT,
   };
 }

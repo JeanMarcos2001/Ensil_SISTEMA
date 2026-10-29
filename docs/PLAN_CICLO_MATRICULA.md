@@ -55,7 +55,7 @@ Se concluyó que **no debe ser una edición libre**, porque cada dato pertenece 
 |---|---|---|
 | **De la persona** (documento, nombres, teléfono, dirección…) | Personas → Alumnos / Titulares | Es de la persona, no de la matrícula: se corrige una vez para todas sus matrículas. |
 | **Comerciales y financieros** (programa, nivel, tarifario, tipo de pago, precio, promoción, cuotas) | **No se editan aquí** | Cambian precio, plan, caja y recetas de entrega. Cada cambio necesita su flujo: refinanciar una cuota (ya existe en Planes), solicitar la caída (nuevo) y, a futuro, **cambio de programa/nivel** y **traslado de sede** (no existen). |
-| **Administrativos** (observación, origen del contacto, responsable de la entrevista, horario de clases) | **Corregir datos** | No alteran el dinero. Se permiten con **motivo obligatorio** y **constancia** (`EnrollmentChange`: quién, cuándo, qué había, qué quedó), visible en el historial. Solo en matrículas activas. |
+| **Administrativos** (observación, origen del contacto, responsable de la entrevista; el horario de clases ya no existe) | **Corregir datos** | No alteran el dinero. Se permiten con **motivo obligatorio** y **constancia** (`EnrollmentChange`: quién, cuándo, qué había, qué quedó), visible en el historial. Solo en matrículas activas. |
 
 La ventana muestra los datos bloqueados y **por qué** y a dónde ir para cambiarlos.
 

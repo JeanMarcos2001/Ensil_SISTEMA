@@ -3,7 +3,7 @@ import { AlertCircle, Lock } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { useData } from '../../context/DataContext';
-import { getAvailableSchedules, getInterviewerOptions } from '../../utils/enrollment';
+import { getInterviewerOptions } from '../../utils/enrollment';
 import { EDIT_LABELS, currentEditValues, diffEnrollmentEdit, type EnrollmentEditValues } from '../../utils/enrollmentEdit';
 import { Field, inputCls } from '../../pages/enrollment/fields';
 
@@ -16,27 +16,26 @@ interface Props {
 const usd = (n?: number) => (n == null ? '—' : `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
 /**
- * Corregir datos de una matrícula registrada. Solo los datos administrativos (observación, origen, responsable de la entrevista
- * y horario de clases), con motivo y constancia. El resto tiene su propio camino y aquí se muestra bloqueado con el porqué.
+ * Corregir datos de una matrícula registrada. Solo los datos administrativos (observación, origen y responsable de la entrevista),
+ * con motivo y constancia. El resto tiene su propio camino y aquí se muestra bloqueado con el porqué.
  */
 export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
   const data = useData();
   const enrollment = data.enrollments.find(e => e.id === enrollmentId);
   const student = enrollment ? data.students.find(s => s.id === enrollment.studentId) ?? data.students.find(s => s.name === enrollment.student) : undefined;
-  const [values, setValues] = useState<EnrollmentEditValues>({ observation: '', originId: '', advisorId: '', schedule: '' });
+  const [values, setValues] = useState<EnrollmentEditValues>({ observation: '', originId: '', advisorId: '' });
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enrollment) return;
-    setValues(currentEditValues(enrollment, student));
+    setValues(currentEditValues(enrollment));
     setReason('');
     setError(null);
   }, [enrollmentId]);
 
   const branchId = enrollment?.branchId ?? '';
   const advisors = useMemo(() => getInterviewerOptions({ staff: data.staff, assignments: data.assignments, branches: data.branches }, branchId), [data.staff, data.assignments, data.branches, branchId]);
-  const schedules = useMemo(() => getAvailableSchedules(data.classSchedules, branchId), [data.classSchedules, branchId]);
 
   const names = useMemo(() => ({
     origin: (id: string) => data.leadSources.find(l => l.id === id)?.name ?? '',
@@ -44,7 +43,7 @@ export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
   }), [data.leadSources, data.staff]);
 
   if (!enrollment) return null;
-  const changes = diffEnrollmentEdit(currentEditValues(enrollment, student), values, names);
+  const changes = diffEnrollmentEdit(currentEditValues(enrollment), values, names);
   const set = (patch: Partial<EnrollmentEditValues>) => { setValues(v => ({ ...v, ...patch })); setError(null); };
   const advisorOptions = values.advisorId && !advisors.some(a => String(a.staff.id) === values.advisorId)
     ? [{ id: values.advisorId, label: names.advisor(values.advisorId) || values.advisorId }, ...advisors.map(a => ({ id: a.staff.id, label: `${a.staff.names} ${a.staff.lastNameP} — ${a.branchName}` }))]
@@ -97,13 +96,6 @@ export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
               <select className={inputCls} value={values.advisorId} onChange={e => set({ advisorId: e.target.value })}>
                 <option value="">Seleccionar...</option>
                 {advisorOptions.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-              </select>
-            </Field>
-            <Field label={EDIT_LABELS.schedule} hint="Se guarda en la ficha del alumno.">
-              <select className={inputCls} value={values.schedule} onChange={e => set({ schedule: e.target.value })}>
-                <option value="">Sin horario</option>
-                {values.schedule && !schedules.some(h => h.name === values.schedule) && <option value={values.schedule}>{values.schedule}</option>}
-                {schedules.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
               </select>
             </Field>
             <Field label={EDIT_LABELS.observation} className="md:col-span-2">

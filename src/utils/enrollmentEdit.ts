@@ -7,31 +7,27 @@
  *    precio, el plan, la caja y las recetas de entrega. Se hacen con sus propios flujos (refinanciar una cuota, solicitar la caída, y a futuro
  *    cambio de programa / traslado de sede).
  *  - Datos **administrativos** de la matrícula: sí se pueden corregir, con motivo y dejando constancia de quién, cuándo, qué había y qué quedó:
- *    observación general, origen del contacto, responsable de la entrevista y horario de clases del alumno.
+ *    observación general, origen del contacto y responsable de la entrevista.
  */
-import type { Enrollment, Student } from '../context/DataContext';
+import type { Enrollment } from '../context/DataContext';
 import { MIN_DETAIL } from './enrollmentDrop';
 
 export interface EnrollmentEditValues {
   observation: string;
   originId: string;
   advisorId: string;
-  /** Horario de clases (se guarda en la ficha del alumno). */
-  schedule: string;
 }
 
 export const EDIT_LABELS: Record<keyof EnrollmentEditValues, string> = {
   observation: 'Observación general',
   originId: 'Origen del contacto',
   advisorId: 'Responsable de la entrevista',
-  schedule: 'Horario de clases',
 };
 
-export const currentEditValues = (e: Enrollment, student?: Pick<Student, 'horario'>): EnrollmentEditValues => ({
+export const currentEditValues = (e: Enrollment): EnrollmentEditValues => ({
   observation: e.observation ?? '',
   originId: e.origenId ?? '',
   advisorId: e.asesorId ?? '',
-  schedule: student?.horario ?? '',
 });
 
 export interface FieldChange {
@@ -64,7 +60,7 @@ export function validateEnrollmentEdit(enrollment: Enrollment, after: Enrollment
   return e;
 }
 
-/** Cambios para la matrícula (el horario va a la ficha del alumno). */
+/** Cambios para la matrícula. */
 export function buildEnrollmentPatch(
   after: EnrollmentEditValues,
   names: { origin: (id: string) => string; advisor: (id: string) => string }

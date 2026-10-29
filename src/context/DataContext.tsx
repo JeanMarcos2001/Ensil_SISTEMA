@@ -2,7 +2,7 @@ import React, { createContext, useContext, useRef, useState, ReactNode } from 'r
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { nextNumericId, nextSequentialId } from '../utils/ids';
-import { addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
+import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
 import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
@@ -24,7 +24,7 @@ import { allowedNoteModes, buildCreditNote, validateNoteChoice, type NoteMode } 
 import { buildClosure, closedMessage, expectedAt, validateClosure, validateReopen, type ClosureInput } from '../utils/cashClosure';
 import { DEFAULT_FUND, validateFund, type PettyFund } from '../utils/pettyCash';
 import {
-  applyProgramChangeToPlan, applyReactivationToPlan, previewProgramChange, previewReactivation, previewTransfer, programChangeProblems, reactivationProblems, transferProblems,
+  applyProgramChangeToPlan, applyReactivationToPlan, previewProgramChange, previewReactivation, previewTransfer, programChangeProblems, reactivationProblems, responsiblesByBranch, transferProblems,
   validateProgramChangeRequest, validateReactivationRequest, validateTransferRequest, type ChangeContext, type ProgramChangeInput, type ReactivationInput, type TransferInput,
 } from '../utils/enrollmentChange';
 import { canRequest, canResolve, type ChangeKind } from '../utils/authority';
@@ -67,7 +67,6 @@ export interface Student {
   grado?: string;
   colegio?: string;
   program: string;
-  horario?: string;
   fechaInicio?: string;
   titular: string;
   status: string;
@@ -87,15 +86,6 @@ export interface Student {
   institutionType?: string;
   occupation?: string;
   workplace?: string;
-}
-
-/** Horario de clases configurable (Configuración → Comercial → Horarios de clases). */
-export interface ClassSchedule {
-  id: string;
-  name: string; // p. ej. «L-M-V 4:00 PM»
-  allBranches: boolean;
-  branchIds: string[];
-  status: 'Activo' | 'Inactivo';
 }
 
 export interface Enrollment {
@@ -1166,10 +1156,6 @@ interface DataContextType {
   items: Item[];
   setItems: React.Dispatch<React.SetStateAction<Item[]>>;
   stockItems: StockItem[];
-  classSchedules: ClassSchedule[];
-  addClassSchedule: (data: Omit<ClassSchedule, 'id'>) => StockResult;
-  updateClassSchedule: (id: string, data: Partial<Omit<ClassSchedule, 'id'>>) => StockResult;
-  deleteClassSchedule: (id: string) => StockResult;
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
   /** Reversa un movimiento de caja manual, venta o lote de depósito (los de un pago se reversan desde el pago). */
@@ -1576,48 +1562,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       { id: 'CCH-001', date: at(3, '09:00'), kind: 'Ingreso', category: 'Reposición de fondo', concept: 'Reposición de fondo fijo', amount: 1000, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
     ];
   });
-
-  // Horarios de clases (antes una lista fija dentro del asistente)
-  const [classSchedules, setClassSchedules] = useState<ClassSchedule[]>([
-    { id: 'HOR-001', name: 'L-M-V 4:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
-    { id: 'HOR-002', name: 'L-M-V 5:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
-    { id: 'HOR-003', name: 'Sábados 9:00 AM', allBranches: true, branchIds: [], status: 'Activo' },
-  ]);
-
-  const normalizeName = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-
-  const addClassSchedule = (data: Omit<ClassSchedule, 'id'>): StockResult => {
-    if (!data.name.trim()) return { ok: false, error: 'El nombre del horario es obligatorio.' };
-    if (classSchedules.some(h => normalizeName(h.name) === normalizeName(data.name))) {
-      return { ok: false, error: 'Ya existe un horario con ese nombre.' };
-    }
-    if (!data.allBranches && data.branchIds.length === 0) return { ok: false, error: 'Seleccione al menos una sede o marque todas.' };
-    const id = nextSequentialId('HOR', classSchedules.map(h => h.id));
-    setClassSchedules(prev => [...prev, { ...data, name: data.name.trim(), id }]);
-    return { ok: true };
-  };
-
-  const updateClassSchedule = (id: string, data: Partial<Omit<ClassSchedule, 'id'>>): StockResult => {
-    const current = classSchedules.find(h => h.id === id);
-    if (!current) return { ok: false, error: 'Horario no encontrado.' };
-    const next = { ...current, ...data };
-    if (!next.name.trim()) return { ok: false, error: 'El nombre del horario es obligatorio.' };
-    if (classSchedules.some(h => h.id !== id && normalizeName(h.name) === normalizeName(next.name))) {
-      return { ok: false, error: 'Ya existe un horario con ese nombre.' };
-    }
-    if (!next.allBranches && next.branchIds.length === 0) return { ok: false, error: 'Seleccione al menos una sede o marque todas.' };
-    setClassSchedules(prev => prev.map(h => (h.id === id ? { ...next, name: next.name.trim() } : h)));
-    return { ok: true };
-  };
-
-  const deleteClassSchedule = (id: string): StockResult => {
-    const current = classSchedules.find(h => h.id === id);
-    if (!current) return { ok: false, error: 'Horario no encontrado.' };
-    const used = students.filter(s => s.horario === current.name).length;
-    if (used > 0) return { ok: false, error: `El horario lo usan ${used} alumno(s). Inactívelo en lugar de eliminarlo.` };
-    setClassSchedules(prev => prev.filter(h => h.id !== id));
-    return { ok: true };
-  };
 
   const addCashMovement = (m: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }): CashMovement => {
     const created: CashMovement = {
@@ -2918,7 +2862,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const result = buildEnrollmentBatch(
       draft,
       {
-        branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students, classSchedules,
+        branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students,
         scheduling: { schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) },
       },
       { guardians, students, enrollments, plans, payments, promotionGroups, schedules },
@@ -3035,12 +2979,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       origin: (id: string) => leadSources.find(l => l.id === id)?.name ?? '',
       advisor: (id: string) => { const m = staff.find(x => x.id === id); return m ? `${m.names} ${m.lastNameP}`.trim() : ''; },
     };
-    const changes = diffEnrollmentEdit(currentEditValues(enrollment, student), after, names);
+    const changes = diffEnrollmentEdit(currentEditValues(enrollment), after, names);
     const problems = validateEnrollmentEdit(enrollment, after, changes, reason);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const at = new Date().toISOString();
     setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e)));
-    if (student && changes.some(c => c.field === 'schedule')) setStudents(prev => prev.map(st => (st.id === student.id ? { ...st, horario: after.schedule.trim() || undefined } : st)));
     setEnrollmentChanges(prev => [
       ...changes.map((c, i) => ({ id: `COR-${Date.now()}-${i}`, enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
       ...prev,
@@ -3373,8 +3316,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   // ---- Cambios de matrícula: reactivación, cambio de programa/nivel y traslado de sede
   const changeContext = (omit?: string): ChangeContext => ({
-    enrollments, plans, students, schedules, monthly: monthlySchedules, programs, levels, tariffs, paymentTypes, branches, classSchedules,
-    payments, groups: promotionGroups, requests: omit ? changeRequests.filter(r => r.id !== omit) : changeRequests, today: todayLocalISO(),
+    enrollments, plans, students, schedules, monthly: monthlySchedules, programs, levels, tariffs, paymentTypes, branches,
+    payments, groups: promotionGroups, requests: omit ? changeRequests.filter(r => r.id !== omit) : changeRequests, responsibles: responsiblesByBranch(staff, assignments, branches), today: todayLocalISO(),
   });
 
   const openChange = (kind: ChangeKind & ChangeRequest['kind'], enrollment: Enrollment, reason: string, detail: string, payload: Record<string, string>): StockResult => {
@@ -3414,7 +3357,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!auth.ok) return { ok: false, error: auth.reason };
     const problems = validateTransferRequest(enrollment, input, changeContext());
     if (problems.length > 0) return { ok: false, error: problems[0] };
-    return openChange('Traslado de sede', enrollment, input.reason, input.detail, { branchId: input.branchId, schedule: input.schedule });
+    return openChange('Traslado de sede', enrollment, input.reason, input.detail, { branchId: input.branchId, firstDate: input.firstDate, firstTime: input.firstTime });
   };
 
   const resolveChangeRequest = (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string): StockResult => {
@@ -3475,14 +3418,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       effects.push(`${preview.fromLabel} → ${toLabel}.`, `Precio: USD ${preview.oldTotal.toFixed(2)} → USD ${preview.newTotal.toFixed(2)}; cobrado USD ${preview.paidUSD.toFixed(2)}; saldo USD ${preview.remaining.toFixed(2)}.`);
       if (preview.verificationReset) effects.push('La verificación vuelve a «Pendiente» para entregar los materiales del programa nuevo.');
     } else {
-      const input = { branchId: request.payload.branchId, schedule: request.payload.schedule };
+      const input = { branchId: request.payload.branchId, firstDate: request.payload.firstDate ?? '', firstTime: request.payload.firstTime ?? '' };
       const problems = transferProblems(enrollment, input, c);
       if (problems.length > 0) return { ok: false, error: problems[0] };
       const preview = previewTransfer(enrollment, input, c);
       if (!preview) return { ok: false, error: 'No se encontró la sede destino.' };
       const fromName = preview.fromName;
       setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, branchId: input.branchId, sede: preview.toName } : e)));
-      if (preview.scheduleChanged) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, horario: preview.schedule } : st)));
       if (preview.scheduleIds.length > 0) {
         setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
         logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
@@ -3494,9 +3436,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
           actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
         })));
       }
+      // La nueva primera asesoría en la sede destino (con personal de Psicopedagogía de esa sede)
+      if (preview.newFirst) {
+        const taken = responsiblesByBranch(staff, assignments, branches)[input.branchId] ?? [];
+        const responsible = taken[0] ?? '';
+        addSchedule({
+          student: enrollment.student, studentId: enrollment.studentId, branchId: input.branchId, program: enrollment.program, level: enrollment.level,
+          date: preview.newFirst.date, time: preview.newFirst.time, duration: SLOT_DURATION, responsible, status: 'Reservado',
+          isFirst: true, registrationId: enrollment.id, enrollmentId: enrollment.id,
+        });
+        effects.push(`Nueva primera asesoría en ${preview.toName}: ${preview.newFirst.date} a las ${preview.newFirst.time}${responsible ? ` con ${responsible}` : ''}.`);
+      }
       log('branch', 'Traslado de sede', fromName, preview.toName);
       effects.push(`Sede: ${fromName} → ${preview.toName}.`, `${preview.scheduleIds.length} asesoría(s) y ${preview.activityRemovals.length} inscripción(es) de la sede anterior canceladas.`);
-      if (preview.scheduleChanged) effects.push(`Horario de clases: ${preview.schedule}.`);
     }
     setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base, effects } : r)));
     addNotification({ title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info' });
@@ -3857,10 +3809,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       items,
       setItems,
       stockItems, 
-      classSchedules,
-      addClassSchedule,
-      updateClassSchedule,
-      deleteClassSchedule,
       cashMovements,
       addCashMovement,
       reverseCashMovement,

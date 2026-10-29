@@ -3,7 +3,7 @@
  * Ejecutar: npx tsx scripts/check-enrollment.ts
  */
 import type {
-  Assignment, Branch, ClassSchedule, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff,
+  Assignment, Branch, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff,
 } from '../src/context/DataContext';
 import {
   buildEnrollmentBatch, emptyDraft, emptyPerson, emptyStudent, getInterviewerOptions, quoteEnrollment,
@@ -71,15 +71,9 @@ const promo: Promotion = {
   startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo',
 };
 
-const classSchedules: ClassSchedule[] = [
-  { id: 'H1', name: 'L-M-V 4:00 PM', allBranches: true, branchIds: [], status: 'Activo' },
-  { id: 'H2', name: 'Sábados 9:00 AM', allBranches: false, branchIds: ['FIL-PIU'], status: 'Activo' },
-  { id: 'H3', name: 'Antiguo', allBranches: true, branchIds: [], status: 'Inactivo' },
-];
-
 const catalogs = (over: Partial<EnrollmentCatalogs> = {}): EnrollmentCatalogs => ({
   branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes,
-  promotions: [promo], guardians: [], students: [], classSchedules, ...over,
+  promotions: [promo], guardians: [], students: [], ...over,
 });
 const empty: ExistingState = { guardians: [], students: [], enrollments: [], plans: [], payments: [], promotionGroups: [], schedules: [] };
 const NOW = '2026-10-10T15:00:00.000Z';
@@ -335,18 +329,6 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   d8.payments[quoteEnrollment(d8, cat).units[0].key] = [usdPart(500)];
   const st = build(d8).batch!.newStudents[0];
   check('Estudiando: guarda colegio, grado y tipo de institución', st.colegio === 'I.E. San Martín' && st.grado === '4° Primaria' && st.institutionType === 'Colegio');
-
-  // Horarios configurados
-  const h1 = base();
-  h1.context.branchId = 'FIL-AYA';
-  h1.students[0].schedule = 'Sábados 9:00 AM'; // solo Piura
-  check('Horario de otra sede → rechazado', validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
-  h1.students[0].schedule = 'Antiguo'; // inactivo
-  check('Horario inactivo → rechazado', validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
-  h1.students[0].schedule = 'L-M-V 4:00 PM';
-  check('Horario disponible en todas las sedes → válido', !validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
-  h1.students[0].schedule = '';
-  check('El horario es opcional', !validateProgram(h1, cat, quoteEnrollment(h1, cat)).some(m => /horario/i.test(m)));
 }
 
 // ---------- Primera asesoría: fecha y hora específicas

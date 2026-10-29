@@ -29,7 +29,7 @@ interface Props {
  * Alta y edición de un alumno. Mismos datos y reglas que el paso Alumnos del asistente de matrícula:
  *  - Con apoderado: titular(es) registrados (el primero es el principal) y parentesco; sin teléfono propio.
  *  - Independiente: es su propio titular y su teléfono es obligatorio.
- * Programa, nivel, horario y sede salen de la matrícula: el alumno nuevo queda «Sin matrícula».
+ * Programa, nivel y sede salen de la matrícula: el alumno nuevo queda «Sin matrícula».
  */
 export function StudentFormModal({ isOpen, onClose, editing }: Props) {
   const { students, guardians, addStudent, updateStudent } = useData();
@@ -185,7 +185,7 @@ export function StudentFormModal({ isOpen, onClose, editing }: Props) {
 
           <p className="text-xs text-text-muted">
             {editing
-              ? 'El programa, el nivel y el horario del alumno se gestionan desde sus matrículas.'
+              ? 'El programa y el nivel del alumno se gestionan desde sus matrículas.'
               : `El alumno quedará «${NO_ENROLLMENT}» hasta que se registre su primera matrícula; entonces se activa y aparece en Programación.`}
           </p>
         </div>
