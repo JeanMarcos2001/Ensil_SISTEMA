@@ -2,6 +2,7 @@
  * Reglas de la Programación de asesorías y utilidades del calendario (funciones puras).
  */
 import type { ActivityAttendance, CapacityConfig, CapacityOverride, Enrollment, MonthlySchedule, Schedule, ScheduleActivity, Student } from '../context/DataContext';
+import { latestEnrollmentOf, studentProgramOf, studentStatus } from './identity';
 
 export const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 export const WEEKDAYS_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -198,23 +199,15 @@ export function availableActions(
 
 // ---------------------------------------------------------------- Sede del alumno
 
-/** Matrícula más reciente del alumno. */
-export function latestEnrollment(student: Pick<Student, 'id' | 'name'>, enrollments: Enrollment[]): Enrollment | undefined {
-  return enrollments
-    .filter(e => e.studentId === student.id || e.student === student.name)
-    .sort((a, b) => (a.dateISO ?? '').localeCompare(b.dateISO ?? ''))
-    .pop();
-}
+/** Matrícula más reciente del alumno (por id). */
+export const latestEnrollment = (student: Pick<Student, 'id'>, enrollments: Enrollment[]): Enrollment | undefined =>
+  latestEnrollmentOf(student.id, enrollments);
 
-/** Programa y nivel vigentes del alumno según su matrícula más reciente («Kids - Nivel 1»); si no tiene, el de su ficha. */
-export function studentProgramLabel(student: Pick<Student, 'id' | 'name' | 'program'>, enrollments: Enrollment[]): string {
-  const latest = latestEnrollment(student, enrollments);
-  if (!latest) return student.program;
-  return latest.level && latest.level !== 'Sin nivel' ? `${latest.program} - ${latest.level}` : latest.program;
-}
+/** Programa y nivel vigentes del alumno = los de su matrícula más reciente («Kids - Nivel 1»); vacío si no tiene matrícula. */
+export const studentProgramLabel = (student: Pick<Student, 'id'>, enrollments: Enrollment[]): string => studentProgramOf(student.id, enrollments);
 
 /** Sede del alumno = sede de su matrícula más reciente. */
-export const branchOfStudent = (student: Pick<Student, 'id' | 'name'>, enrollments: Enrollment[]): string | undefined =>
+export const branchOfStudent = (student: Pick<Student, 'id'>, enrollments: Enrollment[]): string | undefined =>
   latestEnrollment(student, enrollments)?.branchId;
 
 // ---------------------------------------------------------------- Conflictos del alumno
@@ -612,10 +605,10 @@ export function studentsWithoutSession(
 ): { student: Student; branchId?: string }[] {
   const inWeek = new Set(week);
   return data.students
-    .filter(st => st.status === 'Activo')
+    .filter(st => studentStatus(st.id, data.enrollments) === 'Activo')
     .map(student => ({ student, branchId: branchOfStudent(student, data.enrollments) }))
     .filter(x => !branchId || x.branchId === branchId)
     .filter(x => !data.schedules.some(s =>
-      inWeek.has(s.date) && ACTIVE_STATUSES.includes(s.status) && (s.studentId === x.student.id || s.student === x.student.name)
+      inWeek.has(s.date) && ACTIVE_STATUSES.includes(s.status) && s.studentId === x.student.id
     ));
 }

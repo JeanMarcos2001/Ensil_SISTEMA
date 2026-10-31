@@ -6,9 +6,10 @@
  * recarga nada) y el plan recalcula su saldo, su próxima cuota y su estado. El motivo es obligatorio y queda en ambas cuotas.
  * No se refinancian cuotas de monto variable (contado en 2 partes), anuladas o ya refinanciadas.
  */
-import type { Plan } from '../context/DataContext';
-import { installmentDueISO, MIN_DETAIL } from './enrollmentDrop';
-import { formatDisplayDate, roundMoney } from './tariffs';
+import type { Installment, Plan } from '../context/DataContext';
+import { MIN_DETAIL } from './enrollmentDrop';
+import { recomputePlan } from './planState';
+import { roundMoney } from './tariffs';
 
 export interface RefinanceInput {
   /** Nombre de la nueva cuota. */
@@ -35,21 +36,18 @@ export function validateRefinance(plan: Plan, installmentId: string, input: Refi
   return e;
 }
 
-const balanceOf = (installments: any[]) => roundMoney(installments.reduce((a, i) => a + (i.balance > 0 && !closedStatus(i.status) ? i.balance : 0), 0));
-
 export function applyRefinance(plan: Plan, installmentId: string, input: RefinanceInput, today: string, at: string): Plan {
   const inst = plan.installments.find(i => i.id === installmentId)!;
   const newId = `R${plan.installments.filter(i => i.refinancedFrom).length + 1}`;
   const moved = roundMoney(inst.balance);
-  const installments = plan.installments.map(i => (i.id === installmentId
-    ? { ...i, status: 'Refinanciada', balance: 0, refinancedTo: newId, note: `Refinanciada: ${input.reason.trim()}` }
+  const installments: Installment[] = plan.installments.map(i => (i.id === installmentId
+    ? { ...i, status: 'Refinanciada' as const, balance: 0, refinancedTo: newId, note: `Refinanciada: ${input.reason.trim()}` }
     : i));
   installments.push({
     id: newId,
     name: input.name.trim(),
     amount: moved,
     balance: moved,
-    dueDate: formatDisplayDate(input.dueDate),
     dueDateISO: input.dueDate,
     status: 'Pendiente',
     payments: [],
@@ -57,14 +55,5 @@ export function applyRefinance(plan: Plan, installmentId: string, input: Refinan
     note: `Refinanciación de «${inst.name}» (${input.reason.trim()})`,
     createdAt: at,
   });
-  const open = installments.filter(i => i.balance > 0 && !closedStatus(i.status));
-  const next = [...open].sort((a, b) => (installmentDueISO(a) || '9999').localeCompare(installmentDueISO(b) || '9999'))[0];
-  const overdue = open.some(i => (installmentDueISO(i) || '9999') < today);
-  return {
-    ...plan,
-    installments,
-    balance: balanceOf(installments),
-    next: next?.dueDate ?? '-',
-    status: plan.status === 'Completado' ? plan.status : overdue ? 'Atrasado' : 'Al día',
-  };
+  return recomputePlan({ ...plan, installments }, today);
 }

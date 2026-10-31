@@ -32,9 +32,9 @@
  *    cuál viene (`renewsId`).
  */
 import type {
-  Assignment, Branch, ChangeRequest, Enrollment, Level, MonthlySchedule, Payment, Plan, PromotionGroup, Program, Schedule, Student, Tariff, PaymentType, Guardian,
+  Assignment, Branch, ChangeRequest, Enrollment, Installment, Level, MonthlySchedule, Payment, Plan, PromotionGroup, Program, Schedule, Student, Tariff, PaymentType, Guardian,
 } from '../context/DataContext';
-import { enrollmentPaidUSD, installmentDueISO, MIN_DETAIL } from './enrollmentDrop';
+import { enrollmentPaidUSD, MIN_DETAIL } from './enrollmentDrop';
 import { INTERVIEWER_AREA, emptyDraft, emptyStudent, getAvailablePrograms, getProgramLevels, type DraftPerson, type EnrollmentDraft } from './enrollment';
 import { isClosed, isOpen, recomputePlan } from './planState';
 import { addDaysISO, allActivities, checkFirstSessionBlock, findScheduleConflict, longDayLabel, slotLabel, slotsForDate, type SchedulingContext } from './schedule';
@@ -82,8 +82,8 @@ export function responsiblesByBranch(
   return out;
 }
 
-const sameStudent = (a: Enrollment, b: Enrollment) => (a.studentId && b.studentId ? a.studentId === b.studentId : a.student === b.student);
-const studentOf = (e: Enrollment, c: Pick<ChangeContext, 'students'>) => c.students.find(s => s.id === e.studentId) ?? c.students.find(s => s.name === e.student);
+const sameStudent = (a: Enrollment, b: Enrollment) => a.studentId === b.studentId;
+const studentOf = (e: Enrollment, c: Pick<ChangeContext, 'students'>) => c.students.find(s => s.id === e.studentId);
 const labelOf = (program: string, level?: string) => (level && level !== 'Sin nivel' ? `${program} - ${level}` : program);
 const paidOn = (i: { payments?: { amount: number }[] }) => roundMoney((i.payments ?? []).reduce((a, p) => a + p.amount, 0));
 const checkReason = (reason: string, detail: string, allowed: string[]): string[] => {
@@ -129,7 +129,7 @@ export function reactivationProblems(e: Enrollment, c: ChangeContext): string[] 
   if (validity.state === 'finalizada' || (validity.state === 'base-finalizada' && !validity.extensionEnabled)) {
     out.push('La vigencia del programa ya terminó: corresponde una renovación.');
   }
-  const other = c.enrollments.find(o => o.id !== e.id && o.status === 'Activa' && sameStudent(e, o) && (o.programId ?? o.program) === (e.programId ?? e.program));
+  const other = c.enrollments.find(o => o.id !== e.id && o.status === 'Activa' && sameStudent(e, o) && o.programId === e.programId);
   if (other) out.push(`El alumno ya tiene otra matrícula activa de este programa (${other.id}).`);
   if (!c.plans.some(p => p.mat === e.id)) out.push('La matrícula no tiene plan de pagos.');
   return out;
@@ -171,7 +171,7 @@ export function previewReactivation(e: Enrollment, c: ChangeContext, startDate: 
     if (wasDropped) {
       const balance = roundMoney(i.amount - paidOn(i));
       if (balance <= 0) continue;
-      const oldDue = installmentDueISO(i);
+      const oldDue = i.dueDateISO;
       restored.push({ id: i.id, name: i.name, balance, oldDue, newDue: oldDue ? addDaysISO(oldDue, shiftDays) : startDate });
     } else if (isOpen(i)) keptDebt.push({ id: i.id, name: i.name, balance: roundMoney(i.balance) });
   }
@@ -190,7 +190,7 @@ export function previewReactivation(e: Enrollment, c: ChangeContext, startDate: 
     keptDebtUSD: roundMoney(keptDebt.reduce((a, r) => a + r.balance, 0)),
     forgivenCount,
     paidUSD: enrollmentPaidUSD(e.id, c.payments, c.groups, plan),
-    studentReactivates: !!student && student.status !== 'Activo' && !otherActive,
+    studentReactivates: !!student && !otherActive,
     notes,
   };
 }
@@ -198,11 +198,11 @@ export function previewReactivation(e: Enrollment, c: ChangeContext, startDate: 
 /** Plan después de reactivar: cuotas restituidas con su nuevo calendario. */
 export function applyReactivationToPlan(plan: Plan, preview: ReactivationPreview, today: string): Plan {
   const byId = new Map(preview.restored.map(r => [r.id, r]));
-  const installments = plan.installments.map(i => {
+  const installments: Installment[] = plan.installments.map(i => {
     const r = byId.get(i.id);
     if (!r) return i;
     const { dropAnnulled: _d, note: _n, ...rest } = i;
-    return { ...rest, status: 'Pendiente', balance: r.balance, dueDate: formatDisplayDate(r.newDue || today), dueDateISO: r.newDue || today, reactivatedFrom: r.oldDue };
+    return { ...rest, status: 'Pendiente' as const, balance: r.balance, dueDateISO: r.newDue || today, reactivatedFrom: r.oldDue };
   });
   return recomputePlan({ ...plan, installments, status: 'Al día' }, today);
 }
@@ -282,16 +282,16 @@ export function previewProgramChange(e: Enrollment, input: Pick<ProgramChangeInp
   const frozenPartials: string[] = [];
 
   // Cuotas con cobros se conservan; las abiertas sin cobros reparten el saldo
-  const kept = plan.installments.map(i => {
+  const kept: Installment[] = plan.installments.map(i => {
     if (isClosed(i) || i.isMora) return i;
     const paid = paidOn(i);
-    if (paid > 0 && i.balance > 0) { frozenPartials.push(i.name); return { ...i, amount: paid, balance: 0, status: 'Pagada', note: 'Cobro parcial: el saldo pasó al nuevo programa' }; }
+    if (paid > 0 && i.balance > 0) { frozenPartials.push(i.name); return { ...i, amount: paid, balance: 0, status: 'Pagada' as const, note: 'Cobro parcial: el saldo pasó al nuevo programa' }; }
     return i;
   });
   const free = kept.filter(i => isOpen(i) && !i.isMora && paidOn(i) === 0);
-  let installments = kept;
+  let installments: Installment[] = kept;
   if (remaining <= 0) {
-    installments = kept.map(i => (free.includes(i) ? { ...i, status: 'Anulada', balance: 0, note: 'Anulada por el cambio de programa (ya está cobrado el precio nuevo)' } : i));
+    installments = kept.map(i => (free.includes(i) ? { ...i, status: 'Anulada' as const, balance: 0, note: 'Anulada por el cambio de programa (ya está cobrado el precio nuevo)' } : i));
   } else if (free.length > 0) {
     const base = Math.floor((remaining / free.length) * 100) / 100;
     let left = remaining;
@@ -304,7 +304,7 @@ export function previewProgramChange(e: Enrollment, input: Pick<ProgramChangeInp
     });
   } else {
     const due = addDaysISO(c.today, 7);
-    installments = [...kept, { id: `S${kept.length + 1}`, name: 'Saldo por cambio de programa', amount: remaining, balance: remaining, dueDate: formatDisplayDate(due), dueDateISO: due, status: 'Pendiente', payments: [] }];
+    installments = [...kept, { id: `S${kept.length + 1}`, name: 'Saldo por cambio de programa', amount: remaining, balance: remaining, dueDateISO: due, status: 'Pendiente', payments: [] }];
   }
   const verified = !!e.verificationStatus && e.verificationStatus !== 'Pendiente';
   const notes = [
@@ -458,7 +458,7 @@ export function renewalCheck(e: Enrollment, c: Pick<ChangeContext, 'enrollments'
     if (!['por-vencer', 'base-finalizada', 'extension', 'finalizada'].includes(validity.state)) reasons.push('La matrícula sigue vigente: se puede renovar cuando esté por vencer o haya terminado.');
   } else if (e.status === 'Caída') {
     if (!e.dropDate || daysBetween(e.dropDate, c.today) <= REACTIVATION_WINDOW_DAYS) reasons.push(`Una matrícula caída se reactiva durante los primeros ${REACTIVATION_WINDOW_DAYS} días; después se renueva.`);
-  } else reasons.push(`La matrícula está ${e.status.toLowerCase()}.`);
+  }
   const already = c.enrollments.find(o => o.renewsId === e.id && o.status !== 'Caída');
   if (already) reasons.push(`Ya fue renovada con la matrícula ${already.id}.`);
   const next = nextLevel(c.levels, program, e.levelId);

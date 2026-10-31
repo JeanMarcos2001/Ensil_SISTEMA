@@ -49,6 +49,8 @@ export const PERM = {
   psiRemind: 'psi-recordatorios:remind',
   psiConfig: 'psi-recordatorios:config',
   psiReport: 'rep-general:view',
+  reportView: 'rep-general:view',
+  reportExport: 'rep-general:export',
   userCreate: 'org-usuarios:create',
   userEdit: 'org-usuarios:edit',
   userDeactivate: 'org-usuarios:deactivate',

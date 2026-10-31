@@ -14,7 +14,7 @@ Los identificadores del código van en inglés o español según el archivo veci
 React 19 · TypeScript · Vite 6 · Tailwind 4 · react-router 7. Sin pruebas de interfaz: se verifica con scripts.
 
 - `npm run dev` (puerto 3000) · `npm run build` · `npm run lint` (= `npx tsc --noEmit`)
-- Verificación de reglas: `npx tsx scripts/check-<tema>.ts` (hay 15). **Antes de dar algo por terminado**: `tsc` sin errores,
+- Verificación de reglas: `npx tsx scripts/check-<tema>.ts` (hay 17). **Antes de dar algo por terminado**: `tsc` sin errores,
   `vite build` y todos los `check-*` en verde.
 
 ## Arquitectura: «reglas puras primero»
@@ -28,6 +28,10 @@ React 19 · TypeScript · Vite 6 · Tailwind 4 · react-router 7. Sin pruebas de
 5. Lo **derivable no se guarda**: estados de cuotas y planes, vigencia, urgencias, etc. se calculan al mostrar.
 6. Los cambios con control (reversas, cierres, cancelaciones, bajas) piden **motivo** (`ReasonDialog`) y dejan **historial**.
 7. Datos de ejemplo con fechas **relativas a hoy** (`seedDay`) para que siempre haya casos visibles.
+
+Modelo de datos: **el id manda, lo derivable no se guarda** (titular, estado, programa y edad del alumno se calculan en
+`utils/identity.ts`; fechas solo ISO; estados tipados en `utils/statuses.ts`; ids `PREFIJO-NNN` con `utils/ids.ts`; saldo y estado
+del plan solo los escribe `recomputePlan`). Datos de ejemplo en `src/data/seed*.ts`, verificados por `check-integrity.ts`.
 
 Mapa rápido de `src/utils`: matrícula (`enrollment*`, `validity`, `verification*`), dinero (`payments`, `planState`,
 `collections`, `cash*`, `pettyCash`, `creditNotes`, `refinance`), Psicopedagogía (`schedule`, `psy*`, `sessionMetrics`),

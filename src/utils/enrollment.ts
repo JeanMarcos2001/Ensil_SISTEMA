@@ -27,6 +27,7 @@ import type {
   Student,
   Tariff,
 } from '../context/DataContext';
+import { ageOn } from './dates';
 import { nextNumericId, nextSequentialId } from './ids';
 import {
   buildPaymentRecord,
@@ -184,15 +185,7 @@ export function studentPerson(draft: EnrollmentDraft, index: number): DraftPerso
 export const fullName = (p: Pick<DraftPerson, 'names' | 'lastNameP' | 'lastNameM'>) =>
   [p.names, p.lastNameP, p.lastNameM].map(x => x.trim()).filter(Boolean).join(' ');
 
-/** Edad en años cumplidos a una fecha (ISO). `null` si la fecha no es válida. */
-export function ageOn(birthDate: string, onDate: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return null;
-  const [by, bm, bd] = birthDate.split('-').map(Number);
-  const [y, m, d] = onDate.split('-').map(Number);
-  let age = y - by;
-  if (m < bm || (m === bm && d < bd)) age--;
-  return age;
-}
+export { ageOn };
 
 export function validateDocument(type: DocType, number: string): string | null {
   const n = number.trim();
@@ -646,8 +639,6 @@ export interface BatchResult {
   batch?: EnrollmentBatch;
 }
 
-const parseMoney = (s: string) => parseFloat((s || '').replace(/[^0-9.-]/g, '')) || 0;
-
 /**
  * Convierte el borrador validado en filas listas para guardar. No modifica nada.
  * El correlativo definitivo de matrícula se asigna aquí, al confirmar (nunca en borrador).
@@ -685,18 +676,16 @@ export function buildEnrollmentBatch(
   if (draft.mode === 'apoderado') {
     draft.holders.forEach((h, i) => {
       if (h.existingId) { guardianIds.push(h.existingId); return; }
-      const id = nextNumericId([...guardianIdPool, ...newGuardians.map(g => g.id)]);
+      const id = nextSequentialId('TIT', [...guardianIdPool, ...newGuardians.map(g => g.id)]);
       newGuardians.push({
         id, name: fullName(h), doc: h.docNumber.trim(), phone: h.phone.trim(), email: h.email.trim(),
         parentesco: i === 0 ? draft.students[0]?.relationship : undefined, direccion: h.address.trim(),
         docType: h.docType, names: h.names.trim(), lastNameP: h.lastNameP.trim(), lastNameM: h.lastNameM.trim(),
         birthDate: h.birthDate, civilStatus: h.civilStatus,
-        students: 0, enrollments: 0, balance: '$0',
       });
       guardianIds.push(id);
     });
   }
-  const primaryHolderName = draft.mode === 'apoderado' ? fullName(draft.holders[0]) : '';
 
   // ---- Alumnos, matrículas, planes
   const newStudents: Student[] = [];
@@ -708,7 +697,6 @@ export function buildEnrollmentBatch(
   const planIdPool = state.plans.map(p => p.id);
   const enrollmentByKey: Record<string, string> = {};
   const planByKey: Record<string, string> = {};
-  const balanceByGuardian = new Map<string, number>();
   const studentIds: string[] = [];
 
   draft.students.forEach((ds, i) => {
@@ -716,8 +704,6 @@ export function buildEnrollmentBatch(
     const person = studentPerson(draft, i);
     const name = fullName(person);
     const program = q.program!;
-    const programLabel = q.level ? `${program.name} - ${q.level.name}` : program.name;
-    const titularName = draft.mode === 'apoderado' ? primaryHolderName : name;
     const birth = person.birthDate;
 
     let studentId = person.existingId;
@@ -725,18 +711,16 @@ export function buildEnrollmentBatch(
       studentUpdates.push({
         id: studentId,
         patch: {
-          program: programLabel, fechaInicio: ds.startDate || undefined,
-          titular: titularName, status: 'Activo',
+          fechaInicio: ds.startDate || undefined,
           ...situationData(ds),
         },
       });
     } else {
       studentId = nextSequentialId('ALU', [...studentIdPool, ...newStudents.map(s => s.id)]);
       newStudents.push({
-        id: studentId, doc: person.docNumber.trim(), name, age: birth ? (ageOn(birth, draft.context.date) ?? 0) : 0,
-        program: programLabel, fechaInicio: ds.startDate || undefined,
+        id: studentId, doc: person.docNumber.trim(), name,
+        fechaInicio: ds.startDate || undefined,
         ...situationData(ds),
-        titular: titularName, status: 'Activo',
         docType: person.docType, names: person.names.trim(), lastNameP: person.lastNameP.trim(), lastNameM: person.lastNameM.trim(),
         birthDate: birth, phone: draft.mode === 'apoderado' ? '' : person.phone.trim(), email: person.email.trim(), address: person.address.trim(),
         guardianIds: draft.mode === 'apoderado' ? guardianIds : [],
@@ -755,27 +739,22 @@ export function buildEnrollmentBatch(
     let plan: Plan;
     if (q.mode === 'inmediato') {
       plan = {
-        id: planId, mat: enrollmentId, titular: titularName, type: q.paymentType!.name,
-        total: q.assignedPrice, balance: 0, next: '-', status: 'Al día', installments: [],
+        id: planId, mat: enrollmentId, type: q.paymentType!.name,
+        total: q.assignedPrice, balance: 0, status: 'Al día', installments: [],
       };
     } else {
       const variableDates = q.mode === 'fechas_manuales' ? ds.dueDates : undefined;
       const installments = buildPlanInstallments(tariff, draft.context.date, variableDates);
-      const first = installments.find(x => x.balance > 0);
       plan = {
-        id: planId, mat: enrollmentId, titular: titularName, type: q.paymentType!.name,
-        total: tariffTotal(tariff), balance: tariffTotal(tariff), next: first ? first.dueDate : '-',
+        id: planId, mat: enrollmentId, type: q.paymentType!.name,
+        total: tariffTotal(tariff), balance: tariffTotal(tariff),
         status: 'Al día', installments,
       };
     }
     plans.push(plan);
-    balanceByGuardian.set(
-      guardianIds[0] ?? '', (balanceByGuardian.get(guardianIds[0] ?? '') ?? 0) + plan.balance
-    );
 
     enrollments.push({
       id: enrollmentId,
-      date: formatDisplayDate(draft.context.date),
       dateISO: draft.context.date,
       student: name,
       studentId,
@@ -787,7 +766,6 @@ export function buildEnrollmentBatch(
       origen: lead.name, origenId: lead.id,
       observation: draft.context.observation.trim() || undefined,
       status: 'Activa',
-      plan: 'Al día',
       planId,
       paymentTypeId: q.paymentType!.id, paymentTypeName: q.paymentType!.name,
       tariffId: tariff.id, tariffName: tariff.name,
@@ -804,7 +782,7 @@ export function buildEnrollmentBatch(
   draft.students.forEach((ds, i) => {
     const q = quote.students[i];
     newSchedules.push({
-      id: nextNumericId([...scheduleIdPool, ...newSchedules.map(x => x.id)]),
+      id: nextSequentialId('SES', [...scheduleIdPool, ...newSchedules.map(x => x.id)]),
       student: fullName(studentPerson(draft, i)),
       studentId: studentIds[i],
       branchId: draft.context.branchId,
@@ -857,7 +835,7 @@ export function buildEnrollmentBatch(
     // Un pago por unidad (un comprobante) con una parte por medio usado; un movimiento de caja por parte.
     const built = buildPaymentRecord({
       id: paymentId,
-      date: formatDisplayDate(opts.now.slice(0, 10)),
+      date: opts.now.slice(0, 10),
       student: names.join(' + '),
       concept: u.kind === 'group' ? `Contado grupal — ${u.label}` : 'Contado',
       amountUSD: u.required,
@@ -872,28 +850,6 @@ export function buildEnrollmentBatch(
     });
     payments.push(built.payment);
     cashMovements.push(...built.cashMovements);
-  });
-
-  // ---- Contadores de titulares (existentes y nuevos)
-  const studentsPerGuardian = draft.students.length;
-  guardianIds.forEach(gid => {
-    const existing = state.guardians.find(g => g.id === gid);
-    const added = balanceByGuardian.get(guardianIds[0]) ?? 0;
-    if (existing) {
-      guardianUpdates.push({
-        id: gid,
-        patch: {
-          students: existing.students + studentsPerGuardian,
-          enrollments: existing.enrollments + studentsPerGuardian,
-          balance: `$${(parseMoney(existing.balance) + added).toLocaleString('en-US')}`,
-        },
-      });
-    } else {
-      const g = newGuardians.find(x => x.id === gid)!;
-      g.students = studentsPerGuardian;
-      g.enrollments = studentsPerGuardian;
-      g.balance = `$${added.toLocaleString('en-US')}`;
-    }
   });
 
   return {

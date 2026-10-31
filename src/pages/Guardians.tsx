@@ -9,6 +9,7 @@ import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { GuardianFormModal } from './people/GuardianFormModal';
 import { studentProgramLabel, todayLocalISO } from '../utils/schedule';
+import { studentStatus, studentsOfGuardian } from '../utils/identity';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { GuardianStatementModal } from '../components/people/GuardianStatementModal';
 import { guardianBalance } from '../utils/guardianStatement';
@@ -29,8 +30,8 @@ export function Guardians() {
   const [editingGuardian, setEditingGuardian] = useState<any | null>(null);
 
   const selectedGuardian = guardians.find(g => g.id === selectedGuardianId);
-  // Alumnos a cargo: por vínculo (guardianIds); los registros antiguos se reconocen por el nombre del titular
-  const guardianStudents = students.filter(s => (s.guardianIds ? s.guardianIds.includes(selectedGuardian?.id ?? '') : s.titular === selectedGuardian?.name));
+  // Alumnos a cargo: por vínculo (guardianIds)
+  const guardianStudents = selectedGuardian ? studentsOfGuardian(selectedGuardian, students) : [];
 
   const handleOpenDetail = (id: string) => {
     setSelectedGuardianId(id);
@@ -276,7 +277,7 @@ export function Guardians() {
                   <div key={s.id} className="bg-surface-muted p-3 rounded-lg flex items-center justify-between border border-border-soft">
                     <div>
                       <p className="text-sm font-medium text-text-primary">{s.name}</p>
-                      <p className="text-xs text-text-secondary">{studentProgramLabel(s, enrollments) || 'Sin matrícula'} - {s.status}</p>
+                      <p className="text-xs text-text-secondary">{studentProgramLabel(s, enrollments) || 'Sin matrícula'} - {studentStatus(s.id, enrollments)}</p>
                     </div>
                   </div>
                 ))}

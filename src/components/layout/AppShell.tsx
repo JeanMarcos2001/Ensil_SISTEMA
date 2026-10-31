@@ -39,6 +39,12 @@ import { MonthlySchedules } from '../../pages/psychopedagogy/MonthlySchedules';
 import { Reminders } from '../../pages/psychopedagogy/Reminders';
 import { Payroll } from '../../pages/people/Payroll';
 import { PsychopedagogyReport } from '../../pages/reports/PsychopedagogyReport';
+import { EnrollmentsReport } from '../../pages/reports/EnrollmentsReport';
+import { VerificationReport } from '../../pages/reports/VerificationReport';
+import { CashReport } from '../../pages/reports/CashReport';
+import { StockReport } from '../../pages/reports/StockReport';
+import { StaffReport } from '../../pages/reports/StaffReport';
+import { AuditReport } from '../../pages/reports/AuditReport';
 import { StaffPage } from '../../pages/Staff';
 import { ContractsPage } from '../../pages/Contracts';
 import { AssignmentsPage } from '../../pages/Assignments';
@@ -82,6 +88,18 @@ export function AppShell() {
     if (activeModule === 'dashboard') return <Dashboard />;
     if (activeModule === 'mensajeria') return <Messaging />;
     
+    // Reportes: se resuelven antes que las pantallas operativas porque comparten nombre (Matrículas, Caja, Stock…)
+    if (activeModule === 'reportes') {
+      if (activeItem === 'Matrículas') return <EnrollmentsReport />;
+      if (activeItem === 'Cartera') return <PortfolioReport />;
+      if (activeItem === 'Caja') return <CashReport />;
+      if (activeItem === 'Verificación') return <VerificationReport />;
+      if (activeItem === 'Stock') return <StockReport />;
+      if (activeItem === 'Psicopedagogía') return <PsychopedagogyReport />;
+      if (activeItem === 'Personal') return <StaffReport />;
+      if (activeItem === 'Auditoría') return <AuditReport />;
+    }
+
     // Operation Module
     if (activeItem === 'Matrículas') return <Enrollments />;
     if (activeItem === 'Planes y cartera') return <Plans />;
@@ -123,10 +141,9 @@ export function AppShell() {
     if (activeItem === 'Ajustes y mermas') return <Adjustments />;
     
     // System Module
+    if (activeItem === 'Auditoría') return <AuditReport />;
     if (activeItem === 'Solicitudes pendientes') return <PendingRequests />;
     if (activeItem === 'Cierres') return <Closures />;
-    if (activeModule === 'reportes' && activeItem === 'Cartera') return <PortfolioReport />;
-    if (activeModule === 'reportes' && activeItem === 'Psicopedagogía') return <PsychopedagogyReport />;
     if (activeItem === 'Reaperturas') return <Reopenings />;
 
     // Psychopedagogy Module

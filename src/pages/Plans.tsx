@@ -15,7 +15,9 @@ import { ClearFilters } from '../components/ui/ClearFilters';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { todayLocalISO } from '../utils/schedule';
 import { RemindersPanel } from '../components/collections/RemindersPanel';
-import { installmentState, recomputePlan } from '../utils/planState';
+import { installmentState, nextInstallment, recomputePlan } from '../utils/planState';
+import { holderNameOfPlan } from '../utils/identity';
+import { formatDisplayDate } from '../utils/tariffs';
 import { buildReminders, moraOf } from '../utils/collections';
 import { PERM } from '../utils/authority';
 
@@ -31,6 +33,9 @@ export function Plans() {
     const withStates = { ...pl, installments: pl.installments.map(i => ({ ...i, status: installmentState(i, today) })) };
     return recomputePlan(withStates, today);
   }), [data.plans, today]);
+  // Titular y próxima cuota no se guardan en el plan: salen de la matrícula y de las cuotas abiertas
+  const holderOf = (pl: (typeof plans)[number]) => holderNameOfPlan(pl, data.enrollments, data.students, data.guardians);
+  const nextDue = (pl: (typeof plans)[number]) => { const n = nextInstallment(pl); return n ? formatDisplayDate(n.dueDateISO) : '-'; };
   const reminderCount = useMemo(
     () => buildReminders({ plans: data.plans, enrollments: data.enrollments, students: data.students, guardians: data.guardians, branches: data.branches }, collectionPolicy, data.reminderLogs, today).length,
     [data.plans, data.enrollments, data.students, data.guardians, data.branches, collectionPolicy, data.reminderLogs, today]
@@ -61,7 +66,7 @@ export function Plans() {
 
   const filteredPlans = plans.filter(p =>
     (p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.titular.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    holderOf(p).toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.mat.toLowerCase().includes(searchTerm.toLowerCase())) &&
     (!statusFilter || p.status === statusFilter) &&
     (!typeFilter || p.type === typeFilter)
@@ -75,7 +80,7 @@ export function Plans() {
     downloadCsv(
       csvFileName('Cartera', todayLocalISO()),
       ['Plan', 'Matrícula', 'Titular', 'Tipo de pago', 'Total (USD)', 'Saldo (USD)', 'Próxima cuota', 'Estado'],
-      filteredPlans.map(p => [p.id, p.mat, p.titular, p.type, p.total, p.balance, p.next, p.status])
+      filteredPlans.map(p => [p.id, p.mat, holderOf(p), p.type, p.total, p.balance, nextDue(p), p.status])
     );
   };
 
@@ -233,11 +238,11 @@ export function Plans() {
                     <div className="font-medium text-text-primary">{row.id}</div>
                     <div className="text-xs text-text-muted">{row.mat}</div>
                   </td>
-                  <td className="px-6 py-3 text-sm text-text-primary">{row.titular}</td>
+                  <td className="px-6 py-3 text-sm text-text-primary">{holderOf(row)}</td>
                   <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">$ {row.total.toFixed(2)}</td>
                   <td className="px-6 py-3 text-sm font-medium text-text-primary text-right">$ {row.balance.toFixed(2)}</td>
                   <td className={`px-6 py-3 text-sm ${row.status === 'Atrasado' ? 'text-danger-text font-medium' : 'text-text-secondary'}`}>
-                    {row.next} {row.status === 'Atrasado' && '(Vencida)'}
+                    {nextDue(row)} {row.status === 'Atrasado' && '(Vencida)'}
                   </td>
                   <td className="px-6 py-3 text-sm">
                     <Badge variant={row.status === 'Al día' ? 'success' : row.status === 'Completado' ? 'info' : 'danger'}>{row.status}</Badge>
@@ -348,7 +353,7 @@ export function Plans() {
                     {selectedPlan.installments.map((inst: any) => (
                       <tr key={inst.id} className="hover:bg-surface-muted/50 transition-colors">
                         <td className="px-4 py-3 font-medium text-text-primary">{inst.name}{inst.variable && <span className="block text-[11px] font-normal text-text-muted">Monto variable: se define al cobrar</span>}</td>
-                        <td className={`px-4 py-3 ${inst.status === 'Vencida' ? 'text-danger-text font-medium' : 'text-text-secondary'}`}>{inst.dueDate}</td>
+                        <td className={`px-4 py-3 ${inst.status === 'Vencida' ? 'text-danger-text font-medium' : 'text-text-secondary'}`}>{formatDisplayDate(inst.dueDateISO)}</td>
                         <td className="px-4 py-3 text-right text-text-primary">$ {inst.amount.toFixed(2)}</td>
                         <td className="px-4 py-3 text-right font-medium text-text-primary">$ {inst.balance.toFixed(2)}</td>
                         <td className="px-4 py-3">
@@ -400,7 +405,7 @@ export function Plans() {
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="text-xl font-semibold text-text-primary">{selectedInstallment.name}</h3>
-                <p className="text-sm text-text-secondary">Vencimiento: {selectedInstallment.dueDate}</p>
+                <p className="text-sm text-text-secondary">Vencimiento: {formatDisplayDate(selectedInstallment.dueDateISO)}</p>
               </div>
               <Badge variant={getInstallmentBadge(selectedInstallment.status)}>{selectedInstallment.status}</Badge>
             </div>
@@ -465,7 +470,7 @@ export function Plans() {
                     <tbody className="divide-y divide-border-soft">
                       {selectedInstallment.payments.map((payment: any) => (
                         <tr key={payment.id}>
-                          <td className="px-3 py-2 text-text-secondary">{payment.date}</td>
+                          <td className="px-3 py-2 text-text-secondary">{formatDisplayDate(payment.date)}</td>
                           <td className="px-3 py-2 text-text-primary">{payment.receipt}</td>
                           <td className="px-3 py-2 text-right font-medium text-success-text">+ $ {payment.amount.toFixed(2)}</td>
                         </tr>

@@ -7,6 +7,7 @@ import { REFUND_REASON, REVERSAL_REASONS, applyReversalToPlan, reversalTargets, 
 import { todayLocalISO } from '../../utils/schedule';
 import { NOTE_SERIES, allowedNoteModes, documentOf, nextNoteNumber, noteLabel, validateNoteChoice, type NoteMode } from '../../utils/creditNotes';
 import { Field, inputCls } from '../../pages/enrollment/fields';
+import { formatDisplayDate } from '../../utils/tariffs';
 
 interface Props {
   /** Pago a reversar; `null` cierra la ventana. */
@@ -99,7 +100,7 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
           <div><span className="block text-xs text-text-muted">Monto</span><span className="font-medium text-text-primary">{usd(payment.amount)}</span></div>
           <div><span className="block text-xs text-text-muted">Comprobante</span><span className="font-medium text-text-primary">{payment.receipt}</span></div>
           <div><span className="block text-xs text-text-muted">Medio</span><span className="font-medium text-text-primary">{payment.method}</span></div>
-          <div><span className="block text-xs text-text-muted">Fecha</span><span className="font-medium text-text-primary">{payment.date}</span></div>
+          <div><span className="block text-xs text-text-muted">Fecha</span><span className="font-medium text-text-primary">{formatDisplayDate(payment.date)}</span></div>
         </div>
 
         <section className="space-y-2">

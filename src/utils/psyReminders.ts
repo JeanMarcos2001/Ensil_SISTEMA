@@ -88,7 +88,7 @@ export interface PsyReminderContext {
 const when = (days: number, date: string) => (days === 0 ? 'hoy' : days === 1 ? 'mañana' : `el ${longDayLabel(date)}`);
 
 export function recipientOf(student: Student | undefined, guardians: Guardian[]): { name: string; phone: string; email: string } {
-  const guardian = student?.guardianIds?.map(id => guardians.find(g => g.id === id)).find(Boolean) ?? guardians.find(g => g.name === student?.titular);
+  const guardian = student?.guardianIds.map(id => guardians.find(g => g.id === id)).find(Boolean);
   return { name: guardian?.name ?? student?.name ?? '', phone: guardian?.phone ?? student?.phone ?? '', email: guardian?.email ?? student?.email ?? '' };
 }
 

@@ -3,12 +3,11 @@
  * administrativos y ficha de la matrícula.
  * Ejecutar: npx tsx scripts/check-lifecycle.ts
  */
-import type { DropRequest, Enrollment, EnrollmentChange, Guardian, MonthlySchedule, Payment, Plan, Program, PromotionGroup, Schedule, Student, Tracking } from '../src/context/DataContext';
+import type { DropRequest, Enrollment, EnrollmentChange, Guardian, Installment, MonthlySchedule, Payment, Plan, Program, PromotionGroup, Schedule, Student, Tracking } from '../src/context/DataContext';
 import {
   DROP_REASONS,
   applyDropToPlan,
   enrollmentPaidUSD,
-  installmentDueISO,
   paymentShareUSD,
   pendingDropOf,
   previewDrop,
@@ -20,7 +19,8 @@ import {
 import { EDIT_LABELS, buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEnrollmentEdit } from '../src/utils/enrollmentEdit';
 import { buildFicha, type FichaContext } from '../src/utils/enrollmentFicha';
 import { REFUND_REASON, REVERSAL_REASONS, applyReversalToPlan, reversalTargets, validateReversal } from '../src/utils/paymentReversal';
-import { parseDisplayDate } from '../src/utils/tariffs';
+import { formatDisplayDate, parseDisplayDate } from '../src/utils/tariffs';
+import type { InstallmentStatus } from '../src/utils/statuses';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -32,18 +32,18 @@ const TODAY = '2026-10-22';
 // ================================================================ Fechas
 check('Fecha de texto → ISO', parseDisplayDate('15 Abr 2024') === '2024-04-15' && parseDisplayDate('05 Ene 2024') === '2024-01-05' && parseDisplayDate('5 dic 2026') === '2026-12-05');
 check('Texto inválido → null', parseDisplayDate('mañana') === null && parseDisplayDate('15 Xyz 2024') === null && parseDisplayDate(undefined) === null);
-check('Vencimiento de una cuota (ISO o texto)', installmentDueISO({ dueDateISO: '2026-11-01', dueDate: 'x' }) === '2026-11-01' && installmentDueISO({ dueDate: '15 Feb 2024' }) === '2024-02-15' && installmentDueISO({}) === '');
+check('El vencimiento de una cuota se guarda solo en ISO; el texto se arma al mostrar', formatDisplayDate('2026-11-01') === '01 Nov 2026' && parseDisplayDate(formatDisplayDate('2026-11-01')) === '2026-11-01');
 
 // ================================================================ Datos
 const enrollment = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({
-  id, date: '01 Sep 2026', dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', programId: '1', level: 'Nivel 1', status: 'Activa', plan: 'Al día',
+  id, dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', guardianIds: ['G1'], program: 'Kids', programId: '1', level: 'Nivel 1', status: 'Activa',
   branchId: 'FIL-PIU', origenId: '1', origen: 'Facebook', asesorId: 'E1', asesor: 'Ana Quispe', ...over,
 });
-const inst = (id: string, amount: number, balance: number, due: string, status: string, payments: any[] = [], extra: Record<string, unknown> = {}) => ({
-  id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDate: due, dueDateISO: due, status, payments, ...extra,
+const inst = (id: string, amount: number, balance: number, due: string, status: InstallmentStatus, payments: any[] = [], extra: Partial<Installment> = {}): Installment => ({
+  id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDateISO: due, status, payments, ...extra,
 });
 const plan = (over: Partial<Plan> = {}): Plan => ({
-  id: 'PLN-1', mat: 'MAT-1', titular: 'Juan', type: 'Plan 4 cuotas', total: 800, balance: 400, next: '-', status: 'Al día',
+  id: 'PLN-1', mat: 'MAT-1', type: 'Plan 4 cuotas', total: 800, balance: 400, status: 'Al día',
   installments: [
     inst('C1', 200, 0, '2026-09-01', 'Pagada', [{ id: 'P1', paymentId: 'PAG-001', date: '2026-09-01', amount: 200, receipt: 'B001-1' }]),
     inst('C2', 200, 0, '2026-10-01', 'Pagada', [{ id: 'P2', paymentId: 'PAG-002', date: '2026-10-01', amount: 200, receipt: 'B001-2' }]),
@@ -52,10 +52,10 @@ const plan = (over: Partial<Plan> = {}): Plan => ({
   ], ...over,
 });
 const payment = (id: string, over: Partial<Payment> = {}): Payment => ({
-  id, date: '01 Sep 2026', student: 'Mateo Ruiz', concept: 'Pago de Cuota 1', amount: 200, method: 'Efectivo', receipt: 'B001-1', status: 'Aprobado',
+  id, date: '2026-09-01', student: 'Mateo Ruiz', concept: 'Pago de Cuota 1', amount: 200, method: 'Efectivo', receipt: 'B001-1', status: 'Aprobado',
   enrollmentIds: ['MAT-1'], currency: 'USD', parts: [{ id: 'p', currency: 'USD', amount: 200, method: 'Efectivo' }], ...over,
 });
-const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', age: 9, program: 'Kids - Nivel 1', titular: 'Juan', status: 'Activo', guardianIds: ['G1'], ...over });
+const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'], ...over });
 const sch = (id: string, over: Partial<Schedule> = {}): Schedule => ({
   id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over,
 });
@@ -83,7 +83,6 @@ check('No se duplica la solicitud pendiente (sí tras una rechazada)',
   dv(enrollment('MAT-1'), input, [{ id: 'CAI-1', enrollmentId: 'MAT-1', requestedAt: '', requestedBy: '', reason: '', detail: '', effectiveDate: '', status: 'Rechazada' }]).length === 0);
 check('Motivo del catálogo y detalle obligatorios', dv(enrollment('MAT-1'), { ...input, reason: 'x' }).length === 1 && dv(enrollment('MAT-1'), { ...input, detail: ' ' }).length === 1);
 check('Fecha: obligatoria, no futura, no anterior a la matrícula', dv(enrollment('MAT-1'), { ...input, effectiveDate: '' }).length === 1 && dv(enrollment('MAT-1'), { ...input, effectiveDate: '2026-10-30' }).some(m => /futura/.test(m)) && dv(enrollment('MAT-1'), { ...input, effectiveDate: '2026-08-01' }).some(m => /anterior a la matrícula/.test(m)));
-check('Matrícula antigua con fecha de texto también valida la fecha', dv(enrollment('MAT-1', { dateISO: undefined, date: '01 Sep 2026' }), { ...input, effectiveDate: '2026-08-01' }).some(m => /anterior a la matrícula/.test(m)));
 const req: DropRequest = { id: 'CAI-1', enrollmentId: 'MAT-1', requestedAt: '2026-10-22T10:00:00Z', requestedBy: 'Ana', reason: 'x', detail: 'y', effectiveDate: '2026-10-20', status: 'Pendiente' };
 check('Resolver: rechazar exige motivo; aprobar no; una solicitud resuelta no se vuelve a resolver',
   validateDropResolution(req, 'Rechazada', '').length === 1 && validateDropResolution(req, 'Aprobada', '').length === 0 && validateDropResolution({ ...req, status: 'Aprobada' }, 'Aprobada', '').length === 1);
@@ -105,9 +104,9 @@ check('Se informan materiales entregados y grupo promocional',
   previewDrop(ctxOf({ enrollment: enrollment('MAT-1', { verifiedItems: ['a', 'b'], promotionGroupId: 'PGR-1' }), enrollments: [enrollment('MAT-1', { promotionGroupId: 'PGR-1' }), enrollment('MAT-3', { promotionGroupId: 'PGR-1' })] }), '2026-10-20').deliveredItems === 2 &&
   previewDrop(ctxOf({ enrollment: enrollment('MAT-1', { promotionGroupId: 'PGR-1' }), enrollments: [enrollment('MAT-1', { promotionGroupId: 'PGR-1' }), enrollment('MAT-3', { promotionGroupId: 'PGR-1' })] }), '2026-10-20').groupMembers === 1);
 
-const after = applyDropToPlan(plan(), pv, false);
+const after = applyDropToPlan(plan(), pv, false, TODAY);
 check('Aprobar sin condonar: cuotas futuras anuladas, la vencida sigue como deuda, plan «Caída»', after.installments.find(i => i.id === 'C4')?.status === 'Anulada' && after.installments.find(i => i.id === 'C4')?.balance === 0 && after.installments.find(i => i.id === 'C3')?.balance === 200 && after.balance === 200 && after.status === 'Caída');
-const forgiven = applyDropToPlan(plan(), pv, true);
+const forgiven = applyDropToPlan(plan(), pv, true, TODAY);
 check('Condonando la deuda vencida el saldo queda en cero', forgiven.balance === 0 && forgiven.installments.find(i => i.id === 'C3')?.status === 'Anulada');
 check('Lo pagado no se toca', after.installments.find(i => i.id === 'C1')?.status === 'Pagada' && after.installments.find(i => i.id === 'C1')?.payments.length === 1);
 check('Resumen de efectos (sin y con condonación)', summarizeDrop(pv, false).overdueUSD === 200 && summarizeDrop(pv, false).annulledInstallments === 1 && summarizeDrop(pv, true).overdueForgiven && summarizeDrop(pv, true).annulledInstallments === 2 && summarizeDrop(pv, true).cancelledSchedules === 2);
@@ -174,7 +173,7 @@ check('Solo se corrige una matrícula activa; origen y responsable son obligator
 check('La corrección actualiza los nombres junto con los ids', (() => { const p = buildEnrollmentPatch(afterEdit, names); return p.origenId === '2' && p.origen === 'Referido' && p.asesorId === 'E2' && p.asesor === 'Luis Mamani'; })());
 
 // ================================================================ Ficha de la matrícula
-const g: Guardian = { id: 'G1', name: 'Juan Ruiz', doc: '4', phone: '9', email: '', students: 1, enrollments: 1, balance: '$0' };
+const g: Guardian = { id: 'G1', name: 'Juan Ruiz', doc: '4', phone: '9', email: '' };
 const prog: Program = { id: '1', code: 'K', name: 'Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' };
 const fctx = (over: Partial<FichaContext> = {}): FichaContext => ({
   enrollments: [enrollment('MAT-1', { createdAt: '2026-09-01T10:00:00Z', createdBy: 'Ana', verificationDate: '2026-09-05', verificationStatus: 'Verificado Completo', verifier: 'Luis' })],

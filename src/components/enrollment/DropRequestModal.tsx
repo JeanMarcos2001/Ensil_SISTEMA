@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { DateInput } from '../ui/DateInput';
 import { Modal } from '../ui/Modal';
 import { useData } from '../../context/DataContext';
-import { DROP_REASONS, enrollmentDateISO, previewDrop } from '../../utils/enrollmentDrop';
+import { DROP_REASONS, previewDrop } from '../../utils/enrollmentDrop';
 import { todayLocalISO } from '../../utils/schedule';
 import { Field, errorCls, inputCls } from '../../pages/enrollment/fields';
 import { DropEffectsPanel } from './DropEffectsPanel';
@@ -52,7 +52,7 @@ export function DropRequestModal({ enrollmentId, onClose }: Props) {
     onClose();
   };
 
-  const start = enrollmentDateISO(enrollment);
+  const start = enrollment.dateISO;
 
   return (
     <Modal

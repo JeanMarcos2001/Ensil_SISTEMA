@@ -8,6 +8,7 @@ import { emptyDocument, type PaymentDocument } from '../../utils/payments';
 import { buildPlanInstallments } from '../../utils/tariffs';
 import { StepHeader } from './fields';
 import { STEPS, type StepProps } from './types';
+import { formatDisplayDate } from '../../utils/tariffs';
 
 const usd = (n: number) => `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -114,7 +115,7 @@ export function StepPayment({ draft, update, quote }: StepProps) {
                   <tr key={r.id} className="border-t border-border-soft">
                     <td className="py-2 text-text-primary">{r.name}</td>
                     <td className="py-2 text-text-secondary">{r.variable ? 'Se define al cobrar' : usd(r.amount)}</td>
-                    <td className="py-2 text-text-secondary">{r.dueDate}</td>
+                    <td className="py-2 text-text-secondary">{formatDisplayDate(r.dueDateISO)}</td>
                   </tr>
                 ))}
               </tbody>

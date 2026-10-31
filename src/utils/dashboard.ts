@@ -2,14 +2,16 @@
  * Cifras del Dashboard (funciones puras). Todo se DERIVA de los datos del sistema: matrículas, planes, pagos, caja,
  * stock y solicitudes. No hay números escritos a mano.
  */
-import type { Branch, CashMovement, ChangeRequest, DropRequest, Enrollment, Payment, Plan, StockItem } from '../context/DataContext';
+import type { Branch, CashMovement, ChangeRequest, DropRequest, Enrollment, Guardian, Payment, Plan, StockItem, Student } from '../context/DataContext';
 import { cashBalance } from './cash';
-import { installmentDueISO } from './enrollmentDrop';
+import { holderNameOfEnrollment } from './identity';
 import { localDateOf } from './schedule';
-import { formatDisplayDate, parseDisplayDate, roundMoney } from './tariffs';
+import { formatDisplayDate, roundMoney } from './tariffs';
 
 export interface DashboardContext {
   branches: Branch[];
+  students: Student[];
+  guardians: Guardian[];
   enrollments: Enrollment[];
   plans: Plan[];
   payments: Payment[];
@@ -21,8 +23,6 @@ export interface DashboardContext {
 }
 
 const isVoidPayment = (p: Payment) => /anulad|revers/i.test(p.status);
-/** Fecha ISO de un pago (los registros antiguos guardan «24 Mar 2024»). */
-export const paymentDateISO = (p: Pick<Payment, 'date'>): string => (/^\d{4}-\d{2}-\d{2}/.test(p.date) ? p.date.slice(0, 10) : parseDisplayDate(p.date) ?? '');
 
 export interface DueItem {
   planId: string;
@@ -39,17 +39,18 @@ export interface DueItem {
 const daysBetween = (fromISO: string, toISO: string): number => Math.round((Date.parse(`${toISO}T00:00:00Z`) - Date.parse(`${fromISO}T00:00:00Z`)) / 86400000);
 
 /** Cuotas con saldo que vencen dentro de `horizon` días o ya vencieron (la más urgente primero). */
-export function upcomingDues(plans: Plan[], today: string, horizon = 7): DueItem[] {
+export function upcomingDues(ctx: Pick<DashboardContext, 'plans' | 'enrollments' | 'students' | 'guardians'>, today: string, horizon = 7): DueItem[] {
   const out: DueItem[] = [];
-  for (const plan of plans) {
+  for (const plan of ctx.plans) {
+    const titular = holderNameOfEnrollment(ctx.enrollments.find(e => e.id === plan.mat), ctx.students, ctx.guardians);
     if (plan.status === 'Completado') continue;
     for (const i of plan.installments) {
       if (!(i.balance > 0) || ['Anulada', 'Refinanciada'].includes(i.status)) continue;
-      const dueISO = installmentDueISO(i);
+      const dueISO = i.dueDateISO;
       if (!dueISO) continue;
       const days = daysBetween(today, dueISO);
       if (days > horizon) continue;
-      out.push({ planId: plan.id, enrollmentId: plan.mat, titular: plan.titular, installment: i.name, dueISO, dueLabel: i.dueDate ?? dueISO, balance: roundMoney(i.balance), days });
+      out.push({ planId: plan.id, enrollmentId: plan.mat, titular, installment: i.name, dueISO, dueLabel: formatDisplayDate(dueISO), balance: roundMoney(i.balance), days });
     }
   }
   return out.sort((a, b) => a.dueISO.localeCompare(b.dueISO) || a.enrollmentId.localeCompare(b.enrollmentId));
@@ -79,12 +80,12 @@ export interface Kpis {
 
 export function dashboardKpis(ctx: DashboardContext, today: string): Kpis {
   const active = ctx.enrollments.filter(e => e.status === 'Activa');
-  const overdue = upcomingDues(ctx.plans, today, -1).reduce((a, d) => a + d.balance, 0);
+  const overdue = upcomingDues(ctx, today, -1).reduce((a, d) => a + d.balance, 0);
   return {
     activeEnrollments: active.length,
     portfolioUSD: roundMoney(ctx.plans.filter(p => p.status !== 'Completado').reduce((a, p) => a + (p.balance > 0 ? p.balance : 0), 0)),
     overdueUSD: roundMoney(overdue),
-    paymentsTodayUSD: roundMoney(ctx.payments.filter(p => !isVoidPayment(p) && paymentDateISO(p) === today).reduce((a, p) => a + p.amount, 0)),
+    paymentsTodayUSD: roundMoney(ctx.payments.filter(p => !isVoidPayment(p) && p.date === today).reduce((a, p) => a + p.amount, 0)),
     pendingVerifications: active.filter(e => !e.verificationStatus || e.verificationStatus === 'Pendiente').length,
     lowStock: ctx.stockItems.filter(s => s.stock <= s.minStock).length,
     pendingRequests: ctx.dropRequests.filter(r => r.status === 'Pendiente').length + (ctx.changeRequests ?? []).filter(r => r.status === 'Pendiente').length,
@@ -97,11 +98,11 @@ export function dashboardKpis(ctx: DashboardContext, today: string): Kpis {
 export function branchFigures(ctx: DashboardContext, today: string): BranchFigures[] {
   const month = today.slice(0, 7);
   const overdueByPlan = new Map<string, number>();
-  for (const d of upcomingDues(ctx.plans, today, -1)) overdueByPlan.set(d.enrollmentId, (overdueByPlan.get(d.enrollmentId) ?? 0) + d.balance);
+  for (const d of upcomingDues(ctx, today, -1)) overdueByPlan.set(d.enrollmentId, (overdueByPlan.get(d.enrollmentId) ?? 0) + d.balance);
   return ctx.branches
     .filter(b => b.status === 'Activo')
     .map(branch => {
-      const mine = ctx.enrollments.filter(e => (e.branchId ? e.branchId === branch.id : e.sede === branch.name));
+      const mine = ctx.enrollments.filter(e => e.branchId === branch.id);
       const income = ctx.cashMovements
         .filter(m => m.branchId === branch.id && m.kind === 'Ingreso' && m.status === 'Aplicado' && localDateOf(m.date).slice(0, 7) === month)
         .reduce((a, m) => a + (m.amountUSD || (m.currency === 'USD' ? m.amount : 0)), 0);

@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, Truck, MapPin } from 'lucide-react';
 import { useData, Courier, ShippingMethod } from '../../context/DataContext';
+import { nextSequentialId } from '../../utils/ids';
 
 export function Shipping() {
   const { couriers, setCouriers, shippingMethods, setShippingMethods } = useData();
@@ -75,7 +76,7 @@ export function Shipping() {
     if (selectedCourier) {
       setCouriers(couriers.map(c => c.id === selectedCourier.id ? { ...courierFormData as Courier } : c));
     } else {
-      const newId = `COUR-${Date.now()}`;
+      const newId = nextSequentialId('COUR', couriers.map(x => x.id));
       setCouriers([...couriers, { ...courierFormData as Courier, id: newId }]);
     }
     setIsCourierFormOpen(false);
@@ -107,7 +108,7 @@ export function Shipping() {
     if (selectedMethod) {
       setShippingMethods(shippingMethods.map(m => m.id === selectedMethod.id ? { ...methodFormData as ShippingMethod } : m));
     } else {
-      const newId = `SM-${Date.now()}`;
+      const newId = nextSequentialId('SM', shippingMethods.map(x => x.id));
       setShippingMethods([...shippingMethods, { ...methodFormData as ShippingMethod, id: newId }]);
     }
     setIsMethodFormOpen(false);

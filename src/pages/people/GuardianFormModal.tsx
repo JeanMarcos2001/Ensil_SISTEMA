@@ -22,7 +22,7 @@ interface Props {
  * documento, nombres, nacimiento (mayor de edad), celular, correo, dirección y estado civil.
  */
 export function GuardianFormModal({ isOpen, onClose, editing, onSaved }: Props) {
-  const { guardians, students, addGuardian, updateGuardian, updateStudent } = useData();
+  const { guardians, addGuardian, updateGuardian } = useData();
   const today = todayLocalISO();
   const [person, setPerson] = useState<DraftPerson>(emptyPerson());
   const [errors, setErrors] = useState<string[]>([]);
@@ -38,9 +38,8 @@ export function GuardianFormModal({ isOpen, onClose, editing, onSaved }: Props) 
     if (found.length > 0) { setErrors(found); return; }
     const data = buildGuardian(person);
     if (editing) {
+      // El nombre del titular no se copia en ningún otro registro: alumnos, matrículas y planes lo muestran desde su ficha.
       updateGuardian(editing.id, data);
-      // El nombre del titular principal se guarda también en la ficha de sus alumnos
-      students.filter(s => s.guardianIds?.[0] === editing.id && s.titular !== data.name).forEach(s => updateStudent(s.id, { titular: data.name }));
     } else {
       const created = addGuardian(data);
       onSaved?.(created);

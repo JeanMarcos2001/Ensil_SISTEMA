@@ -42,16 +42,16 @@ const usd = (n: number) => `$ ${n.toLocaleString('en-US', { minimumFractionDigit
 const usd0 = (n: number) => `$ ${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
 export function Dashboard() {
-  const { enrollments, programs, schedules, dropRequests, changeRequests, branches, plans, payments, cashMovements, stockItems, pendingFirstSessions } = useData();
+  const { enrollments, programs, schedules, dropRequests, changeRequests, branches, plans, payments, cashMovements, stockItems, students, guardians, pendingFirstSessions } = useData();
   const navigate = useNavigate();
   const today = todayLocalISO();
   const ctx = useMemo(
-    () => ({ branches, enrollments, plans, payments, cashMovements, stockItems, dropRequests, changeRequests }),
-    [branches, enrollments, plans, payments, cashMovements, stockItems, dropRequests, changeRequests]
+    () => ({ branches, students, guardians, enrollments, plans, payments, cashMovements, stockItems, dropRequests, changeRequests }),
+    [branches, students, guardians, enrollments, plans, payments, cashMovements, stockItems, dropRequests, changeRequests]
   );
   const k = useMemo(() => dashboardKpis(ctx, today), [ctx, today]);
   const bySede = useMemo(() => branchFigures(ctx, today), [ctx, today]);
-  const dues = useMemo(() => upcomingDues(plans, today, 7), [plans, today]);
+  const dues = useMemo(() => upcomingDues(ctx, today, 7), [ctx, today]);
   const activity = useMemo(() => recentActivity(ctx, 6), [ctx]);
   const expiring = validityCounts({ enrollments, programs, schedules }, today)['por-vencer'];
   const critical = dues.filter(d => d.days <= 3).length;

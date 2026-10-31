@@ -16,6 +16,7 @@ import { ClearFilters } from '../components/ui/ClearFilters';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { documentLabel, parseReceipt } from '../utils/payments';
 import { PERM } from '../utils/authority';
+import { formatDisplayDate } from '../utils/tariffs';
 
 const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const usd = (n: number) => `$ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -192,7 +193,7 @@ export function Payments() {
             <tbody className="divide-y divide-border-soft">
               {paginatedPayments.map((row) => (
                 <tr key={row.id} className="hover:bg-surface-muted/50 transition-colors even:bg-surface-muted/30">
-                  <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{row.date}</td>
+                  <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{formatDisplayDate(row.date)}</td>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-2">
                       <FileText size={14} className="text-text-muted" />
@@ -292,7 +293,7 @@ export function Payments() {
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="text-xl font-semibold text-text-primary">{selectedPayment.currency === 'PEN' ? 'S/' : '$'} {selectedPayment.amount}</h3>
-                <p className="text-sm text-text-secondary">{selectedPayment.date}</p>
+                <p className="text-sm text-text-secondary">{formatDisplayDate(selectedPayment.date)}</p>
               </div>
               <Badge variant={selectedPayment.status === 'Aplicado' ? 'success' : selectedPayment.status === 'Anulado' ? 'danger' : 'neutral'}>{selectedPayment.status}</Badge>
             </div>

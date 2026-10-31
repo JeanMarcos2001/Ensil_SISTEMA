@@ -8,6 +8,7 @@ import { HelpPopover } from '../../components/ui/HelpPopover';
 import { Search, Plus, Shield, Users, Settings, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
+import { nextSequentialId } from '../../utils/ids';
 
 interface RolesProps {
   onNavigate?: (item: string, state?: any) => void;
@@ -111,7 +112,7 @@ export function Roles({ onNavigate }: RolesProps) {
       } else {
         addRole({
           ...newRoleData,
-          id: `ROL-${Date.now().toString().slice(-3)}`
+          id: nextSequentialId('ROL', roles.map(x => x.id))
         });
       }
       setIsFormOpen(false);
@@ -133,7 +134,7 @@ export function Roles({ onNavigate }: RolesProps) {
       if (selectedRole) {
         updateRole(selectedRole, newRoleData);
       } else {
-        newRoleId = `ROL-${Date.now().toString().slice(-3)}`;
+        newRoleId = nextSequentialId('ROL', roles.map(x => x.id));
         addRole({
           ...newRoleData,
           id: newRoleId

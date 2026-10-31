@@ -20,9 +20,9 @@ import type {
   Plan,
   PromotionGroup,
   Schedule,
-  Student,
-} from '../context/DataContext';
-import { parseDisplayDate, roundMoney } from './tariffs';
+  Student, Installment } from '../context/DataContext';
+import { recomputePlan } from './planState';
+import { roundMoney } from './tariffs';
 
 export const DROP_REASONS = [
   'Motivos económicos',
@@ -36,11 +36,7 @@ export const DROP_REASONS = [
 
 export const MIN_DETAIL = 5;
 
-/** Fecha ISO de vencimiento de una cuota (las nuevas la traen; las antiguas solo guardan el texto «15 Abr 2024»). */
-export const installmentDueISO = (i: { dueDateISO?: string; dueDate?: string }): string => i.dueDateISO ?? parseDisplayDate(i.dueDate) ?? '';
 
-/** Fecha ISO de una matrícula (`dateISO`, o el texto antiguo). */
-export const enrollmentDateISO = (e: Pick<Enrollment, 'dateISO' | 'date'>): string => e.dateISO ?? parseDisplayDate(e.date) ?? '';
 
 const isVoidPayment = (p: Payment) => /anulad|revers/i.test(p.status);
 
@@ -87,7 +83,7 @@ export function validateDropRequest(enrollment: Enrollment, input: DropInput, re
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveDate)) e.push('Indique desde cuándo dejó de asistir.');
   else {
     if (input.effectiveDate > today) e.push('La fecha no puede ser futura.');
-    const start = enrollmentDateISO(enrollment);
+    const start = enrollment.dateISO;
     if (start && input.effectiveDate < start) e.push('La fecha no puede ser anterior a la matrícula.');
   }
   return e;
@@ -132,25 +128,24 @@ export interface DropPreview {
   deliveredItems: number;
 }
 
-const sameStudent = (e: Enrollment, other: Enrollment) => (e.studentId && other.studentId ? e.studentId === other.studentId : e.student === other.student);
+const sameStudent = (e: Enrollment, other: Enrollment) => e.studentId === other.studentId;
 
 export function previewDrop(ctx: DropContext, effectiveDate: string): DropPreview {
   const { enrollment, plan } = ctx;
-  const own = ctx.students.find(s => s.id === enrollment.studentId) ?? ctx.students.find(s => s.name === enrollment.student);
-  const studentId = own?.id ?? enrollment.studentId;
+  const studentId = enrollment.studentId;
   const otherActive = ctx.enrollments.filter(o => o.id !== enrollment.id && o.status === 'Activa' && sameStudent(enrollment, o)).map(o => o.id);
 
   const annulled: DropPreview['annulled'] = [];
   const overdue: DropPreview['overdue'] = [];
   for (const i of plan?.installments ?? []) {
     if (!(i.balance > 0) || i.status === 'Refinanciada' || i.status === 'Anulada') continue;
-    const due = installmentDueISO(i);
+    const due = i.dueDateISO;
     const row = { id: i.id, name: i.name, balance: roundMoney(i.balance) };
     (due && due <= effectiveDate ? overdue : annulled).push(row);
   }
 
   // Si el alumno sigue con otra matrícula activa, solo se cancela lo propio de esta (su primera asesoría)
-  const mine = (s: Schedule) => (studentId && s.studentId ? s.studentId === studentId : s.student === enrollment.student);
+  const mine = (s: Schedule) => s.studentId === studentId;
   const scheduleIds = ctx.schedules
     .filter(s => ['Reservado', 'Reprogramado'].includes(s.status) && s.date >= effectiveDate)
     .filter(s => (otherActive.length === 0 ? mine(s) : s.isFirst && s.enrollmentId === enrollment.id))
@@ -175,24 +170,24 @@ export function previewDrop(ctx: DropContext, effectiveDate: string): DropPrevie
     scheduleIds,
     activityRemovals,
     otherActiveEnrollments: otherActive,
-    studentDeactivated: otherActive.length === 0 && own?.status === 'Activo',
+    studentDeactivated: otherActive.length === 0,
     groupMembers: enrollment.promotionGroupId ? ctx.enrollments.filter(o => o.id !== enrollment.id && o.promotionGroupId === enrollment.promotionGroupId && o.status === 'Activa').length : 0,
     deliveredItems: enrollment.verifiedItems?.length ?? 0,
   };
 }
 
 /** Plan después de la caída: cuotas futuras anuladas (y las vencidas, si se condonan); el saldo es lo que queda como deuda. */
-export function applyDropToPlan(plan: Plan, preview: DropPreview, forgiveOverdue: boolean): Plan {
+export function applyDropToPlan(plan: Plan, preview: DropPreview, forgiveOverdue: boolean, today: string): Plan {
   const future = new Set(preview.annulled.map(r => r.id));
   const forgiven = new Set(forgiveOverdue ? preview.overdue.map(r => r.id) : []);
   // `dropAnnulled` = cuota futura anulada por la caída (se restituye si la matrícula se reactiva); `forgiven` = deuda condonada (no se restituye)
-  const installments = plan.installments.map(i => {
-    if (future.has(i.id)) return { ...i, status: 'Anulada', balance: 0, note: 'Anulada por caída de la matrícula', dropAnnulled: true };
-    if (forgiven.has(i.id)) return { ...i, status: 'Anulada', balance: 0, note: 'Condonada al aprobar la caída', forgiven: true };
+  const installments: Installment[] = plan.installments.map(i => {
+    if (future.has(i.id)) return { ...i, status: 'Anulada' as const, balance: 0, note: 'Anulada por caída de la matrícula', dropAnnulled: true };
+    if (forgiven.has(i.id)) return { ...i, status: 'Anulada' as const, balance: 0, note: 'Condonada al aprobar la caída', forgiven: true };
     return i;
   });
-  const balance = roundMoney(installments.reduce((a, i) => a + (i.balance > 0 && i.status !== 'Refinanciada' ? i.balance : 0), 0));
-  return { ...plan, installments, balance, status: 'Caída', next: '-' };
+  // El saldo del plan caído es la deuda que queda (lo vencido que no se condonó)
+  return recomputePlan({ ...plan, installments, status: 'Caída' }, today);
 }
 
 export function summarizeDrop(preview: DropPreview, forgiveOverdue: boolean): DropEffects {

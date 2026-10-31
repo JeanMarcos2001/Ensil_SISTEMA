@@ -8,6 +8,8 @@ import { todayLocalISO } from '../../utils/schedule';
 import { PaymentPartsEditor, newPart } from './PaymentPartsEditor';
 import { ReceiptFields } from './ReceiptFields';
 import { DateInput } from '../ui/DateInput';
+import { holderNameOfEnrollment } from '../../utils/identity';
+import { formatDisplayDate } from '../../utils/tariffs';
 
 const norm = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const usd = (n: number) => `$ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -31,7 +33,7 @@ interface Props {
  * (comprobante). Al guardar, la cuota, el pago y la caja quedan consistentes.
  */
 export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialInstallmentId, onSaved }: Props) {
-  const { plans, enrollments, registerPayment } = useData();
+  const { plans, enrollments, students, guardians, registerPayment } = useData();
   const [planQuery, setPlanQuery] = useState('');
   const [planId, setPlanId] = useState('');
   const [installmentId, setInstallmentId] = useState('');
@@ -59,11 +61,11 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
   // Todas las matrículas que figuran en Planes y cartera (cada una con su plan)
   const planOptions = plans.map(plan => {
     const enrollment = enrollments.find(e => e.id === plan.mat);
-    return { plan, student: enrollment?.student ?? plan.titular };
+    return { plan, student: enrollment?.student ?? plan.mat, titular: holderNameOfEnrollment(enrollment, students, guardians) };
   });
   const q = norm(planQuery.trim());
   const planMatches = planOptions
-    .filter(o => !q || norm(`${o.plan.mat} ${o.plan.id} ${o.student} ${o.plan.titular}`).includes(q))
+    .filter(o => !q || norm(`${o.plan.mat} ${o.plan.id} ${o.student} ${o.titular}`).includes(q))
     .sort((a, b) => Number(b.plan.balance > 0) - Number(a.plan.balance > 0))
     .slice(0, 8);
   const selectedPlan = plans.find(p => p.id === planId);
@@ -182,7 +184,7 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
               {selectedPlan && payable.length === 0 && <option value="">El plan no tiene cuotas con saldo</option>}
               {payable.map((i: any) => (
                 <option key={i.id} value={i.id}>
-                  {i.name} · vence {i.dueDate} · {i.variable ? `monto variable (saldo del plan ${usd(selectedPlan!.balance)})` : `saldo ${usd(i.balance)}`}
+                  {i.name} · vence {formatDisplayDate(i.dueDateISO)} · {i.variable ? `monto variable (saldo del plan ${usd(selectedPlan!.balance)})` : `saldo ${usd(i.balance)}`}
                 </option>
               ))}
             </select>

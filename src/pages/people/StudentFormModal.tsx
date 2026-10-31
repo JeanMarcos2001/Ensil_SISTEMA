@@ -61,7 +61,7 @@ export function StudentFormModal({ isOpen, onClose, editing }: Props) {
   const handleSave = () => {
     const found = validateStudentInput(input, students, guardians, today, editing?.id);
     if (found.length > 0) { setErrors(found); return; }
-    const record = buildStudent(input, guardians, today, editing ?? undefined);
+    const record = buildStudent(input, editing ?? undefined);
     if (editing) updateStudent(editing.id, record);
     else addStudent(record);
     onClose();

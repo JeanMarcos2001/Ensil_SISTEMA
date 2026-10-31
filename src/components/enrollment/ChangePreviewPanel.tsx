@@ -5,6 +5,7 @@ import {
   previewProgramChange, previewReactivation, previewTransfer, type ChangeContext,
 } from '../../utils/enrollmentChange';
 import type { ChangeKindName } from '../../context/DataContext';
+import { formatDisplayDate } from '../../utils/tariffs';
 
 const usd = (n: number) => `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dmy = (iso: string) => (iso ? iso.split('-').reverse().join('/') : '—');
@@ -54,7 +55,7 @@ export function ChangePreviewPanel({ kind, enrollment, payload, ctx }: Props) {
         <Row label="Cobrado">{usd(pv.paidUSD)} se abona al precio nuevo. {pv.remaining >= 0 ? `Saldo por cobrar: ${usd(pv.remaining)}.` : ''}</Row>
         {pv.remaining < 0 && <Row label="No aplicable" tone="warn">se cobró {usd(-pv.remaining)} más que el precio nuevo: primero hay que devolver esa diferencia.</Row>}
         {pv.remaining >= 0 && (
-          <Row label="Plan">{pv.installments.filter(i => i.balance > 0 && i.status !== 'Anulada' && i.status !== 'Refinanciada').map(i => `${i.name} ${usd(i.balance)} (${i.dueDate})`).join('; ') || 'sin cuotas por cobrar.'}</Row>
+          <Row label="Plan">{pv.installments.filter(i => i.balance > 0 && i.status !== 'Anulada' && i.status !== 'Refinanciada').map(i => `${i.name} ${usd(i.balance)} (${formatDisplayDate(i.dueDateISO)})`).join('; ') || 'sin cuotas por cobrar.'}</Row>
         )}
         {pv.notes.map(n => <Row key={n} label="Ojo">{n}</Row>)}
       </div>

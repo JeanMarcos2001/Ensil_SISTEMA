@@ -116,26 +116,22 @@ interface Catalog {
   schedules: Schedule[];
 }
 
-const ownEnrollments = (student: Pick<Student, 'id' | 'name'>, enrollments: Enrollment[]) =>
-  enrollments.filter(e => e.studentId === student.id || e.student === student.name);
+const ownEnrollments = (student: Pick<Student, 'id'>, enrollments: Enrollment[]) => enrollments.filter(e => e.studentId === student.id);
 
-const programOf = (e: Enrollment, programs: Program[]) =>
-  programs.find(p => p.id === e.programId) ?? programs.find(p => p.name === e.program);
+const programOf = (e: Enrollment, programs: Program[]) => programs.find(p => p.id === e.programId);
 
 /** Vigencia de cada matrícula activa del alumno. */
-export function studentValidities(student: Pick<Student, 'id' | 'name'>, c: Catalog, today: string) {
+export function studentValidities(student: Pick<Student, 'id'>, c: Catalog, today: string) {
   return ownEnrollments(student, c.enrollments)
     .filter(e => e.status === 'Activa')
     .map(e => ({ enrollment: e, validity: enrollmentValidity(e, programOf(e, c.programs), c.schedules, today) }));
 }
 
 /**
- * ¿Aparece el alumno para programarle asesorías y actividades? Sí si está activo y tiene al menos una matrícula activa
- * vigente (o sin inicio, o en extensión). Sin matrículas registradas no se altera su comportamiento.
+ * ¿Aparece el alumno para programarle asesorías y actividades? Sí si tiene al menos una matrícula activa vigente (o sin inicio,
+ * o en extensión). Un alumno «Sin matrícula» o con todas sus matrículas caídas no aparece.
  */
-export function isStudentWorkable(student: Pick<Student, 'id' | 'name' | 'status'>, c: Catalog, today: string): boolean {
-  if (student.status !== 'Activo') return false;
-  if (ownEnrollments(student, c.enrollments).length === 0) return true;
+export function isStudentWorkable(student: Pick<Student, 'id'>, c: Catalog, today: string): boolean {
   return studentValidities(student, c, today).some(x => x.validity.working);
 }
 
@@ -143,7 +139,7 @@ export function isStudentWorkable(student: Pick<Student, 'id' | 'name' | 'status
  * Último día en que se le puede programar una asesoría: el más lejano entre sus matrículas vigentes.
  * undefined si no hay límite calculable (p. ej. una matrícula sin primera asesoría vinculada).
  */
-export function studentLimit(student: Pick<Student, 'id' | 'name'>, c: Catalog, today: string): string | undefined {
+export function studentLimit(student: Pick<Student, 'id'>, c: Catalog, today: string): string | undefined {
   const working = studentValidities(student, c, today).filter(x => x.validity.working);
   if (working.length === 0 || working.some(x => !x.validity.limit)) return undefined;
   return working.map(x => x.validity.limit!).sort().pop();

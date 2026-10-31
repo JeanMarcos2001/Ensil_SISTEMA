@@ -25,6 +25,7 @@ import { EditEnrollmentModal } from '../components/enrollment/EditEnrollmentModa
 import { useChangeActions } from '../components/enrollment/useChangeActions';
 import { planState } from '../utils/planState';
 import type { FichaTab } from '../components/enrollment/EnrollmentFichaModal';
+import { formatDisplayDate } from '../utils/tariffs';
 
 const VALIDITY_VARIANT: Record<ValidityState, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
   'sin-inicio': 'neutral',
@@ -270,7 +271,7 @@ export function Enrollments() {
               {paginatedEnrollments.map((row, idx) => (
                 <tr key={idx} className="hover:bg-surface-muted/50 transition-colors even:bg-surface-muted/30">
                   <td className="px-6 py-3 font-mono text-text-secondary whitespace-nowrap">{row.id}</td>
-                  <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{row.date}</td>
+                  <td className="px-6 py-3 text-text-secondary whitespace-nowrap">{formatDisplayDate(row.dateISO)}</td>
                   <td className="px-6 py-3">
                     <div className="font-medium text-text-primary">{row.student}</div>
                   </td>
@@ -313,8 +314,8 @@ export function Enrollments() {
                     {(() => {
                       // Estado del plan calculado con las cuotas y la fecha (el texto guardado en la matrícula se desfasa)
                       const pl = plans.find(p => p.mat === row.id);
-                      const label = row.status === 'Caída' ? 'Caída' : pl ? planState(pl, today) : row.plan;
-                      return <Badge variant={label === 'Al día' || label === 'Completado' ? 'success' : label === 'Parcial' ? 'warning' : 'danger'}>{label}</Badge>;
+                      const label = row.status === 'Caída' ? 'Caída' : pl ? planState(pl, today) : '—';
+                      return <Badge variant={label === 'Al día' || label === 'Completado' ? 'success' : 'danger'}>{label}</Badge>;
                     })()}
                   </td>
                   <td className="px-6 py-3 text-right">

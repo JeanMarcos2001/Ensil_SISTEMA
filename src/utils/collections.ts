@@ -13,8 +13,7 @@
  *
  * Cartera: se construye a partir de las cuotas abiertas de los planes (con matrícula activa, o caída con deuda conservada).
  */
-import type { Branch, Enrollment, Guardian, Payment, Plan, Student } from '../context/DataContext';
-import { installmentDueISO } from './enrollmentDrop';
+import type { Branch, Enrollment, Guardian, Payment, Plan, Student, Installment } from '../context/DataContext';
 import { daysOverdue, isOpen } from './planState';
 import { roundMoney, formatDisplayDate } from './tariffs';
 import { addDaysISO, localDateOf } from './schedule';
@@ -69,7 +68,7 @@ export interface MoraInfo {
   pending: number;
 }
 
-export function moraOf(inst: { balance: number; status: string; amount: number; dueDate?: string; dueDateISO?: string; moraCharged?: number; isMora?: boolean; payments?: { amount: number }[] }, policy: CollectionPolicy, today: string): MoraInfo {
+export function moraOf(inst: Pick<Installment, 'balance' | 'status' | 'amount' | 'dueDateISO'> & Partial<Pick<Installment, 'moraCharged' | 'isMora' | 'payments'>>, policy: CollectionPolicy, today: string): MoraInfo {
   const days = inst.isMora ? 0 : daysOverdue(inst, today);
   const chargeable = Math.max(0, days - policy.graceDays);
   const accrued = policy.moraMonthlyRate > 0 ? roundMoney(inst.balance * policy.moraMonthlyRate * chargeable / 30) : 0;
@@ -97,7 +96,7 @@ export function chargeMoraOn(plan: Plan, installmentId: string, policy: Collecti
   const id = `M${plan.installments.filter(i => i.isMora).length + 1}`;
   const installments = plan.installments.map(i => (i.id === installmentId ? { ...i, moraCharged: roundMoney((i.moraCharged ?? 0) + mora.pending) } : i));
   installments.push({
-    id, name: `Mora · ${inst.name}`, amount: mora.pending, balance: mora.pending, dueDate: formatDisplayDate(today), dueDateISO: today, status: 'Pendiente',
+    id, name: `Mora · ${inst.name}`, amount: mora.pending, balance: mora.pending, dueDateISO: today, status: 'Pendiente',
     payments: [], isMora: true, moraOf: installmentId, note: `Mora de ${mora.chargeableDays} día(s) sobre ${inst.balance.toFixed(2)} a ${(policy.moraMonthlyRate * 100).toFixed(2)} % mensual`,
   });
   const open = installments.filter(isOpen);
@@ -172,10 +171,10 @@ export function reminderMessage(stage: ReminderStage, v: { recipient: string; st
   return `${head} la ${v.installment.toLowerCase()} de ${v.student}, por ${usd(v.balance)}, venció el ${v.due} (hace ${v.days} día${v.days === 1 ? '' : 's'}). Le pedimos regularizar su pago a la brevedad o comunicarse con nosotros para coordinar. ${tail}`;
 }
 
-/** Titular que atiende la cobranza: el vinculado a la matrícula o al alumno; en registros antiguos, el del nombre guardado. */
-export function collectionGuardian(e: Enrollment, student: Student | undefined, plan: Plan, guardians: Guardian[]): Guardian | undefined {
-  const ids = e.guardianIds?.length ? e.guardianIds : student?.guardianIds ?? [];
-  return guardians.find(g => g.id === ids[0]) ?? guardians.find(g => g.name === (student?.titular ?? plan.titular));
+/** Titular que atiende la cobranza: el de la matrícula y, si no lo trae, el del alumno. Un independiente cobra a su propio nombre. */
+export function collectionGuardian(e: Enrollment, student: Student | undefined, guardians: Guardian[]): Guardian | undefined {
+  const ids = e.guardianIds.length ? e.guardianIds : student?.guardianIds ?? [];
+  return guardians.find(g => g.id === ids[0]);
 }
 
 const phoneDigits = (p: string) => p.replace(/\D/g, '');
@@ -194,16 +193,16 @@ export function buildReminders(ctx: ReminderContext, policy: CollectionPolicy, l
     const enrollment = ctx.enrollments.find(e => e.id === plan.mat);
     if (!enrollment || plan.status === 'Completado') continue;
     if (enrollment.status !== 'Activa' && plan.status !== 'Caída') continue;
-    const student = ctx.students.find(s => s.id === enrollment.studentId) ?? ctx.students.find(s => s.name === enrollment.student);
-    const guardian = collectionGuardian(enrollment, student, plan, ctx.guardians);
-    const recipient = guardian?.name ?? student?.name ?? plan.titular;
+    const student = ctx.students.find(s => s.id === enrollment.studentId);
+    const guardian = collectionGuardian(enrollment, student, ctx.guardians);
+    const recipient = guardian?.name ?? student?.name ?? enrollment.student;
     const phone = guardian?.phone ?? student?.phone ?? '';
     const email = guardian?.email ?? student?.email ?? '';
     const branchName = ctx.branches.find(b => b.id === enrollment.branchId)?.name ?? enrollment.sede ?? '';
     for (const inst of plan.installments) {
       if (!isOpen(inst)) continue;
       // Una cuota de un plan caído solo se recuerda si ya venció (es deuda); las demás ya fueron anuladas
-      const due = installmentDueISO(inst);
+      const due = inst.dueDateISO;
       if (!due) continue;
       const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000);
       const reached = stages.filter(s => s.offset <= days);
@@ -261,17 +260,17 @@ export function portfolioRows(ctx: ReminderContext, today: string): PortfolioRow
     const e = ctx.enrollments.find(x => x.id === plan.mat);
     if (!e) continue;
     if (e.status !== 'Activa' && plan.status !== 'Caída') continue;
-    const student = ctx.students.find(s => s.id === e.studentId) ?? ctx.students.find(s => s.name === e.student);
-    const guardian = collectionGuardian(e, student, plan, ctx.guardians);
+    const student = ctx.students.find(s => s.id === e.studentId);
+    const guardian = collectionGuardian(e, student, ctx.guardians);
     for (const i of plan.installments) {
       if (!isOpen(i)) continue;
-      const due = installmentDueISO(i);
+      const due = i.dueDateISO;
       const days = due ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000) : 0;
       // Plan caído: solo cuenta la deuda ya vencida
       if (plan.status === 'Caída' && days <= 0) continue;
       rows.push({
-        planId: plan.id, enrollmentId: e.id, student: e.student, titular: guardian?.name ?? plan.titular, phone: guardian?.phone ?? student?.phone ?? '',
-        branchId: e.branchId ?? '', branchName: ctx.branches.find(b => b.id === e.branchId)?.name ?? e.sede ?? '—', programId: e.programId ?? e.program, program: e.level && e.level !== 'Sin nivel' ? `${e.program} - ${e.level}` : e.program,
+        planId: plan.id, enrollmentId: e.id, student: e.student, titular: guardian?.name ?? student?.name ?? e.student, phone: guardian?.phone ?? student?.phone ?? '',
+        branchId: e.branchId, branchName: ctx.branches.find(b => b.id === e.branchId)?.name ?? e.sede ?? '—', programId: e.programId, program: e.level && e.level !== 'Sin nivel' ? `${e.program} - ${e.level}` : e.program,
         installmentId: i.id, installment: i.name, dueISO: due, balance: roundMoney(i.balance), days, bucket: bucketOf(days), planStatus: plan.status, isMora: !!i.isMora,
       });
     }

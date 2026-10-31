@@ -4,6 +4,7 @@
  */
 import type { Contract, Guardian, Staff, Student } from '../src/context/DataContext';
 import { emptyPerson } from '../src/utils/enrollment';
+import { holderNameOfStudent, staffAge, studentAge, studentStatus } from '../src/utils/identity';
 import {
   AFP_FUNDS,
   CONTRACT_TYPES,
@@ -47,8 +48,8 @@ const TODAY = '2026-10-22';
 
 // ================================================================ Trabajadores
 const existing: Staff[] = [
-  { id: '1', code: '000001', docType: 'DNI', docNumber: '12345678', names: 'Juan', lastNameP: 'Pérez', lastNameM: 'García', birthDate: '1985-05-15', age: 41, phone: '987654321', status: 'Activo' },
-  { id: '2', code: '000007', docType: 'DNI', docNumber: '87654321', names: 'María', lastNameP: 'Torres', lastNameM: 'López', birthDate: '1990-08-20', age: 36, phone: '912345678', status: 'Activo' },
+  { id: '1', code: '000001', docType: 'DNI', docNumber: '12345678', names: 'Juan', lastNameP: 'Pérez', lastNameM: 'García', birthDate: '1985-05-15', phone: '987654321', status: 'Activo' },
+  { id: '2', code: '000007', docType: 'DNI', docNumber: '87654321', names: 'María', lastNameP: 'Torres', lastNameM: 'López', birthDate: '1990-08-20', phone: '912345678', status: 'Activo' },
 ];
 const goodStaff = (over: Partial<StaffForm> = {}): StaffForm => ({
   ...emptyStaffForm(), docNumber: '70112233', gender: 'Femenino', names: 'Ana María', lastNameP: 'Quispe', lastNameM: 'Rojas',
@@ -75,7 +76,7 @@ check('Con hijos: el número es obligatorio (1 a 20)', !!errs(goodStaff({ hasChi
 check('Sin hijos no se pide el número', !('childrenCount' in errs(goodStaff({ hasChildren: false }))));
 check('Código correlativo de 6 dígitos (sigue al más alto)', nextStaffCode(existing) === '000008' && nextStaffCode([]) === '000001');
 const built = buildStaff(goodStaff({ hasChildren: true, childrenCount: '2', specialty: ' ' }), TODAY, undefined, existing);
-check('La edad se calcula de la fecha de nacimiento, el estado queda Activo y se recortan los textos', built.age === 34 && built.status === 'Activo' && built.code === '000008' && built.childrenCount === 2 && built.specialty === undefined);
+check('La edad se calcula de la fecha de nacimiento (no se guarda), el estado queda Activo y se recortan los textos', staffAge(built, TODAY) === 34 && !('age' in built) && built.status === 'Activo' && built.code === '000008' && built.childrenCount === 2 && built.specialty === undefined);
 check('Editar conserva código y estado', buildStaff(goodStaff(), TODAY, { code: '000002', status: 'Inactivo' }).code === '000002' && buildStaff(goodStaff(), TODAY, { code: '000002', status: 'Inactivo' }).status === 'Inactivo');
 check('Ida y vuelta ficha → formulario', staffToForm({ ...existing[0], hasChildren: true, childrenCount: 3, gender: 'Masculino' }).childrenCount === '3');
 
@@ -122,8 +123,8 @@ check('Indeterminado: sin fecha de fin guardada; locación: sin pensión ni vaca
 
 // ================================================================ Titulares
 const guardians: Guardian[] = [
-  { id: '1', name: 'Juan Ruiz', doc: '40111222', phone: '987654321', email: 'j@x.com', students: 1, enrollments: 1, balance: '$0' },
-  { id: '2', name: 'María del Carmen Castro Pérez', doc: '40333444', phone: '912345678', email: 'm@x.com', students: 0, enrollments: 0, balance: '$0' },
+  { id: '1', name: 'Juan Ruiz', doc: '40111222', phone: '987654321', email: 'j@x.com' },
+  { id: '2', name: 'María del Carmen Castro Pérez', doc: '40333444', phone: '912345678', email: 'm@x.com' },
 ];
 const goodGuardian = (over: Record<string, unknown> = {}) => ({
   ...emptyPerson(), docNumber: '41555666', names: 'Rosa', lastNameP: 'Vega', lastNameM: 'Díaz', birthDate: '1988-02-10', phone: '987000111',
@@ -140,7 +141,7 @@ check('Titular antiguo sin nombres separados → se deducen del nombre', (() => 
 
 // ================================================================ Alumnos
 const students: Student[] = [
-  { id: 'ALU-001', doc: '76543210', name: 'Mateo Ruiz', age: 8, program: 'Kids - Nivel 1', titular: 'Juan Ruiz', status: 'Activo', guardianIds: ['1'], relationship: 'Hijo(a)' },
+  { id: 'ALU-001', doc: '76543210', name: 'Mateo Ruiz', birthDate: '2018-03-01', guardianIds: ['1'], relationship: 'Hijo(a)' },
 ];
 const input = (over: Partial<StudentInput> = {}, studentOver: Record<string, unknown> = {}): StudentInput => ({
   mode: 'apoderado',
@@ -164,12 +165,12 @@ check('Situación obligatoria; estudiando pide institución y grado; trabajando 
   serrs(input({}, { situation: 'trabajando', occupation: '' })).some(m => /ocupación/.test(m)) && serrs(input({}, { situation: 'ninguna' })).length === 0);
 check('Documento ya registrado → rechazado; al editar al mismo alumno → permitido', serrs(input({}, { person: { ...emptyPerson(), docNumber: '76543210', names: 'X', lastNameP: 'Y', birthDate: '2016-01-01' } })).some(m => /ya está registrado/.test(m)) &&
   serrs(input({}, { person: { ...emptyPerson(), docNumber: '76543210', names: 'X', lastNameP: 'Y', birthDate: '2016-01-01' } }), 'ALU-001').length === 0);
-const sb = buildStudent(input(), guardians, TODAY);
-check('Alumno nuevo: queda «Sin matrícula», con su titular principal, parentesco, edad y sin teléfono propio', sb.status === NO_ENROLLMENT && sb.program === '' && sb.titular === 'Juan Ruiz' && sb.guardianIds?.join() === '1' && sb.relationship === 'Hijo(a)' && sb.age === 10 && sb.phone === '');
+const sb = buildStudent(input());
+check('Alumno nuevo: queda «Sin matrícula» (derivado), con su titular principal, parentesco, edad y sin teléfono propio', studentStatus(sb.name, []) === NO_ENROLLMENT && holderNameOfStudent(sb, guardians) === 'Juan Ruiz' && sb.guardianIds.join() === '1' && sb.relationship === 'Hijo(a)' && studentAge(sb, TODAY) === 10 && sb.phone === '' && !('titular' in sb) && !('status' in sb) && !('program' in sb) && !('age' in sb));
 check('Situación guardada solo lo que corresponde', sb.colegio === 'I.E. San Martín' && sb.grado === '4° Primaria' && sb.occupation === undefined && sb.occupationStatus === 'estudiando');
-const sbi = buildStudent(input({ mode: 'independiente', guardianIds: ['1'] }, { relationship: 'Hijo(a)', person: { ...emptyPerson(), docNumber: '70555666', names: 'Luz', lastNameP: 'Ruiz', birthDate: '1999-05-05', phone: '987654321' } }), guardians, TODAY);
-check('Independiente: es su propio titular, sin vínculos y con su teléfono', sbi.titular === 'Luz Ruiz' && sbi.guardianIds?.length === 0 && sbi.relationship === '' && sbi.phone === '987654321');
-check('Editar conserva programa y estado', (() => { const b = buildStudent(input(), guardians, TODAY, { program: 'Kids - Nivel 1', status: 'Activo' }); return b.program === 'Kids - Nivel 1' && b.status === 'Activo'; })());
+const sbi = buildStudent(input({ mode: 'independiente', guardianIds: ['1'] }, { relationship: 'Hijo(a)', person: { ...emptyPerson(), docNumber: '70555666', names: 'Luz', lastNameP: 'Ruiz', birthDate: '1999-05-05', phone: '987654321' } }));
+check('Independiente: es su propio titular (derivado), sin vínculos y con su teléfono', holderNameOfStudent(sbi, guardians) === 'Luz Ruiz' && sbi.guardianIds.length === 0 && sbi.relationship === '' && sbi.phone === '987654321');
+check('Editar conserva la fecha de inicio', buildStudent(input(), { fechaInicio: '2026-01-01' }).fechaInicio === '2026-01-01');
 check('Ida y vuelta alumno → formulario', (() => { const i = studentToInput(students[0], guardians); return i.mode === 'apoderado' && i.guardianIds.join() === '1' && i.student.relationship === 'Hijo(a)' && i.student.person.names === 'Mateo'; })());
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

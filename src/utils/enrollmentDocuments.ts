@@ -15,8 +15,8 @@ import type {
   Branch, Company, ContractClause, ContractTemplate, Enrollment, EnrollmentDocuments, Guardian, IssuedDocument, Level, Plan, Program, Schedule, Student,
 } from '../context/DataContext';
 import { nextSequentialId } from './ids';
+import { ageText, studentAge } from './identity';
 import { escapeHtml } from './printTable';
-import { installmentDueISO } from './enrollmentDrop';
 import { to12h } from './schedule';
 import { formatDisplayDate } from './tariffs';
 import type { Validity } from './validity';
@@ -163,7 +163,7 @@ export function documentProblems(kind: DocKind, ctx: DocContext): string[] {
   if (!c) out.push('No hay contratante: la matrícula no tiene titular ni alumno.');
   else {
     if (!c.address.trim()) out.push(`Falta la dirección ${c.independent ? 'del alumno' : 'del titular'} (${c.name}): complétela en Personas.`);
-    if (c.independent && (ctx.student?.age ?? 0) < 18) out.push('El alumno es menor de edad y no tiene titular: vincule a su apoderado en Personas → Alumnos.');
+    if (c.independent && (ctx.student ? studentAge(ctx.student, ctx.today) ?? 0 : 0) < 18) out.push('El alumno es menor de edad y no tiene titular: vincule a su apoderado en Personas → Alumnos.');
   }
   if (!ctx.branch) out.push('No se encontró la sede de la matrícula.');
   if (!ctx.company) out.push(`No se encontró la empresa de la sede${ctx.branch ? ` (${ctx.branch.company})` : ''}: registre su razón social y RUC en Organización → Empresas.`);
@@ -173,13 +173,13 @@ export function documentProblems(kind: DocKind, ctx: DocContext): string[] {
 
 const planRows = (plan?: Plan): string[][] =>
   (plan?.installments ?? []).filter(i => !['Anulada', 'Refinanciada'].includes(i.status) || i.amount > 0)
-    .map(i => [i.name, i.dueDate || formatDisplayDate(installmentDueISO(i)), usd(i.amount), i.status === 'Anulada' ? 'Anulada' : i.status === 'Refinanciada' ? 'Refinanciada' : i.balance <= 0 ? 'Pagada' : i.balance < i.amount ? 'Parcial' : 'Pendiente']);
+    .map(i => [i.name, formatDisplayDate(i.dueDateISO), usd(i.amount), i.status === 'Anulada' ? 'Anulada' : i.status === 'Refinanciada' ? 'Refinanciada' : i.balance <= 0 ? 'Pagada' : i.balance < i.amount ? 'Parcial' : 'Pendiente']);
 
 export function planSummary(plan: Plan | undefined, tipo: string): string {
   if (!plan) return 'sin plan de pagos';
   const live = plan.installments.filter(i => !['Anulada', 'Refinanciada'].includes(i.status));
   if (live.length === 0) return 'pago único al contado';
-  return `${live.length} ${live.length === 1 ? 'pago' : 'pagos'} (${tipo}): ${live.map(i => `${usd(i.amount)} el ${i.dueDate || formatDisplayDate(installmentDueISO(i))}`).join('; ')}`;
+  return `${live.length} ${live.length === 1 ? 'pago' : 'pagos'} (${tipo}): ${live.map(i => `${usd(i.amount)} el ${formatDisplayDate(i.dueDateISO)}`).join('; ')}`;
 }
 
 export function templateVars(ctx: DocContext): Record<string, string> {
@@ -196,7 +196,7 @@ export function templateVars(ctx: DocContext): Record<string, string> {
     garantia: warrantyMonths > 0 ? `El programa incluye una garantía de ${months(warrantyMonths)} adicionales (extensión), que se habilita a solicitud cuando la duración base está por terminar o ya terminó${v.extensionEnd ? `, hasta el ${longDate(v.extensionEnd)}` : ''}.` : 'El programa no incluye período de extensión.',
     inicio: v.start ? longDate(v.start) : 'fecha por definir (primera asesoría)', fin_base: v.baseEnd ? longDate(v.baseEnd) : 'fecha por definir', fin_extension: v.extensionEnd ? longDate(v.extensionEnd) : 'fecha por definir',
     horario: ctx.firstSession ? `${longDate(ctx.firstSession.date)} a las ${to12h(ctx.firstSession.time)}` : 'por definir (primera asesoría)', precio: usd(e.assignedPrice ?? plan?.total ?? 0), tipo_pago: e.paymentTypeName ?? plan?.type ?? '—',
-    plan_pagos: planSummary(plan, e.paymentTypeName ?? plan?.type ?? ''), fecha_matricula: e.dateISO ? longDate(e.dateISO) : e.date, fecha_contrato: longDate(ctx.today), matricula: e.id,
+    plan_pagos: planSummary(plan, e.paymentTypeName ?? plan?.type ?? ''), fecha_matricula: longDate(e.dateISO), fecha_contrato: longDate(ctx.today), matricula: e.id,
   };
 }
 
@@ -224,11 +224,11 @@ export function buildFichaDocument(ctx: DocContext): BuiltDocument {
   const { enrollment: e, student, guardians, plan, branch, firstSession, validity: v } = ctx;
   const sections: DocSection[] = [
     { title: 'Datos de la matrícula', rows: [
-      ['Código', e.id], ['Fecha', e.dateISO ? longDate(e.dateISO) : e.date], ['Sede', branch?.name ?? e.sede ?? '—'],
+      ['Código', e.id], ['Fecha', longDate(e.dateISO)], ['Sede', branch?.name ?? e.sede ?? '—'],
       ['Responsable de la entrevista', e.asesor ?? '—'], ['Origen del contacto', e.origen ?? '—'], ['Registrada por', e.createdBy ?? '—'],
     ] },
     { title: 'Alumno', rows: [
-      ['Nombre', student?.name ?? e.student], ['Documento', studentDocText(student)], ['Edad', student ? `${student.age} años` : '—'], ['Nacimiento', student?.birthDate ?? '—'],
+      ['Nombre', student?.name ?? e.student], ['Documento', studentDocText(student)], ['Edad', student ? ageText(studentAge(student, ctx.today)) : '—'], ['Nacimiento', student?.birthDate ?? '—'],
       ['Institución / grado', [student?.colegio, student?.grado].filter(Boolean).join(' · ') || '—'],
       ['Teléfono', student?.phone || '—'], ['Dirección', student?.address || '—'],
     ] },

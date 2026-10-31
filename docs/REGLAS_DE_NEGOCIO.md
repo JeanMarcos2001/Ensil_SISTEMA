@@ -263,7 +263,61 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 
 ---
 
-## 10. Qué se probó
+## 10. Reportes: cómo se calculan y qué responde cada uno ✅
+
+**Principio:** un reporte **no guarda datos propios**; se calcula en el momento con lo que ya guardan las pantallas operativas, así que nunca las contradice. Todos arrancan con la sede del selector del encabezado (se puede cambiar), filtran por período con atajos (este mes, mes anterior, 30 días, este año, todo el historial), exportan **CSV y PDF** y piden `reportView` / `reportExport`. Las reglas viven en `src/utils/report*.ts` y `audit.ts`.
+
+| Reporte | Qué responde | Reglas que conviene recordar |
+|---|---|---|
+| **Matrículas** | Embudo (matriculadas → verificadas → primera asesoría dada → activas hoy), por sede, programa, tipo de pago, origen y entrevistador, vigencia, caídas y cambios aprobados. | La fecha de la matrícula es la ISO o, si no, la del texto antiguo. La tasa de caída cuenta solo las **aprobadas** en el período; las pendientes se avisan aparte. |
+| **Verificación** | Qué falta entregar, cuánto tarda, qué artículos faltan y qué primera asesoría está en riesgo. | Solo cuenta matrículas **activas**. Las pendientes salen primero las que esperan su primera asesoría, la más urgente arriba. |
+| **Caja** | Ingresos y egresos por moneda, depósitos, devoluciones, reversas, efectivo sin depositar, cierres con su diferencia y caja chica. | Una caja por moneda. Los depósitos y las devoluciones **no** son egresos operativos. El saldo es el actual, no el del período. Caja chica siempre en soles y sin filtro de sede. |
+| **Stock** | Foto del inventario por sede, valor a costo y, sobre todo, si **alcanza** para lo que las recetas piden a las matrículas que aún esperan sus materiales. | Faltante = lo que piden las recetas vigentes de matrículas activas sin verificar − stock disponible de su sede. «Sin movimiento» = 90 días o más según el kardex. |
+| **Personal** | Plantilla, contrato (vigente, por vencer en 30 días o vencido), cuenta de acceso, asignación, bajas del período y costo de la última planilla cerrada por sede. | Activos sin contrato vigente o sin asignación se listan para corregirlos. Las vacaciones se muestran a 60 días, pero **aún no bloquean la agenda**. |
+| **Auditoría** | Quién hizo qué y cuándo, en una sola línea de tiempo con enlace a la pantalla de origen. | No hay tabla de auditoría: se **deriva** de las constancias de cada módulo (correcciones, solicitudes, reversas, notas de crédito, depósitos, cierres y reaperturas, agenda, planilla, contratos, cobranza, ajustes). |
+| Cartera, Psicopedagogía | Ver §6 y §8. | — |
+
+**Falta:** cortes históricos (todo se calcula al día), que la auditoría registre cambios de precios, recetas y permisos, y que Cartera y Psicopedagogía usen las piezas compartidas.
+
+---
+
+## 11. Modelo de datos: el id manda, lo derivable no se guarda ✅
+
+**La inconsistencia:** el mismo dato vivía en dos o tres lugares (el titular en el alumno, en el plan y en la ficha; el programa del alumno en su ficha y en su matrícula; la fecha de la matrícula como texto y como ISO; el saldo del titular guardado y calculado). Cada copia se desactualizaba sola: al renombrar a una persona o pagar una cuota, unas pantallas decían una cosa y otras otra.
+
+**La regla de oro:** cada dato tiene **un solo dueño**. Lo demás se calcula al mostrar o es una copia con una única puerta de corrección.
+
+| Dato | Antes | Ahora (dueño) |
+|---|---|---|
+| Titular del alumno / del plan | Texto guardado en el alumno y en el plan | `guardianIds[0]` del alumno o de la matrícula; el independiente es su propio titular (`holderNameOf*`) |
+| Alumnos, matrículas y saldo del titular | Contadores guardados | Se derivan de matrículas, planes y pagos (`guardianStatement.ts`) |
+| Estado del alumno | `status` guardado | Activo si tiene alguna matrícula activa, Inactivo si todas cayeron, «Sin matrícula» si no tiene (`studentStatus`). Cae la última matrícula → pasa a Inactivo solo; se reactiva → vuelve a Activo |
+| Programa y nivel del alumno | `program` en la ficha | La matrícula más reciente (`studentProgramOf`) |
+| Edad | `age` guardada | Se calcula de la fecha de nacimiento (`studentAge`, `staffAge`); la fecha de nacimiento es obligatoria |
+| Fechas | Texto «24 Mar 2024» + ISO opcional | Solo ISO; el texto se arma al mostrar (`formatDisplayDate`) |
+| Próxima cuota del plan | `next` guardado | Se calcula de las cuotas abiertas (`nextInstallment`) |
+| Saldo y estado del plan | Escritos por cuatro funciones distintas | Los escribe **solo** `recomputePlan` (cobros, reversas, refinanciación, caída, reactivación, cambio de programa) |
+| Nombre del alumno en matrícula y agenda | Copia sin regla | Copia de visualización (listar y buscar sin cruces) que se corrige en `syncStudentName`; **nunca** se cruza por nombre |
+| Sede, programa y nivel en la matrícula | Texto sin vínculo claro | El id manda; el texto se corrige en `syncCatalogLabels` al renombrar el catálogo (y la sede también en asignaciones y cuentas) |
+| Nombre en un comprobante (pago, nota de crédito, contrato) | — | **Constancia:** conserva el nombre del día de la emisión y no se reescribe |
+
+**Cómo encaja con el resto del sistema**
+- *Reglas puras primero:* todo vive en `utils/identity.ts`, `statuses.ts`, `dates.ts`, `ids.ts` y `dataIntegrity.ts`; el contexto solo llama a esas funciones.
+- *Cada panel muestra lo mismo:* Alumnos, Titulares, Matrículas, Planes, Pagos, Caja, Dashboard, Cobranza, Psicopedagogía y los reportes leen las mismas funciones; por eso pagar una cuota mueve a la vez el plan, la caja, el saldo del titular y la cartera.
+- *Con historial se conserva:* un alumno o un titular con matrículas, asesorías o seguimiento no se elimina.
+- *Estados tipados* (`statuses.ts`): matrícula (Activa / Caída), contrato (Vigente / Cesado; «Vencido» se calcula), plan (Al día / Atrasado / Completado / Caída), cuota (Pendiente / Parcial / Pagada / Vencida / Anulada / Refinanciada), pago (Aprobado / Anulado).
+- *Ids:* una política `PREFIJO-NNN` (registro `ID_PREFIX`) y un asignador que no repite ni siquiera dentro del mismo instante. Los catálogos de configuración usan número correlativo.
+- *Datos de ejemplo coherentes:* cinco casos con fechas relativas a hoy (al día, atrasado, caída con su solicitud, contado por verificar, vigencia por vencer), armados con las mismas funciones que el flujo real; cada cobro de una cuota existe como pago y deja su movimiento de caja.
+
+**Qué falta:** pasar a ids las asignaciones y las cuentas de usuario (hoy guardan la sede por nombre y se corrigen al renombrar) y el responsable de la asesoría (texto).
+
+---
+
+## 12. Qué se probó
+Modelo de datos: `check-integrity.ts` (los datos de ejemplo cumplen todas las reglas de integridad; los casos rotos a propósito se detectan; titular, estado, programa y edad derivados; sincronía de nombres; planes; ids) y los demás scripts actualizados; en el navegador: renombrar al alumno corrige su matrícula y su agenda pero no el comprobante; cobrar la cuota vencida de Sofia pasa el plan de «Atrasado» a «Al día» y mueve la caja y el saldo del titular.
+
+Reportes: `check-reports.ts` (rangos y atajos, conteos, embudo y tasas de Matrículas, Verificación, Caja y Caja chica, Stock con faltantes, Personal con contratos y planilla, y Auditoría con sus filtros); en el navegador: las ocho rutas de Reportes y Sistema → Auditoría abren sin errores y Caja separa por sede.
+
 Personal, usuarios y planilla: `check-payroll.ts` (motor, flujo, boleta y acceso del personal); en el navegador: generar la planilla de octubre (Juan Pérez S/ 3 077.96 y María Torres S/ 2 429.55 de neto), agregar un ajuste (sin motivo se rechaza), cerrar, reabrir con motivo, volver a cerrar y registrar el pago (desaparece «Reabrir»); cerrar un contrato ya pagado (se rechaza); crear la cuenta de María desde Personal (formulario prellenado con sus datos y sede); inactivar a Juan (aviso previo, y su cuenta queda inactiva con constancia; activarla se rechaza mientras la ficha siga inactiva).
 
 Psicopedagogía: `check-psychopedagogy.ts` (84 casos: responsable y cruces, asistencia, motivos y 24 h, eventos del historial, métricas, recordatorios y reporte); en el navegador: cancelar con un motivo del alumno a menos de 24 h (se rechaza), cancelarla por la institución (queda en el historial), asignar el responsable de una actividad (Juan Pérez aparece bloqueado por una asesoría suya a esa hora), marcar asistencia, el formulario de la sesión con sus obligatorias, los recordatorios (registrar un envío), el reporte, y reprogramar un cambio de responsable sin motivo (se rechaza) y con motivo (queda «Reprogramada 1 vez»).

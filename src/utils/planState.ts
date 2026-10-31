@@ -5,19 +5,10 @@
  * cuota «Pendiente» de ayer aparece «Vencida» sin que nadie tenga que actualizarla, y todas las pantallas (Planes, Titulares,
  * Dashboard, cobranza) dicen lo mismo.
  */
-import type { Plan } from '../context/DataContext';
-import { installmentDueISO } from './enrollmentDrop';
+import type { Installment, Plan } from '../context/DataContext';
 import { roundMoney } from './tariffs';
 
-export type InstallmentLike = {
-  amount: number;
-  balance: number;
-  status: string;
-  dueDate?: string;
-  dueDateISO?: string;
-  payments?: { amount: number }[];
-  variable?: boolean;
-};
+export type InstallmentLike = Pick<Installment, 'amount' | 'balance' | 'status' | 'dueDateISO'> & Partial<Pick<Installment, 'payments' | 'variable'>>;
 
 export const isClosed = (i: Pick<InstallmentLike, 'status'>) => i.status === 'Anulada' || i.status === 'Refinanciada';
 /** Cuota con saldo por cobrar. */
@@ -29,7 +20,7 @@ export type InstallmentState = 'Pagada' | 'Parcial' | 'Vencida' | 'Pendiente' | 
 export function installmentState(i: InstallmentLike, today: string): InstallmentState {
   if (i.status === 'Anulada' || i.status === 'Refinanciada') return i.status;
   if (i.balance <= 0) return 'Pagada';
-  const due = installmentDueISO(i);
+  const due = i.dueDateISO;
   if (due && due < today) return 'Vencida';
   const paid = (i.payments ?? []).reduce((a, p) => a + p.amount, 0);
   return paid > 0 || i.balance < i.amount ? 'Parcial' : 'Pendiente';
@@ -38,7 +29,7 @@ export function installmentState(i: InstallmentLike, today: string): Installment
 /** Días de atraso de una cuota abierta (0 si no venció). */
 export function daysOverdue(i: InstallmentLike, today: string): number {
   if (!isOpen(i)) return 0;
-  const due = installmentDueISO(i);
+  const due = i.dueDateISO;
   if (!due || due >= today) return 0;
   return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86400000);
 }
@@ -52,14 +43,18 @@ export function planState(plan: Pick<Plan, 'status' | 'installments'>, today: st
   return open.some(i => daysOverdue(i, today) > 0) ? 'Atrasado' : 'Al día';
 }
 
-/** Saldo, próxima cuota y estado del plan a partir de sus cuotas. */
+/** Próxima cuota por cobrar (la de vencimiento más cercano). No se guarda en el plan: se calcula cuando se muestra. */
+export const nextInstallment = (plan: Pick<Plan, 'installments'>): Installment | undefined =>
+  [...plan.installments.filter(isOpen)].sort((a, b) => (a.dueDateISO || '9999').localeCompare(b.dueDateISO || '9999'))[0];
+
+/**
+ * Saldo y estado del plan a partir de sus cuotas. Es la ÚNICA función que escribe `balance` y `status` del plan: cobros,
+ * reversas, refinanciaciones, caídas, reactivaciones y cambios de programa la llaman al terminar de tocar las cuotas.
+ */
 export function recomputePlan(plan: Plan, today: string): Plan {
-  const open = plan.installments.filter(isOpen);
-  const next = [...open].sort((a, b) => (installmentDueISO(a) || '9999').localeCompare(installmentDueISO(b) || '9999'))[0];
   return {
     ...plan,
-    balance: roundMoney(open.reduce((a, i) => a + i.balance, 0)),
-    next: next?.dueDate ?? '-',
+    balance: roundMoney(plan.installments.filter(isOpen).reduce((a, i) => a + i.balance, 0)),
     status: planState(plan, today),
   };
 }

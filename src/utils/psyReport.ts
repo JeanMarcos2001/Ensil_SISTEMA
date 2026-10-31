@@ -222,9 +222,9 @@ export function psyReport(ctx: PsyReportContext, f: PsyReportFilters): PsyReport
   for (const student of ctx.students) {
     if (!isStudentWorkable(student, { enrollments: ctx.enrollments, programs: ctx.programs, schedules: ctx.schedules }, ctx.today)) continue;
     const branchId = branchOfStudent(student, ctx.enrollments);
-    const enrollment = ctx.enrollments.filter(e => e.studentId === student.id || e.student === student.name).filter(e => e.status === 'Activa')[0];
+    const enrollment = ctx.enrollments.filter(e => e.studentId === student.id).filter(e => e.status === 'Activa')[0];
     if ((f.branchId && branchId !== f.branchId) || (f.program && enrollment?.program !== f.program)) continue;
-    const own = ctx.schedules.filter(s => s.studentId === student.id || s.student === student.name);
+    const own = ctx.schedules.filter(s => s.studentId === student.id);
     const done = own.filter(s => s.status === 'Asistió' || s.status === 'Faltó').sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
     let streak = 0;
     for (const s of done) { if (s.status === 'Faltó') streak++; else break; }
@@ -238,7 +238,7 @@ export function psyReport(ctx: PsyReportContext, f: PsyReportFilters): PsyReport
     }
     const unregistered = own.filter(s => s.status === 'Asistió' && !hasSession(s)).length;
     if (unregistered > 0) reasonsList.push(`${unregistered} asesoría${unregistered === 1 ? '' : 's'} sin sesión registrada`);
-    if (reasonsList.length > 0) risk.push({ studentId: student.id, student: student.name, branchName: branchName(branchId), program: enrollment?.program ?? student.program, reasons: reasonsList });
+    if (reasonsList.length > 0) risk.push({ studentId: student.id, student: student.name, branchName: branchName(branchId), program: enrollment?.program ?? '', reasons: reasonsList });
   }
   risk.sort((a, b) => b.reasons.length - a.reasons.length || a.student.localeCompare(b.student));
 

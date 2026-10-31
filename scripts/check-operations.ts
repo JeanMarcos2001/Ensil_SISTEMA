@@ -2,7 +2,7 @@
  * Verificación de las reglas de Personal, Caja, Caja chica, estado de cuenta, refinanciación, carga masiva y Dashboard.
  * Ejecutar: npx tsx scripts/check-operations.ts
  */
-import type { Assignment, Branch, CashMovement, Contract, DropRequest, Enrollment, Guardian, Payment, PettyCashMovement, Plan, Schedule, Staff, StockItem, Student } from '../src/context/DataContext';
+import type { Assignment, Branch, CashMovement, Contract, DropRequest, Enrollment, Guardian, Installment, Payment, PettyCashMovement, Plan, Schedule, Staff, StockItem, Student } from '../src/context/DataContext';
 import {
   closeAllOf, closeAssignmentIn, closeImpact, emptyAssignmentForm, futureSessionsOf, mainToDemote, saveAssignment, validateAssignmentClose, validateAssignmentForm, willBeMain,
 } from '../src/utils/assignments';
@@ -14,10 +14,12 @@ import {
 import { emptyPettyInput, pettyBalance, pettyMonthTotals, validatePettyInput, validatePettyReversal } from '../src/utils/pettyCash';
 import { buildStatement, guardianBalance } from '../src/utils/guardianStatement';
 import { applyRefinance, validateRefinance } from '../src/utils/refinance';
+import { nextInstallment } from '../src/utils/planState';
+import type { InstallmentStatus } from '../src/utils/statuses';
 import { BULK_HEADERS, buildBookBatch, parseCsv } from '../src/utils/itemImport';
 import { csvFileName, toCsv } from '../src/utils/exportCsv';
 import { tableDocumentHtml } from '../src/utils/printTable';
-import { branchFigures, dashboardKpis, dueText, initials, recentActivity, relativeTime, upcomingDues } from '../src/utils/dashboard';
+import { branchFigures, dashboardKpis, dueText, initials, recentActivity, relativeTime, upcomingDues, type DashboardContext } from '../src/utils/dashboard';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -28,7 +30,7 @@ const TODAY = '2026-10-23';
 
 // ================================================================ Datos
 const staff = (id: string, over: Partial<Staff> = {}): Staff => ({
-  id, code: `TRB-${id}`, docType: 'DNI', docNumber: `1000000${id}`, names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '1990-01-01', age: 36, phone: '999999999', status: 'Activo', ...over,
+  id, code: `TRB-${id}`, docType: 'DNI', docNumber: `1000000${id}`, names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '1990-01-01', phone: '999999999', status: 'Activo', ...over,
 });
 const members = [staff('1'), staff('2', { names: 'Luis', lastNameP: 'Pérez' }), staff('3', { names: 'Eva', lastNameP: 'Soto', status: 'Inactivo' })];
 const branches: Branch[] = [
@@ -66,9 +68,9 @@ check('Editar conserva id y estado', (() => {
 })());
 
 const sessions: Schedule[] = [
-  { id: 'S1', student: 'X', program: 'Kids', level: 'N1', date: '2026-10-30', time: '16:00', duration: 60, responsible: 'Ana Quispe', status: 'Reservado' },
-  { id: 'S2', student: 'Y', program: 'Kids', level: 'N1', date: '2026-10-01', time: '16:00', duration: 60, responsible: 'Ana Quispe', status: 'Reservado' },
-  { id: 'S3', student: 'Z', program: 'Kids', level: 'N1', date: '2026-10-30', time: '17:00', duration: 60, responsible: 'Luis Pérez', status: 'Cancelado' },
+  { id: 'S1', student: 'X', studentId: 'ALU-X', program: 'Kids', level: 'N1', date: '2026-10-30', time: '16:00', duration: 60, responsible: 'Ana Quispe', status: 'Reservado' },
+  { id: 'S2', student: 'Y', studentId: 'ALU-Y', program: 'Kids', level: 'N1', date: '2026-10-01', time: '16:00', duration: 60, responsible: 'Ana Quispe', status: 'Reservado' },
+  { id: 'S3', student: 'Z', studentId: 'ALU-Z', program: 'Kids', level: 'N1', date: '2026-10-30', time: '17:00', duration: 60, responsible: 'Luis Pérez', status: 'Cancelado' },
 ];
 check('Asesorías futuras a su nombre', futureSessionsOf(members[0], sessions, TODAY).length === 1);
 check('Cerrar: fecha no futura ni anterior al inicio y motivo', validateAssignmentClose(base[0], '2026-12-01', 'Motivo válido', TODAY).length > 0 && validateAssignmentClose(base[0], '2025-12-01', 'Motivo válido', TODAY).length > 0 && validateAssignmentClose(base[0], '2026-10-20', 'x', TODAY).length > 0 && validateAssignmentClose(base[0], '2026-10-20', 'Cambio de área', TODAY).length === 0);
@@ -110,7 +112,7 @@ check('Editar su propio contrato no choca con «un solo vigente»', !validateCon
 const mv = (id: string, over: Partial<CashMovement> = {}): CashMovement => ({
   id, date: '2026-10-22T15:00:00.000Z', kind: 'Ingreso', concept: 'Ingreso', reference: 'ref', currency: 'PEN', amount: 100, amountUSD: 27, method: 'Efectivo', user: 'Admin', status: 'Aplicado', ...over,
 });
-const plans: Plan[] = [{ id: 'PLN-001', mat: 'MAT-2024-001', titular: 'Juan', type: 'Plan 6 Cuotas', total: 1200, balance: 800, next: '15 Abr 2024', status: 'Al día', installments: [] }];
+const plans: Plan[] = [{ id: 'PLN-001', mat: 'MAT-2024-001', type: 'Plan 6 Cuotas', total: 1200, balance: 800, status: 'Al día', installments: [] }];
 const cash: CashMovement[] = [
   mv('CJ-1', { paymentId: 'PAG-1', enrollmentIds: ['MAT-1'], concept: 'Cobro' }),
   mv('CJ-2', { kind: 'Egreso', amount: 30, concept: 'Pago a proveedor', reference: 'Limpieza (Factura F1)' }),
@@ -162,12 +164,12 @@ check('Reversar un ingreso ya gastado deja el saldo negativo → no', validatePe
 check('Reversar un egreso siempre se puede (con motivo)', validatePettyReversal(petty[1], 'Gasto no realizado', 'No se hizo el viaje', petty).length === 0 && validatePettyReversal(petty[3], 'Gasto no realizado', 'No se hizo el viaje', petty).length === 1);
 
 // ================================================================ Estado de cuenta
-const guardian = { id: 'G1', name: 'Juan Ruiz', doc: '1', phone: '9', email: 'a@b.c', students: 0, enrollments: 0, balance: '$0' } as Guardian;
-const stu: Student[] = [{ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', age: 9, program: 'Kids', titular: 'Juan Ruiz', status: 'Activo', guardianIds: ['G1'] }, { id: 'ALU-2', doc: '2', name: 'Otro', age: 9, program: 'Kids', titular: 'Otro', status: 'Activo', guardianIds: ['G9'] }];
-const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({ id, date: '01 Sep 2026', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', status: 'Activa', plan: 'Al día', ...over });
-const inst = (id: string, amount: number, balance: number, due: string, status: string, payments: any[] = []) => ({ id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDate: due, dueDateISO: due, status, payments });
+const guardian = { id: 'G1', name: 'Juan Ruiz', doc: '1', phone: '9', email: 'a@b.c' } as Guardian;
+const stu: Student[] = [{ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'] }, { id: 'ALU-2', doc: '2', name: 'Otro', birthDate: '2017-01-01', guardianIds: ['G9'] }];
+const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({ id, dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', guardianIds: ['G1'], program: 'Kids', programId: '1', level: 'Nivel 1', branchId: 'FIL-PIU', status: 'Activa', ...over });
+const inst = (id: string, amount: number, balance: number, due: string, status: InstallmentStatus, payments: any[] = []): Installment => ({ id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDateISO: due, status, payments });
 const sPlan: Plan = {
-  id: 'PLN-1', mat: 'MAT-1', titular: 'Juan Ruiz', type: 'Plan 4', total: 800, balance: 400, next: '-', status: 'Atrasado',
+  id: 'PLN-1', mat: 'MAT-1', type: 'Plan 4', total: 800, balance: 400, status: 'Atrasado',
   installments: [inst('C1', 200, 0, '2026-09-01', 'Pagada', [{ id: 'P', amount: 200 }]), inst('C2', 200, 0, '2026-10-01', 'Pagada', [{ id: 'P', amount: 200 }]), inst('C3', 200, 200, '2026-10-15', 'Vencida'), inst('C4', 200, 200, '2026-11-15', 'Pendiente')],
 };
 const pays: Payment[] = [
@@ -175,7 +177,7 @@ const pays: Payment[] = [
   { id: 'PAG-2', date: '2026-10-01', student: 'Mateo Ruiz', concept: 'C2', amount: 200, method: 'Efectivo', receipt: 'B2', status: 'Aprobado', enrollmentIds: ['MAT-1'] },
   { id: 'PAG-3', date: '2026-10-02', student: 'Mateo Ruiz', concept: 'Error', amount: 50, method: 'Efectivo', receipt: 'B3', status: 'Anulado', enrollmentIds: ['MAT-1'] },
 ];
-const sctx = { guardians: [guardian], students: stu, enrollments: [enr('MAT-1'), enr('MAT-2', { student: 'Otro', studentId: 'ALU-2' })], plans: [sPlan], payments: pays, groups: [] };
+const sctx = { guardians: [guardian], students: stu, enrollments: [enr('MAT-1'), enr('MAT-2', { student: 'Otro', studentId: 'ALU-2', guardianIds: ['G9'] })], plans: [sPlan], payments: pays, groups: [] };
 const st = buildStatement(sctx, 'G1', TODAY)!;
 check('Estado de cuenta: solo las matrículas de sus alumnos', st.enrollments.length === 1 && st.students.length === 1 && st.enrollments[0].enrollment.id === 'MAT-1');
 check('Total, cobrado, saldo y deuda vencida', st.totals.totalUSD === 800 && st.totals.paidUSD === 400 && st.totals.balanceUSD === 400 && st.totals.overdueUSD === 200);
@@ -185,7 +187,7 @@ check('Titular sin matrículas: todo en cero', (() => { const e = buildStatement
 check('Titular inexistente → sin estado', buildStatement(sctx, 'G404', TODAY) === undefined);
 check('Saldo del titular para la lista', guardianBalance(sctx, 'G1', TODAY).balanceUSD === 400 && guardianBalance(sctx, 'G1', TODAY).enrollments === 1);
 check('Caída: lo anulado no es deuda', (() => {
-  const dropped = { ...sPlan, status: 'Caída', balance: 200, installments: [...sPlan.installments.slice(0, 3), { ...sPlan.installments[3], status: 'Anulada', balance: 0 }] };
+  const dropped: Plan = { ...sPlan, status: 'Caída', balance: 200, installments: [...sPlan.installments.slice(0, 3), { ...sPlan.installments[3], status: 'Anulada', balance: 0 }] };
   const d = buildStatement({ ...sctx, plans: [dropped], enrollments: [enr('MAT-1', { status: 'Caída' })] }, 'G1', TODAY)!;
   return d.totals.balanceUSD === 200 && d.totals.annulledUSD === 200 && d.totals.paidUSD === 400;
 })());
@@ -194,7 +196,7 @@ check('Caída: lo anulado no es deuda', (() => {
 const rin = { name: 'Cuota 3 (refinanciada)', dueDate: '2026-11-30', reason: 'Dificultad económica' };
 check('Refinanciar: datos válidos', validateRefinance(sPlan, 'C3', rin, TODAY).length === 0);
 check('Refinanciar: nombre, fecha futura y motivo', validateRefinance(sPlan, 'C3', { name: '', dueDate: '2026-01-01', reason: '' }, TODAY).length === 3);
-check('No se refinancia una cuota pagada, anulada o ya refinanciada', validateRefinance(sPlan, 'C1', rin, TODAY).length > 0 && validateRefinance({ ...sPlan, installments: sPlan.installments.map(i => (i.id === 'C4' ? { ...i, status: 'Anulada', balance: 0 } : i)) }, 'C4', rin, TODAY).length > 0);
+check('No se refinancia una cuota pagada, anulada o ya refinanciada', validateRefinance(sPlan, 'C1', rin, TODAY).length > 0 && validateRefinance({ ...sPlan, installments: sPlan.installments.map(i => (i.id === 'C4' ? { ...i, status: 'Anulada' as const, balance: 0 } : i)) }, 'C4', rin, TODAY).length > 0);
 check('No se refinancia en un plan caído ni una cuota variable', validateRefinance({ ...sPlan, status: 'Caída' }, 'C3', rin, TODAY).length > 0 && validateRefinance({ ...sPlan, installments: sPlan.installments.map(i => (i.id === 'C3' ? { ...i, variable: true } : i)) }, 'C3', rin, TODAY).length > 0);
 check('El saldo se traslada sin duplicarse', (() => {
   const r = applyRefinance(sPlan, 'C3', rin, TODAY, '2026-10-23T10:00:00Z');
@@ -204,10 +206,10 @@ check('El saldo se traslada sin duplicarse', (() => {
 })());
 check('Tras refinanciar, ya no está atrasado y la próxima cuota es la más cercana', (() => {
   const r = applyRefinance(sPlan, 'C3', rin, TODAY, 'x');
-  return r.status === 'Al día' && r.next === '2026-11-15';
+  return r.status === 'Al día' && nextInstallment(r)?.dueDateISO === '2026-11-15';
 })());
 check('Si queda otra vencida, sigue atrasado', (() => {
-  const two = { ...sPlan, installments: sPlan.installments.map(i => (i.id === 'C4' ? { ...i, dueDate: '2026-10-20', dueDateISO: '2026-10-20', status: 'Vencida' } : i)) };
+  const two = { ...sPlan, installments: sPlan.installments.map(i => (i.id === 'C4' ? { ...i, dueDateISO: '2026-10-20', status: 'Vencida' as const } : i)) };
   return applyRefinance(two, 'C3', rin, TODAY, 'x').status === 'Atrasado';
 })());
 
@@ -231,18 +233,18 @@ check('Nombre de archivo seguro', csvFileName('Caja USD', '2026-10-23') === 'caj
 check('Documento imprimible escapa el HTML', (() => { const h = tableDocumentHtml('T <b>', 'S', ['H'], [['<script>x</script>']]); return !h.includes('<script>') && h.includes('&lt;script&gt;') && h.includes('<th>H</th>'); })());
 
 // ================================================================ Dashboard
-const dctx = {
-  branches,
+const dctx: DashboardContext = {
+  branches, students: stu, guardians: [guardian],
   enrollments: [enr('MAT-1', { branchId: 'FIL-PIU', verificationStatus: 'Pendiente' }), enr('MAT-2', { branchId: 'FIL-CHI', verificationStatus: 'Verificado Completo' }), enr('MAT-3', { branchId: 'FIL-PIU', status: 'Caída' })],
   plans: [sPlan, { ...sPlan, id: 'PLN-2', mat: 'MAT-2', status: 'Completado', balance: 0, installments: [] }],
-  payments: [...pays, { id: 'PAG-9', date: TODAY, student: 'X', concept: 'c', amount: 70, method: 'Efectivo', receipt: 'B9', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-10', date: '23 Oct 2026', student: 'X', concept: 'c', amount: 30, method: 'Efectivo', receipt: 'B10', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-11', date: TODAY, student: 'X', concept: 'c', amount: 999, method: 'Efectivo', receipt: 'B11', status: 'Anulado', enrollmentIds: ['MAT-1'] }],
+  payments: [...pays, { id: 'PAG-9', date: TODAY, student: 'X', concept: 'c', amount: 70, method: 'Efectivo', receipt: 'B9', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-10', date: '2026-10-23', student: 'X', concept: 'c', amount: 30, method: 'Efectivo', receipt: 'B10', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-11', date: TODAY, student: 'X', concept: 'c', amount: 999, method: 'Efectivo', receipt: 'B11', status: 'Anulado', enrollmentIds: ['MAT-1'] }],
   cashMovements: [mv('A', { branchId: 'FIL-PIU', currency: 'USD', amount: 100, amountUSD: 100, date: '2026-10-05T15:00:00Z' }), mv('B', { branchId: 'FIL-PIU', amountUSD: 40, date: '2026-10-06T15:00:00Z' }), mv('C', { branchId: 'FIL-CHI', amountUSD: 10, date: '2026-09-06T15:00:00Z' })],
   stockItems: [{ id: 's1', itemId: 'i', branchId: 'FIL-PIU', stock: 3, minStock: 5 }, { id: 's2', itemId: 'i', branchId: 'FIL-CHI', stock: 9, minStock: 5 }] as StockItem[],
   dropRequests: [{ id: 'CAI-1', status: 'Pendiente', enrollmentId: 'MAT-1', requestedAt: '2026-10-23T09:00:00Z', requestedBy: 'Ana', reason: 'x', detail: 'y', effectiveDate: TODAY, requestedByUser: '' } as unknown as DropRequest],
 };
 const k = dashboardKpis(dctx, TODAY);
 check('KPIs: matrículas activas, cartera, verificaciones, stock y solicitudes', k.activeEnrollments === 2 && k.portfolioUSD === 400 && k.overdueUSD === 200 && k.pendingVerifications === 1 && k.lowStock === 1 && k.pendingRequests === 1);
-check('Pagos del día: ISO y texto, sin anulados', k.paymentsTodayUSD === 100);
+check('Pagos del día (fecha ISO), sin anulados', k.paymentsTodayUSD === 100);
 check('Saldos de caja por moneda', k.cashUSD === 100 && k.cashPEN === 200);
 check('Resumen por sede: matrículas, ingresos del mes y mora', (() => {
   const b = branchFigures(dctx, TODAY);
@@ -251,8 +253,8 @@ check('Resumen por sede: matrículas, ingresos del mes y mora', (() => {
   return piu.activeEnrollments === 1 && piu.monthIncomeUSD === 140 && piu.overdueUSD === 200 && chi.activeEnrollments === 1 && chi.monthIncomeUSD === 0 && chi.overdueUSD === 0;
 })());
 check('Vencimientos: la vencida primero y el horizonte', (() => {
-  const d = upcomingDues(dctx.plans, TODAY, 7);
-  return d.length === 1 && d[0].installment === 'Cuota 3' && d[0].days === -8 && upcomingDues(dctx.plans, TODAY, 30).length === 2;
+  const d = upcomingDues(dctx, TODAY, 7);
+  return d.length === 1 && d[0].installment === 'Cuota 3' && d[0].days === -8 && upcomingDues(dctx, TODAY, 30).length === 2;
 })());
 check('Texto de vencimiento', dueText(-1) === 'Vencida hace 1 día' && dueText(-8) === 'Vencida hace 8 días' && dueText(0) === 'Vence hoy' && dueText(1) === 'Vence mañana' && dueText(5) === 'Vence en 5 días');
 check('Actividad reciente ordenada y con reversas', (() => {

@@ -11,6 +11,7 @@ import { useData, Recipe, RecipeItem } from '../../context/DataContext';
 import { getRecipeSelectableItems } from '../../utils/inventory';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
+import { nextSequentialId } from '../../utils/ids';
 
 export function Recipes() {
   const { recipes, setRecipes, programs, levels, branches, items } = useData();
@@ -168,7 +169,7 @@ export function Recipes() {
     } else {
       const newRecipe: Recipe = {
         ...formData as Recipe,
-        id: `REC-${Date.now()}`
+        id: nextSequentialId('REC', recipes.map(x => x.id))
       };
       setRecipes([newRecipe, ...recipes]);
     }
@@ -336,7 +337,7 @@ export function Recipes() {
                               onConfirm: () => {
                                 const newRecipe = {
                                   ...row,
-                                  id: `REC-${Date.now()}`,
+                                  id: nextSequentialId('REC', recipes.map(x => x.id)),
                                   name: `${row.name} (Copia)`
                                 };
                                 setRecipes([newRecipe, ...recipes]);

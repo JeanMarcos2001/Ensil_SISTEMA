@@ -31,13 +31,13 @@ const recipe: Recipe = {
   id: 'R1', name: 'Receta Kids', programId: 'P-KIDS', levelId: undefined, branchIds: [], applyToAllBranches: true,
   status: 'Activo', items: [{ itemId: 'LIB', quantity: 1 }], startDate: '2026-01-01',
 };
-const paidPlan: Plan = { id: 'PL1', mat: 'MAT-1', titular: 'T', type: 'Contado', total: 100, balance: 0, next: '-', status: 'Al día', installments: [] };
+const paidPlan: Plan = { id: 'PL1', mat: 'MAT-1', type: 'Contado', total: 100, balance: 0, status: 'Al día', installments: [] };
 const unpaidPlan: Plan = { ...paidPlan, id: 'PL2', mat: 'MAT-2', balance: 100 };
 
 const enrollment = (id: string, o: Partial<Enrollment> = {}): Enrollment =>
   ({ id, student: 'Alumno', studentId: 'ALU-1', programId: 'P-KIDS', program: 'Kids', levelId: 'N1', level: 'Nivel 1', branchId: 'B1', status: 'Activa', planId: id === 'MAT-2' ? 'PL2' : 'PL1', ...o } as Enrollment);
 const first = (enrollmentId: string, date: string, time = '16:00', o: Partial<Schedule> = {}): Schedule =>
-  ({ id: `S-${enrollmentId}-${date}`, student: 'Alumno', program: 'Kids', level: 'Nivel 1', date, time, duration: 60, responsible: 'R', status: 'Reservado', isFirst: true, enrollmentId, ...o });
+  ({ id: `S-${enrollmentId}-${date}`, student: 'Alumno', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date, time, duration: 60, responsible: 'R', status: 'Reservado', isFirst: true, enrollmentId, ...o });
 
 const ctx = (schedules: Schedule[], over: Partial<GateContext> = {}): GateContext =>
   ({ schedules, plans: [paidPlan, unpaidPlan], recipes: [recipe], today, now, ...over });

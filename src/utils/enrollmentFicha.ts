@@ -15,7 +15,7 @@ import type {
   Student,
   Tracking,
 } from '../context/DataContext';
-import { enrollmentDateISO, enrollmentPaidUSD, paymentShareUSD } from './enrollmentDrop';
+import { enrollmentPaidUSD, paymentShareUSD } from './enrollmentDrop';
 import { localDateOf } from './schedule';
 import { parseDisplayDate, roundMoney } from './tariffs';
 import { enrollmentValidity, programOf, type Validity } from './validity';
@@ -107,7 +107,7 @@ export function buildFicha(ctx: FichaContext, enrollmentId: string): Ficha | und
 
   // ---- Línea de tiempo (derivada de los datos; no hay bitácora)
   const events: FichaEvent[] = [];
-  const created = enrollment.createdAt ? localDateOf(enrollment.createdAt) : enrollmentDateISO(enrollment);
+  const created = enrollment.createdAt ? localDateOf(enrollment.createdAt) : enrollment.dateISO;
   if (created) events.push({ date: created, title: 'Matrícula registrada', detail: enrollment.createdBy ? `Por ${enrollment.createdBy}` : undefined, tone: 'info' });
   for (const { payment: p, shareUSD, voided } of payments) {
     const d = isoOf(p.date);

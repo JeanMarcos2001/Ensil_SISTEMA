@@ -203,7 +203,7 @@ const acts: FlatActivity[] = [
 const rctxReport: PsyReportContext = {
   schedules: rs, trackings: sessions, events: evts, activities: acts,
   enrollments: [{ ...enroll, studentId: 'S1', program: 'Kids' } as Enrollment, { ...enroll, id: 'M2', studentId: 'S2', student: 'Alumno Dos', program: 'Pre-Kids', branchId: 'CHI' } as Enrollment],
-  students: [{ ...students[0], status: 'Activo', doc: '1', age: 9, program: 'Kids' }, { ...students[1], status: 'Activo', doc: '2', age: 9, program: 'Pre-Kids' }] as Student[],
+  students: [{ ...students[0], doc: '1' }, { ...students[1], doc: '2' }] as Student[],
   programs: [program], branches, blockedScheduleIds: new Set(['p6']), today,
 };
 const rep = psyReport(rctxReport, { from: '2026-10-01', to: '2026-10-31', branchId: '', program: '' });

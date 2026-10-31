@@ -9,6 +9,7 @@ import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCir
 import { useData, ShippingMethod, Courier, ShipmentItem, Shipment, ShipmentBox, ShipmentBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
+import { nextSequentialId } from '../../utils/ids';
 
 export function Shipments() {
   const { 
@@ -259,7 +260,7 @@ export function Shipments() {
       attachments: attachments.map(f => f.name) // Mocking attachments
     };
 
-    const newShipmentId = selectedShipment ? selectedShipment.id : `ENV-${Math.floor(Math.random() * 100000).toString().padStart(5, '0')}`;
+    const newShipmentId = selectedShipment ? selectedShipment.id : nextSequentialId('ENV', shipments.map(x => x.id), { pad: 5 });
     const shipmentToSave = { ...newShipment, id: newShipmentId, status: status };
     
     // Regla de stock: al despachar el stock sale del origen (una sola vez); el destino suma al recepcionar.

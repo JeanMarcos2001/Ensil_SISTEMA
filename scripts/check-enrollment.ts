@@ -3,8 +3,7 @@
  * Ejecutar: npx tsx scripts/check-enrollment.ts
  */
 import type {
-  Assignment, Branch, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff,
-} from '../src/context/DataContext';
+  Assignment, Branch, LeadSource, Level, PaymentPart, PaymentType, Program, Promotion, Staff, Tariff, Payment } from '../src/context/DataContext';
 import {
   buildEnrollmentBatch, emptyDraft, emptyPerson, emptyStudent, getInterviewerOptions, quoteEnrollment,
   validateContext, validatePayments, validateProgram, validateHolders,
@@ -12,6 +11,8 @@ import {
 } from '../src/utils/enrollment';
 import { generateBreakdown, resolveScheduleMode, sumBreakdown } from '../src/utils/tariffs';
 import { validateStudents } from '../src/utils/enrollment';
+
+import { holderNameOfStudent } from '../src/utils/identity';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -26,8 +27,8 @@ const branches: Branch[] = [
 ];
 const leadSources: LeadSource[] = [{ id: 'L1', name: 'Facebook', status: 'active' }];
 const staff: Staff[] = [
-  { id: 'E1', code: '1', docType: 'DNI', docNumber: '1', names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '', age: 30, phone: '', status: 'Activo' },
-  { id: 'E2', code: '2', docType: 'DNI', docNumber: '2', names: 'Luis', lastNameP: 'Mamani', lastNameM: 'Soto', birthDate: '', age: 30, phone: '', status: 'Activo' },
+  { id: 'E1', code: '1', docType: 'DNI', docNumber: '1', names: 'Ana', lastNameP: 'Quispe', lastNameM: 'Rojas', birthDate: '', phone: '', status: 'Activo' },
+  { id: 'E2', code: '2', docType: 'DNI', docNumber: '2', names: 'Luis', lastNameP: 'Mamani', lastNameM: 'Soto', birthDate: '', phone: '', status: 'Activo' },
 ];
 const assignments: Assignment[] = [
   { id: 'A1', staffId: 'E1', branch: 'Ayacucho', area: 'Psicopedagogía', role: 'x', startDate: '2026-01-01', isMain: true, status: 'Activa' },
@@ -254,7 +255,7 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   d.holders = [person(50, { birthDate: '1990-01-01' })];
   const r = build(d);
   check('Independiente: crea una persona (alumno) y ningún titular', r.ok && r.batch!.newStudents.length === 1 && r.batch!.newGuardians.length === 0, r.error);
-  check('Independiente: el alumno es su propio titular', r.batch!.newStudents[0].titular === r.batch!.newStudents[0].name);
+  check('Independiente: el alumno es su propio titular (sin vínculos; el titular se deriva)', r.batch!.newStudents[0].guardianIds.length === 0 && holderNameOfStudent(r.batch!.newStudents[0], []) === r.batch!.newStudents[0].name);
 }
 {
   // Reglas de contexto
@@ -390,14 +391,14 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   two.students[1].counselingDate = '2026-10-13'; two.students[1].counselingTime = '17:00';
   two.promotion = { promotionId: 'PR1', groups: [['k0', 'k1']] };
   two.payments[quoteEnrollment(two, cat).units[0].key] = [usdPart(700)];
-  const b = build(two, cat, { ...empty, schedules: [{ id: '5' } as any] });
+  const b = build(two, cat, { ...empty, schedules: [{ id: 'SES-005' } as any] });
   check('Guarda una primera asesoría por alumno', b.ok && b.batch!.schedules.length === 2, b.error);
   check('Asesoría con la fecha y hora de cada alumno',
     b.batch!.schedules[0].date === '2026-10-12' && b.batch!.schedules[0].time === '15:00' &&
     b.batch!.schedules[1].date === '2026-10-13' && b.batch!.schedules[1].time === '17:00');
   check('Asesoría: Reservado, primera, 60 min, programa/nivel y correlativo continuo',
     b.batch!.schedules.every(x => x.status === 'Reservado' && x.isFirst === true && x.duration === 60) &&
-    b.batch!.schedules[0].program === 'Pre-Kids' && b.batch!.schedules[1].level === 'Kids 2' && b.batch!.schedules.map(x => x.id).join() === '6,7');
+    b.batch!.schedules[0].program === 'Pre-Kids' && b.batch!.schedules[1].level === 'Kids 2' && b.batch!.schedules.map(x => x.id).join() === 'SES-006,SES-007');
   check('Asesoría: sede de la matrícula, alumno vinculado y responsable = quien entrevistó',
     b.batch!.schedules.every(x => x.branchId === 'FIL-AYA') &&
     b.batch!.schedules[0].studentId === b.batch!.newStudents[0].id && b.batch!.schedules[1].studentId === b.batch!.newStudents[1].id &&
@@ -425,7 +426,7 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   check('Con comprobante → válido', validatePayments(d, quoteEnrollment(d, catalogs())).length === 0);
   const r = build(d);
   check('El pago guarda el comprobante (no la operación) en `receipt`', r.ok && r.batch!.payments[0].receipt === 'B001-4567' && r.batch!.payments[0].document?.number === '4567', r.error);
-  const used = [{ id: 'PAG-009', date: '', student: '', concept: '', amount: 1, method: 'Efectivo', receipt: 'B001-004567', status: 'Aprobado' }];
+  const used: Payment[] = [{ id: 'PAG-009', date: '', student: '', concept: '', amount: 1, method: 'Efectivo', receipt: 'B001-004567', status: 'Aprobado' }];
   check('Comprobante ya usado por otro pago → rechazado', validatePayments(d, quoteEnrollment(d, catalogs()), used).some(m => /ya fue usado en el pago PAG-009/.test(m)));
   d.paymentDocs[key] = { type: 'Factura', serie: 'B001', number: '1' };
   check('Factura con serie B → rechazada', validatePayments(d, quoteEnrollment(d, catalogs())).some(m => /debe comenzar con «F»/.test(m)));

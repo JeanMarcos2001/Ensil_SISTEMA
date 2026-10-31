@@ -2,7 +2,8 @@
  * Verificación de las reglas de Verificación de entrega.
  * Ejecutar: npx tsx scripts/check-verification.ts
  */
-import type { Item, Plan, Recipe, StockItem } from '../src/context/DataContext';
+import type { Item, Plan, Recipe, StockItem, Installment } from '../src/context/DataContext';
+import type { InstallmentStatus } from '../src/utils/statuses';
 import {
   availableComponents,
   canSplitKit,
@@ -20,9 +21,9 @@ const check = (name: string, ok: boolean, detail = '') => {
 };
 
 // ---------------------------------------------------------------- Condición de pago
-const inst = (name: string, balance: number, status: string, variable = false) => ({ id: name, name, amount: 100, balance, dueDate: '', status, payments: [], variable });
+const inst = (name: string, balance: number, status: InstallmentStatus, variable = false): Installment => ({ id: name, name, amount: 100, balance, dueDateISO: '', status, payments: [], variable });
 const plan = (id: string, mat: string, installments: any[], balance: number, type = 'Plan'): Plan =>
-  ({ id, mat, titular: 'T', type, total: 100, balance, next: '-', status: 'Al día', installments });
+  ({ id, mat, type, total: 100, balance, status: 'Al día', installments });
 const enr = (id: string) => ({ id, planId: undefined as string | undefined });
 
 check('Contado cobrado en la matrícula (sin cuotas, saldo 0) → puede verificar',

@@ -11,9 +11,11 @@
  * En los cronogramas de monto variable (Contado en 2 partes) los pagos se reversan del más reciente al más antiguo.
  * La nota de crédito de un comprobante ya emitido no se genera aquí: solo se registra su número.
  */
-import type { Enrollment, Payment, Plan, PromotionGroup } from '../context/DataContext';
-import { installmentDueISO, MIN_DETAIL, paymentShareUSD } from './enrollmentDrop';
-import { formatDisplayDate, roundMoney } from './tariffs';
+import type { Enrollment, Installment, Payment, Plan, PromotionGroup } from '../context/DataContext';
+import { MIN_DETAIL, paymentShareUSD } from './enrollmentDrop';
+import { recomputePlan } from './planState';
+import type { InstallmentStatus } from './statuses';
+import { roundMoney } from './tariffs';
 
 export const REVERSAL_REASONS = [
   'Error de registro (monto, medio o alumno)',
@@ -76,10 +78,7 @@ export function reversalTargets(payment: Payment, ctx: ReversalContext): Reversa
   }));
 }
 
-const balanceOf = (installments: any[]) =>
-  roundMoney(installments.reduce((a, i) => a + (i.balance > 0 && i.status !== 'Refinanciada' && i.status !== 'Anulada' ? i.balance : 0), 0));
-
-const restoredStatus = (i: { amount: number; balance: number }, due: string, today: string) =>
+const restoredStatus = (i: { amount: number; balance: number }, due: string, today: string): InstallmentStatus =>
   i.balance <= 0 ? 'Pagada' : i.balance < i.amount ? 'Parcial' : due && due < today ? 'Vencida' : 'Pendiente';
 
 export interface ReversalApplied {
@@ -92,7 +91,7 @@ export interface ReversalApplied {
 
 /** Repone en el plan lo que cubrió el pago. */
 export function applyReversalToPlan(plan: Plan, payment: Pick<Payment, 'id' | 'receipt'>, shareUSD: number, today: string): ReversalApplied {
-  let installments = plan.installments.map(i => ({ ...i, payments: [...(i.payments ?? [])] }));
+  let installments: Installment[] = plan.installments.map(i => ({ ...i, payments: [...(i.payments ?? [])] }));
   let matched = false;
   let note: string | undefined;
 
@@ -105,7 +104,7 @@ export function applyReversalToPlan(plan: Plan, payment: Pick<Payment, 'id' | 'r
     const entryAt = inst.payments.findIndex((x: any) => x.paymentId === payment.id || (!x.paymentId && x.receipt === payment.receipt && Math.abs(x.amount - shareUSD) < 0.01));
     const entry = inst.payments[entryAt];
     inst.payments.splice(entryAt, 1);
-    const due = installmentDueISO(inst);
+    const due = inst.dueDateISO;
 
     if (inst.status === 'Anulada' || inst.status === 'Refinanciada') {
       note = 'La cuota ya estaba anulada o refinanciada: solo se quitó el cobro.';
@@ -131,16 +130,12 @@ export function applyReversalToPlan(plan: Plan, payment: Pick<Payment, 'id' | 'r
     // Matrícula de contado: el plan no tenía cuotas; se crea el pago único pendiente para poder cobrarlo de nuevo
     matched = true;
     installments = [{
-      id: 'C1', name: 'Pago único', amount: plan.total, balance: roundMoney(shareUSD), dueDate: formatDisplayDate(today), dueDateISO: today,
+      id: 'C1', name: 'Pago único', amount: plan.total, balance: roundMoney(shareUSD), dueDateISO: today,
       status: 'Pendiente', payments: [],
     }];
   } else {
     note = 'No se encontró el cobro de este pago en el plan (registro antiguo): ajuste el plan con una refinanciación si corresponde.';
   }
 
-  const balance = balanceOf(installments);
-  const overdue = installments.some(i => i.balance > 0 && !['Anulada', 'Refinanciada'].includes(i.status) && (installmentDueISO(i) || '9999') < today);
-  const status = plan.status === 'Caída' ? 'Caída' : balance === 0 ? 'Completado' : overdue ? 'Atrasado' : plan.status === 'Completado' || plan.status === 'Atrasado' ? 'Al día' : plan.status;
-  const next = installments.find(i => i.balance > 0 && !['Anulada', 'Refinanciada'].includes(i.status))?.dueDate ?? '-';
-  return { plan: { ...plan, installments, balance, status, next }, matched, note };
+  return { plan: recomputePlan({ ...plan, installments }, today), matched, note };
 }

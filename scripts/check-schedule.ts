@@ -339,11 +339,11 @@ check('Reserva de la semana pasada → rechazada', /anterior a hoy/.test(res({ d
 
 // ---------------------------------------------------------------- Sede del alumno, responsable sugerido y agrupación
 const enrol = (id: string, studentId: string, branchId: string, dateISO: string): Enrollment => ({
-  id, date: '', student: `Alumno ${studentId}`, studentId, branchId, dateISO, program: 'Kids', level: 'N1', status: 'Activa', plan: 'Al día',
+  id, student: `Alumno ${studentId}`, studentId, guardianIds: [], branchId, dateISO, programId: '1', program: 'Kids', level: 'N1', status: 'Activa',
 });
 check('Sede del alumno = la de su matrícula más reciente',
-  branchOfStudent({ id: 'ALU-1', name: 'A' }, [enrol('1', 'ALU-1', 'FIL-PIU', '2026-01-01'), enrol('2', 'ALU-1', 'FIL-CHI', '2026-06-01')]) === 'FIL-CHI');
-check('Sin matrícula → sin sede', branchOfStudent({ id: 'ALU-9', name: 'Z' }, []) === undefined);
+  branchOfStudent({ id: 'ALU-1' }, [enrol('1', 'ALU-1', 'FIL-PIU', '2026-01-01'), enrol('2', 'ALU-1', 'FIL-CHI', '2026-06-01')]) === 'FIL-CHI');
+check('Sin matrícula → sin sede', branchOfStudent({ id: 'ALU-9' }, []) === undefined);
 check('Responsable sugerido: el que ya atiende ese horario',
   suggestedResponsible([mk('1', { responsible: 'Ana' }), mk('2', { responsible: 'Ana' }), mk('3', { responsible: 'Luis' })], 'FIL-PIU', '2026-10-20', '16:00') === 'Ana');
 check('Responsable sugerido: vacío si el horario está libre', suggestedResponsible(five, 'FIL-PIU', '2026-10-20', '17:00') === '');
@@ -351,11 +351,11 @@ const groups = groupByBlock([mk('1', { time: '17:00' }), mk('2'), mk('3', { time
 check('Agrupar por horario, en orden', groups.map(g => `${g.time}:${g.items.length}`).join() === '16:00:1,17:00:2');
 
 // ---------------------------------------------------------------- Frecuencia semanal
-const stu = (id: string, status = 'Activo'): Student => ({ id, doc: id, name: `Alumno ${id}`, age: 10, program: 'Kids', titular: 'T', status });
+const stu = (id: string): Student => ({ id, doc: id, name: `Alumno ${id}`, birthDate: '2016-01-01', guardianIds: [] });
 const week = weekOf('2026-10-20').slice(0, 6);
 const pend = studentsWithoutSession(
   {
-    students: [stu('ALU-1'), stu('ALU-2'), stu('ALU-3'), stu('ALU-4', 'Inactivo'), stu('ALU-5')],
+    students: [stu('ALU-1'), stu('ALU-2'), stu('ALU-3'), stu('ALU-4'), stu('ALU-5')],
     schedules: [
       mk('1', { studentId: 'ALU-1', student: 'Alumno ALU-1' }),
       mk('2', { studentId: 'ALU-2', student: 'Alumno ALU-2', status: 'Cancelado' }),
@@ -365,7 +365,7 @@ const pend = studentsWithoutSession(
   },
   week
 );
-check('Sin asesoría esta semana: activos que no reservaron (cancelada no cuenta; otra semana no cuenta; inactivos fuera)',
+check('Sin asesoría esta semana: activos que no reservaron (cancelada no cuenta; otra semana no cuenta; sin matrícula fuera)',
   pend.map(x => x.student.id).join() === 'ALU-2,ALU-3,ALU-5');
 check('Filtrar por sede',
   studentsWithoutSession(
@@ -374,10 +374,10 @@ check('Filtrar por sede',
   ).map(x => x.student.id).join() === 'ALU-3');
 
 // ---------------------------------------------------------------- Programa mostrado del alumno
-const fichaTeens: Student = { id: 'ALU-7', doc: '7', name: 'Diego', age: 15, program: 'Teens - Avanzado', titular: 'T', status: 'Activo' };
-check('El programa mostrado sale de la matrícula más reciente, no de la ficha (Teens se retiró)', studentProgramLabel(fichaTeens, [enrol('1', 'ALU-7', 'FIL-PIU', '2026-01-01')]) === 'Kids - N1');
-check('Sin matrícula se usa la ficha', studentProgramLabel(fichaTeens, []) === 'Teens - Avanzado');
-check('Sin nivel se muestra solo el programa', studentProgramLabel(fichaTeens, [{ ...enrol('1', 'ALU-7', 'FIL-PIU', ''), level: 'Sin nivel' }]) === 'Kids');
+const diego = { id: 'ALU-7' };
+check('El programa mostrado sale de la matrícula más reciente (la ficha del alumno ya no lo guarda)', studentProgramLabel(diego, [enrol('1', 'ALU-7', 'FIL-PIU', '2026-01-01')]) === 'Kids - N1');
+check('Sin matrícula no hay programa que mostrar', studentProgramLabel(diego, []) === '');
+check('Sin nivel se muestra solo el programa', studentProgramLabel(diego, [{ ...enrol('1', 'ALU-7', 'FIL-PIU', ''), level: 'Sin nivel' }]) === 'Kids');
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);
 process.exit(failed === 0 ? 0 : 1);

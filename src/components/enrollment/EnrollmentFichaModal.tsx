@@ -13,6 +13,9 @@ import { EditEnrollmentModal } from './EditEnrollmentModal';
 import { ResolveDropModal } from './ResolveDropModal';
 import { EnrollmentDocumentsPanel } from './EnrollmentDocumentsPanel';
 import { useChangeActions } from './useChangeActions';
+import { formatDisplayDate } from '../../utils/tariffs';
+import { ageText, studentAge } from '../../utils/identity';
+import { nextInstallment } from '../../utils/planState';
 
 export type FichaTab = 'resumen' | 'plan' | 'asesorias' | 'entrega' | 'documentos' | 'historial';
 const TABS: { id: FichaTab; label: string }[] = [
@@ -134,7 +137,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
               <div className="w-12 h-12 bg-primary-accent/10 rounded-full flex items-center justify-center text-primary-accent font-bold">{e.student.charAt(0)}</div>
               <div>
                 <h3 className="text-lg font-bold text-text-primary">{e.id} · {e.student}</h3>
-                <p className="text-sm text-text-secondary">{e.program}{e.level ? ` - ${e.level}` : ''} · {e.sede ?? '—'} · Matrícula del {e.date}</p>
+                <p className="text-sm text-text-secondary">{e.program}{e.level ? ` - ${e.level}` : ''} · {e.sede ?? '—'} · Matrícula del {formatDisplayDate(e.dateISO)}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 items-center">
@@ -196,25 +199,21 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
                 <div className="grid grid-cols-2 gap-4">
                   <Item label="Nombre">{student?.name ?? e.student}</Item>
                   <Item label="Documento">{student ? `${student.docType ?? 'DNI'} ${student.doc}` : ''}</Item>
-                  <Item label="Edad">{student ? `${student.age} años` : ''}</Item>
+                  <Item label="Edad">{student ? ageText(studentAge(student, today)) : ''}</Item>
                   <Item label="Nacimiento">{student?.birthDate}</Item>
                   <Item label="Situación">
                     {student?.occupationStatus === 'estudiando' ? 'Estudia' : student?.occupationStatus === 'trabajando' ? 'Trabaja' : student?.occupationStatus === 'ambos' ? 'Estudia y trabaja' : student?.occupationStatus === 'ninguna' ? 'Ninguna' : ''}
                   </Item>
                   <Item label="Institución / grado">{[student?.colegio, student?.grado].filter(Boolean).join(' · ')}</Item>
                   {student?.occupation && <Item label="Ocupación">{[student.occupation, student.workplace].filter(Boolean).join(' · ')}</Item>}
-                  {student && (!student.guardianIds || student.guardianIds.length === 0) && <Item label="Teléfono">{student.phone}</Item>}
+                  {student && student.guardianIds.length === 0 && <Item label="Teléfono">{student.phone}</Item>}
                 </div>
               </Card>
 
               <Card title={guardians.length > 1 ? 'Titulares' : 'Titular'}>
                 {guardians.length === 0 ? (
                   <p className="text-sm text-text-secondary">
-                    {student && (!student.guardianIds || student.guardianIds.length === 0)
-                      ? student.titular && student.titular !== student.name
-                        ? `${student.titular} (registro antiguo, sin ficha de titular vinculada).`
-                        : 'Alumno independiente: es su propio titular.'
-                      : 'Sin titular registrado.'}
+                    {student && student.guardianIds.length === 0 ? 'Alumno independiente: es su propio titular.' : 'Sin titular registrado.'}
                   </p>
                 ) : guardians.map((g, i) => (
                   <div key={g.id} className="space-y-1 pb-2 border-b border-border-soft last:border-0 last:pb-0">
@@ -228,7 +227,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
 
               <Card title="Matrícula">
                 <div className="grid grid-cols-2 gap-4">
-                  <Item label="Fecha">{e.date}</Item>
+                  <Item label="Fecha">{formatDisplayDate(e.dateISO)}</Item>
                   <Item label="Sede">{e.sede}</Item>
                   <Item label="Programa">{e.program}</Item>
                   <Item label="Nivel">{e.level}</Item>
@@ -262,7 +261,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
                 <Stat label="Total de la matrícula" value={usd(ficha.totalUSD)} />
                 <Stat label="Cobrado" value={usd(ficha.paidUSD)} tone="success" />
                 <Stat label="Saldo por cobrar" value={usd(ficha.balanceUSD)} tone={ficha.balanceUSD > 0 ? 'danger' : undefined} />
-                <Stat label="Próxima cuota" value={plan?.next && plan.next !== '-' ? plan.next : '—'} />
+                <Stat label="Próxima cuota" value={plan && nextInstallment(plan) ? formatDisplayDate(nextInstallment(plan)!.dueDateISO) : '—'} />
               </div>
 
               {plan ? (
@@ -286,7 +285,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
                           {plan.installments.map((i: any) => (
                             <tr key={i.id}>
                               <td className="px-4 py-2 font-medium text-text-primary">{i.name}</td>
-                              <td className="px-4 py-2 text-text-secondary">{i.dueDate}</td>
+                              <td className="px-4 py-2 text-text-secondary">{formatDisplayDate(i.dueDateISO)}</td>
                               <td className="px-4 py-2 text-right text-text-primary">{usd(i.amount)}</td>
                               <td className="px-4 py-2 text-right font-medium text-text-primary">{usd(i.balance)}</td>
                               <td className="px-4 py-2"><Badge variant={INSTALLMENT_TONE(i.status)}>{i.status}</Badge></td>
@@ -323,7 +322,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
                         {ficha.payments.map(({ payment: p, shareUSD, voided }) => (
                           <tr key={p.id} className={voided ? 'opacity-60' : ''}>
                             <td className="px-4 py-2 font-mono text-text-secondary">{p.id}</td>
-                            <td className="px-4 py-2 text-text-secondary">{p.date}</td>
+                            <td className="px-4 py-2 text-text-secondary">{formatDisplayDate(p.date)}</td>
                             <td className="px-4 py-2 text-text-primary">{p.concept}</td>
                             <td className="px-4 py-2 text-text-secondary">{p.method}</td>
                             <td className="px-4 py-2 text-text-secondary">{p.receipt}</td>

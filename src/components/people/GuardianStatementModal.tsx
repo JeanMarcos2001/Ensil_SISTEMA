@@ -187,7 +187,7 @@ export function GuardianStatementModal({ guardianId, onClose }: Props) {
                     <tbody className="divide-y divide-border-soft">
                       {statement.payments.map(({ payment, enrollmentIds, shareUSD, voided }) => (
                         <tr key={payment.id} className={voided ? 'text-text-muted' : ''}>
-                          <td className="px-4 py-2 whitespace-nowrap">{payment.date}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{formatDisplayDate(payment.date)}</td>
                           <td className="px-4 py-2">{payment.receipt}</td>
                           <td className="px-4 py-2 text-xs">{enrollmentIds.join(', ')}</td>
                           <td className="px-4 py-2">{payment.method}</td>

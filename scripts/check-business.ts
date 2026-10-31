@@ -3,12 +3,13 @@
  * cambio de programa, traslado de sede, renovación, contrato y ficha, mora, recordatorios y cartera.
  * Ejecutar: npx tsx scripts/check-business.ts
  */
-import type { Branch, CashClosure, CashMovement, ChangeRequest, ContractTemplate, Enrollment, Guardian, Level, Payment, PettyCashMovement, Plan, Program, Role, Schedule, Student, Tariff, PaymentType } from '../src/context/DataContext';
+import type { Branch, CashClosure, CashMovement, ChangeRequest, ContractTemplate, Enrollment, Guardian, Installment, Level, Payment, PettyCashMovement, Plan, Program, Role, Schedule, Student, Tariff, PaymentType } from '../src/context/DataContext';
 import { APPROVAL_POLICY, PERM, canRequest, canResolve, can } from '../src/utils/authority';
 import { NOTE_SERIES, allowedNoteModes, buildCreditNote, documentOf, nextNoteNumber, noteLabel, parseNoteNumber, validateNoteChoice } from '../src/utils/creditNotes';
 import { buildClosure, closedMessage, closedUntil, closureDrift, expectedAt, isDateClosed, validateClosure, validateReopen } from '../src/utils/cashClosure';
 import { DEFAULT_FUND, refillNeeded, validateFund, validatePettyInput, emptyPettyInput } from '../src/utils/pettyCash';
-import { daysOverdue, installmentState, planState, recomputePlan } from '../src/utils/planState';
+import { daysOverdue, installmentState, nextInstallment, planState, recomputePlan } from '../src/utils/planState';
+import type { InstallmentStatus } from '../src/utils/statuses';
 import { applyDropToPlan, previewDrop, enrollmentPaidUSD } from '../src/utils/enrollmentDrop';
 import {
   REACTIVATION_WINDOW_DAYS, applyProgramChangeToPlan, applyReactivationToPlan, buildRenewalDraft, nextLevel, previewProgramChange, previewReactivation, previewTransfer,
@@ -83,12 +84,12 @@ check('Reposición = fondo − saldo (nunca negativa)', refillNeeded(DEFAULT_FUN
 check('Un gasto no supera el tope del fondo', !!validatePettyInput({ ...emptyPettyInput('Egreso', TODAY), category: 'Movilidad', concept: 'Taxi', amount: '250' }, petty, TODAY, DEFAULT_FUND).amount && !validatePettyInput({ ...emptyPettyInput('Egreso', TODAY), category: 'Movilidad', concept: 'Taxi', amount: '150' }, petty, TODAY, DEFAULT_FUND).amount);
 
 // ================================================================ Estado derivado de cuotas y planes
-const inst = (id: string, amount: number, balance: number, due: string, status: string, payments: any[] = [], extra: Record<string, unknown> = {}) => ({ id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDate: due, dueDateISO: due, status, payments, ...extra });
+const inst = (id: string, amount: number, balance: number, due: string, status: InstallmentStatus, payments: any[] = [], extra: Partial<Installment> = {}): Installment => ({ id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDateISO: due, status, payments, ...extra });
 check('Una cuota «Pendiente» vencida se ve «Vencida»', installmentState(inst('C1', 100, 100, '2026-10-01', 'Pendiente'), TODAY) === 'Vencida' && installmentState(inst('C1', 100, 100, '2026-11-01', 'Pendiente'), TODAY) === 'Pendiente');
 check('Parcial, pagada y cerradas', installmentState(inst('C1', 100, 40, '2026-11-01', 'Pendiente', [{ amount: 60 }]), TODAY) === 'Parcial' && installmentState(inst('C1', 100, 0, '2026-10-01', 'Pendiente'), TODAY) === 'Pagada' && installmentState(inst('C1', 100, 0, '2026-10-01', 'Anulada'), TODAY) === 'Anulada');
 check('Días de atraso', daysOverdue(inst('C1', 100, 100, '2026-10-13', 'Pendiente'), TODAY) === 10 && daysOverdue(inst('C1', 100, 100, '2026-11-13', 'Pendiente'), TODAY) === 0 && daysOverdue(inst('C1', 100, 0, '2026-10-13', 'Pagada'), TODAY) === 0);
 const basePlan = (over: Partial<Plan> = {}): Plan => ({
-  id: 'PLN-1', mat: 'MAT-1', titular: 'Juan Ruiz', type: 'Plan 4 cuotas', total: 800, balance: 400, next: '-', status: 'Al día',
+  id: 'PLN-1', mat: 'MAT-1', type: 'Plan 4 cuotas', total: 800, balance: 400, status: 'Al día',
   installments: [
     inst('C1', 200, 0, '2026-09-01', 'Pagada', [{ id: 'P1', paymentId: 'PAG-1', date: '2026-09-01', amount: 200, receipt: 'B001-1' }]),
     inst('C2', 200, 0, '2026-10-01', 'Pagada', [{ id: 'P2', paymentId: 'PAG-2', date: '2026-10-01', amount: 200, receipt: 'B001-2' }]),
@@ -96,9 +97,9 @@ const basePlan = (over: Partial<Plan> = {}): Plan => ({
     inst('C4', 200, 200, '2026-11-15', 'Pendiente'),
   ], ...over,
 });
-check('El plan se recalcula: atrasado, al día, completado, caída', planState(basePlan(), TODAY) === 'Atrasado' && planState(basePlan({ installments: basePlan().installments.map(i => (i.id === 'C3' ? { ...i, dueDate: '2026-11-01', dueDateISO: '2026-11-01' } : i)) }), TODAY) === 'Al día'
+check('El plan se recalcula: atrasado, al día, completado, caída', planState(basePlan(), TODAY) === 'Atrasado' && planState(basePlan({ installments: basePlan().installments.map(i => (i.id === 'C3' ? { ...i, dueDateISO: '2026-11-01' } : i)) }), TODAY) === 'Al día'
   && planState(basePlan({ installments: basePlan().installments.map(i => ({ ...i, balance: 0 })) }), TODAY) === 'Completado' && planState(basePlan({ status: 'Caída' }), TODAY) === 'Caída');
-check('recomputePlan: saldo y próxima cuota', (() => { const r = recomputePlan(basePlan(), TODAY); return r.balance === 400 && r.next === '2026-10-15' && r.status === 'Atrasado'; })());
+check('recomputePlan: saldo y estado; la próxima cuota se calcula de las cuotas', (() => { const r = recomputePlan(basePlan(), TODAY); return r.balance === 400 && nextInstallment(r)?.dueDateISO === '2026-10-15' && r.status === 'Atrasado'; })());
 
 // ================================================================ Reactivación, cambio de programa, traslado, renovación
 const branches: Branch[] = [
@@ -119,9 +120,9 @@ const tariff = (id: string, programId: string, levelId: string | undefined, tota
   id, name: `Tarifa ${id}`, programId, levelId, paymentTypeId: 'PT-4', branchId: 'all', currency: 'USD', basePrice: total, installments: [{ number: 1, concept: 'Pago', amount: total, dueDays: 0 }], startDate: '2026-01-01', status: 'Activo', ...over,
 });
 const tariffs = [tariff('T-K1', 'P-K', 'L-K1', 800), tariff('T-K2', 'P-K', 'L-K2', 900), tariff('T-T1', 'P-T', 'L-T1', 1000), tariff('T-A', 'P-A', undefined, 300)];
-const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '12345678', name: 'Mateo Ruiz', age: 9, program: 'Kids', titular: 'Juan Ruiz', status: 'Activo', guardianIds: ['G1'], ...over });
+const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '12345678', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'], ...over });
 const enrollment = (over: Partial<Enrollment> = {}): Enrollment => ({
-  id: 'MAT-1', date: '01 Sep 2026', dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', programId: 'P-K', level: 'Nivel 1', levelId: 'L-K1', status: 'Activa', plan: 'Al día',
+  id: 'MAT-1', dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', programId: 'P-K', level: 'Nivel 1', levelId: 'L-K1', status: 'Activa', guardianIds: ['G1'],
   branchId: 'FIL-PIU', sede: 'Piura', paymentTypeId: 'PT-4', paymentTypeName: 'Plan 4 cuotas', assignedPrice: 800, planId: 'PLN-1', verificationStatus: 'Pendiente', ...over,
 });
 const schedule = (id: string, over: Partial<Schedule> = {}): Schedule => ({ id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over });
@@ -130,13 +131,13 @@ const ctxOf = (over: Partial<ChangeContext> = {}): ChangeContext => ({
 });
 
 // --- Reactivación
-const dropped = (over: Partial<Enrollment> = {}) => enrollment({ status: 'Caída', plan: 'Caída', dropDate: '2026-10-20', ...over });
-const droppedPlan = () => applyDropToPlan(basePlan(), previewDrop({ enrollment: dropped(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [dropped()], payments: [], groups: [] }, '2026-10-20'), false);
+const dropped = (over: Partial<Enrollment> = {}) => enrollment({ status: 'Caída', dropDate: '2026-10-20', ...over });
+const droppedPlan = () => applyDropToPlan(basePlan(), previewDrop({ enrollment: dropped(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [dropped()], payments: [], groups: [] }, '2026-10-20'), false, TODAY);
 check('La caída marca lo anulado y lo condonado por separado', (() => {
-  const p = applyDropToPlan(basePlan(), previewDrop({ enrollment: enrollment(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [enrollment()], payments: [], groups: [] }, '2026-10-20'), true);
+  const p = applyDropToPlan(basePlan(), previewDrop({ enrollment: enrollment(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [enrollment()], payments: [], groups: [] }, '2026-10-20'), true, TODAY);
   return p.installments.find(i => i.id === 'C4')!.dropAnnulled === true && p.installments.find(i => i.id === 'C3')!.forgiven === true;
 })());
-const rc = (e: Enrollment, p: Plan) => ctxOf({ enrollments: [e], plans: [p], students: [student({ status: 'Inactivo' })] });
+const rc = (e: Enrollment, p: Plan) => ctxOf({ enrollments: [e], plans: [p], students: [student()] });
 check('Reactivar: se puede dentro del plazo', reactivationProblems(dropped(), rc(dropped(), droppedPlan())).length === 0);
 check('Reactivar: solo matrículas caídas', reactivationProblems(enrollment(), ctxOf()).length === 1);
 check('Reactivar: fuera de plazo corresponde renovar', /renovación/.test(reactivationProblems(dropped({ dropDate: '2026-06-01' }), rc(dropped({ dropDate: '2026-06-01' }), droppedPlan())).join(' ')) && REACTIVATION_WINDOW_DAYS === 90);
@@ -151,7 +152,7 @@ check('Reactivar: validación de fecha y motivo', (() => {
 })());
 check('Reactivar: restituye lo anulado con el calendario corrido y respeta lo condonado', (() => {
   const dp = droppedPlan();
-  const forgiving = applyDropToPlan(basePlan(), previewDrop({ enrollment: enrollment(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [enrollment()], payments: [], groups: [] }, '2026-10-20'), true);
+  const forgiving = applyDropToPlan(basePlan(), previewDrop({ enrollment: enrollment(), plan: basePlan(), schedules: [], monthly: [], students: [student()], enrollments: [enrollment()], payments: [], groups: [] }, '2026-10-20'), true, TODAY);
   const pv = previewReactivation(dropped(), rc(dropped(), dp), '2026-10-30');
   const pvForgiven = previewReactivation(dropped(), rc(dropped(), forgiving), '2026-10-30');
   const after = applyReactivationToPlan(dp, pv, TODAY);
@@ -285,7 +286,7 @@ check('Contrato: qué falta para generarlo', documentProblems('contract', docCtx
   && documentProblems('contract', docCtx({ company: { ...company, ruc: '' } })).some(p => /RUC/.test(p))
   && documentProblems('contract', docCtx({ plan: undefined })).some(p => /plan de pagos/.test(p))
   && documentProblems('contract', docCtx({ enrollment: dropped() })).some(p => /activas/.test(p)));
-check('Un menor sin titular no puede ser su propio contratante', documentProblems('contract', docCtx({ guardians: [], student: student({ age: 12, address: 'Calle' }) })).some(p => /menor de edad/.test(p)) && documentProblems('contract', docCtx({ guardians: [], student: student({ age: 30, address: 'Calle' }) })).length === 0);
+check('Un menor sin titular no puede ser su propio contratante', documentProblems('contract', docCtx({ guardians: [], student: student({ birthDate: '2014-01-01', address: 'Calle' }) })).some(p => /menor de edad/.test(p)) && documentProblems('contract', docCtx({ guardians: [], student: student({ birthDate: '1996-01-01', address: 'Calle' }) })).length === 0);
 check('La ficha solo exige tener al alumno', documentProblems('ficha', docCtx({ student: undefined })).length === 1 && documentProblems('ficha', docCtx({ plan: undefined, company: undefined })).length === 0);
 check('Numeración y versión: nuevo, igual, cambió', (() => {
   const built = buildContractDocument(docCtx());
@@ -338,7 +339,7 @@ check('Cobrar mora: crea la cuota «Mora», sube el saldo y no se cobra dos vece
 check('La mora cobrada no cuenta como cobrado del programa', enrollmentPaidUSD('MAT-1', [], [], basePlan({ installments: [inst('M1', 5, 0, '2026-10-23', 'Pagada', [{ amount: 5 }], { isMora: true }), inst('C1', 200, 0, '2026-09-01', 'Pagada', [{ amount: 200 }])] })) === 200);
 
 const remCtx = (plans: Plan[], e: Enrollment[] = [enrollment()]) => ({ plans, enrollments: e, students: [student()], guardians: [guardian], branches });
-const pl = (due: string, status = 'Pendiente') => basePlan({ installments: [inst('C3', 200, 200, due, status)] });
+const pl = (due: string, status: InstallmentStatus = 'Pendiente') => basePlan({ installments: [inst('C3', 200, 200, due, status)] });
 check('Recordatorio: una cuota que vence en 3 días entra en «3 días antes»', (() => { const r = buildReminders(remCtx([pl('2026-10-26')]), DEFAULT_POLICY, [], TODAY); return r.length === 1 && r[0].stage.offset === -3 && r[0].daysFromDue === -3 && /vence el 26 Oct 2026/.test(r[0].message); })());
 check('Recordatorio: nada si faltan más de 3 días', buildReminders(remCtx([pl('2026-10-30')]), DEFAULT_POLICY, [], TODAY).length === 0);
 check('Recordatorio: el día del vencimiento y después', buildReminders(remCtx([pl('2026-10-23')]), DEFAULT_POLICY, [], TODAY)[0].stage.kind === 'vencimiento' && buildReminders(remCtx([pl('2026-10-16')]), DEFAULT_POLICY, [], TODAY)[0].stage.offset === 7);
@@ -356,7 +357,7 @@ check('Registrar un recordatorio: canal, resultado y motivo si se omite', valida
 
 const pf = remCtx([
   basePlan(),
-  basePlan({ id: 'PLN-2', mat: 'MAT-2', titular: 'Ana Silva', installments: [inst('C1', 300, 300, '2026-07-01', 'Pendiente'), inst('C2', 300, 300, '2026-11-20', 'Pendiente')] }),
+  basePlan({ id: 'PLN-2', mat: 'MAT-2', installments: [inst('C1', 300, 300, '2026-07-01', 'Pendiente'), inst('C2', 300, 300, '2026-11-20', 'Pendiente')] }),
   basePlan({ id: 'PLN-3', mat: 'MAT-3', status: 'Completado', installments: [] }),
   basePlan({ id: 'PLN-4', mat: 'MAT-4', status: 'Caída', installments: [inst('C1', 100, 100, '2026-08-01', 'Pendiente'), inst('C2', 100, 100, '2026-12-01', 'Anulada')] }),
 ], [enrollment(), enrollment({ id: 'MAT-2', student: 'Ana Silva', studentId: 'ALU-2', branchId: 'FIL-CHI', sede: 'Chiclayo' }), enrollment({ id: 'MAT-3' }), enrollment({ id: 'MAT-4', status: 'Caída' })]);

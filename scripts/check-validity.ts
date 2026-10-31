@@ -37,7 +37,7 @@ const kids: Program = { id: '1', code: 'K', name: 'Kids', hasLevels: true, durat
 const prof: Program = { id: '5', code: 'P', name: 'Profesional', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' };
 const noWarranty: Program = { ...kids, id: '9', warranty: 0 };
 const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({
-  id, date: '', student: 'Mateo', studentId: 'ALU-1', program: 'Kids', programId: '1', level: 'N1', status: 'Activa', plan: 'Al día', ...over,
+  id, dateISO: '2026-01-01', student: 'Mateo', studentId: 'ALU-1', guardianIds: [], program: 'Kids', programId: '1', level: 'N1', branchId: 'FIL-PIU', status: 'Activa', ...over,
 });
 const first = (enrollmentId: string, date: string, over: Partial<Schedule> = {}): Schedule => ({
   id: `S-${enrollmentId}-${date}`, student: 'Mateo', studentId: 'ALU-1', program: 'Kids', level: 'N1', date, time: '16:00', duration: 60,
@@ -91,18 +91,18 @@ check('Todavía dentro del período de extensión sin habilitarla → base final
 check('Sin inicio no se puede habilitar', !canEnableExtension(V(enr('M1'), kids, [], '2026-12-31')));
 
 // ---------------------------------------------------------------- Alumnos que aparecen para programar
-const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo', age: 9, program: 'Kids', titular: 'T', status: 'Activo', ...over });
+const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo', birthDate: '2017-01-01', guardianIds: [], ...over });
 const cat = (enrollments: Enrollment[], schedules: Schedule[]) => ({ enrollments, programs: [kids, prof], schedules });
 check('Alumno con matrícula vigente → aparece', isStudentWorkable(student(), cat([enr('M1')], [s1]), '2026-12-01'));
 check('Alumno con la base terminada y sin extensión → deja de aparecer (sus datos siguen)', !isStudentWorkable(student(), cat([enr('M1')], [s1]), '2027-02-01'));
 check('Con la extensión habilitada → vuelve a aparecer', isStudentWorkable(student(), cat([ext], [s1]), '2027-02-01'));
-check('Alumno inactivo → no aparece', !isStudentWorkable(student({ status: 'Inactivo' }), cat([enr('M1')], [s1]), '2026-12-01'));
-check('Alumno sin matrículas registradas → no se altera (aparece)', isStudentWorkable(student(), cat([], []), '2026-12-01'));
+check('Alumno con todas sus matrículas caídas (inactivo) → no aparece', !isStudentWorkable(student(), cat([enr('M1', { status: 'Caída' })], [s1]), '2026-12-01'));
+check('Alumno sin matrícula → no aparece (primero se matricula)', !isStudentWorkable(student(), cat([], []), '2026-12-01'));
 check('Matrícula sin primera asesoría → aparece', isStudentWorkable(student(), cat([enr('M1')], []), '2027-02-01'));
 check('Con otra matrícula vigente (renovación) → aparece aunque la anterior terminó',
   isStudentWorkable(student(), cat([enr('M1'), enr('M2', { programId: '5', program: 'Profesional' })], [s1, first('M2', '2027-01-20')]), '2027-02-01'));
 check('Matrícula caída no cuenta', !isStudentWorkable(student(), cat([enr('M1', { status: 'Caída' })], [s1]), '2026-12-01'));
-check('Se reconoce al alumno por nombre cuando la matrícula no trae su id', isStudentWorkable(student(), cat([enr('M1', { studentId: undefined })], [s1]), '2026-12-01'));
+check('Solo cuentan las matrículas de ese id: una con el mismo nombre pero otro alumno no lo hace aparecer', !isStudentWorkable(student(), cat([enr('M1', { studentId: 'ALU-9' })], [s1]), '2026-12-01'));
 
 // ---------------------------------------------------------------- Límite para programar y aviso
 check('Límite para programar: fin de la base', studentLimit(student(), cat([enr('M1')], [s1]), '2026-12-01') === '2027-01-14');

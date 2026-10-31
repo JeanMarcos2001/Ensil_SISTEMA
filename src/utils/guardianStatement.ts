@@ -6,8 +6,9 @@
  * Todo en USD (moneda de la configuración comercial).
  */
 import type { Enrollment, Guardian, Payment, Plan, PromotionGroup, Student } from '../context/DataContext';
-import { enrollmentPaidUSD, installmentDueISO, paymentShareUSD } from './enrollmentDrop';
-import { roundMoney } from './tariffs';
+import { enrollmentPaidUSD, paymentShareUSD } from './enrollmentDrop';
+import { studentsOfGuardian } from './identity';
+import { formatDisplayDate, roundMoney } from './tariffs';
 
 export interface StatementContext {
   guardians: Guardian[];
@@ -59,9 +60,7 @@ export interface GuardianStatement {
   totals: { totalUSD: number; paidUSD: number; balanceUSD: number; overdueUSD: number; annulledUSD: number };
 }
 
-/** Alumnos a cargo del titular: por vínculo; los registros antiguos se reconocen por el nombre del titular. */
-export const studentsOfGuardian = (g: Guardian, students: Student[]): Student[] =>
-  students.filter(s => (s.guardianIds ? s.guardianIds.includes(g.id) : s.titular === g.name));
+export { studentsOfGuardian };
 
 const isVoid = (p: Payment) => /anulad|revers/i.test(p.status);
 
@@ -69,7 +68,7 @@ export function buildStatement(ctx: StatementContext, guardianId: string, today:
   const guardian = ctx.guardians.find(g => g.id === guardianId);
   if (!guardian) return undefined;
   const students = studentsOfGuardian(guardian, ctx.students);
-  const own = ctx.enrollments.filter(e => e.guardianIds?.includes(guardian.id) || students.some(s => (e.studentId ? e.studentId === s.id : e.student === s.name)));
+  const own = ctx.enrollments.filter(e => e.guardianIds.includes(guardian.id) || students.some(s => e.studentId === s.id));
 
   const rows: StatementEnrollment[] = own.map(enrollment => {
     const plan = ctx.plans.find(p => p.mat === enrollment.id);
@@ -78,8 +77,8 @@ export function buildStatement(ctx: StatementContext, guardianId: string, today:
     const pending: StatementInstallment[] = (plan?.installments ?? [])
       .filter(i => i.balance > 0 && !['Anulada', 'Refinanciada'].includes(i.status))
       .map(i => {
-        const dueISO = installmentDueISO(i);
-        return { id: i.id, name: i.name, dueISO, dueLabel: i.dueDate ?? dueISO, amount: i.amount, balance: roundMoney(i.balance), status: i.status, overdue: !!dueISO && dueISO < today };
+        const dueISO = i.dueDateISO;
+        return { id: i.id, name: i.name, dueISO, dueLabel: formatDisplayDate(dueISO), amount: i.amount, balance: roundMoney(i.balance), status: i.status, overdue: !!dueISO && dueISO < today };
       })
       .sort((a, b) => (a.dueISO || '9999').localeCompare(b.dueISO || '9999'));
     // Sin cuotas (contado ya cobrado o sin plan): el saldo es lo que falta del precio si la matrícula sigue activa

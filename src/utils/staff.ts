@@ -103,7 +103,6 @@ export function buildStaff(f: StaffForm, today: string, base?: Pick<Staff, 'code
     lastNameP: f.lastNameP.trim(),
     lastNameM: f.lastNameM.trim(),
     birthDate: f.birthDate,
-    age: ageOn(f.birthDate, today) ?? 0,
     gender: f.gender,
     civilStatus: f.civilStatus,
     hasChildren: f.hasChildren,

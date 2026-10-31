@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
-import { nextNumericId, nextSequentialId } from '../utils/ids';
+import { createIdAllocator, nextNumericId, nextSequentialId } from '../utils/ids';
 import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
@@ -35,6 +35,11 @@ import {
   DEFAULT_POLICY, chargeMoraOn, parsePolicy, validateMoraCharge, validatePolicy, validateReminderLog, type CollectionPolicy, type Reminder, type ReminderLog,
 } from '../utils/collections';
 import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils/refinance';
+import type { ContractStatus, EnrollmentStatus, InstallmentStatus, PaymentStatus, PlanStatus } from '../utils/statuses';
+import { recomputePlan } from '../utils/planState';
+import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
+import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers } from '../data/seedCatalog';
+import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 
@@ -54,32 +59,29 @@ export interface Guardian {
   lastNameM?: string;
   birthDate?: string;
   civilStatus?: string;
-  students: number;
-  enrollments: number;
-  balance: string;
+  // Alumnos, matrículas y saldo del titular NO se guardan: se derivan (utils/guardianStatement.ts).
 }
 
 export interface Student {
   id: string;
   doc: string;
   name: string;
-  age: number;
   grado?: string;
   colegio?: string;
-  program: string;
   fechaInicio?: string;
-  titular: string;
-  status: string;
+  // Titular, estado, programa y edad NO se guardan: se derivan de los vínculos, las matrículas y la fecha de nacimiento (utils/identity.ts).
   // Datos del registro de matrícula (asistente)
   docType?: string;
   names?: string;
   lastNameP?: string;
   lastNameM?: string;
-  birthDate?: string;
+  /** Fecha de nacimiento (AAAA-MM-DD): de aquí sale la edad. */
+  birthDate: string;
   phone?: string;
   email?: string;
   address?: string;
-  guardianIds?: string[];
+  /** Titulares del alumno (el primero es el principal). Vacío = alumno independiente, su propio titular. */
+  guardianIds: string[];
   relationship?: string; // parentesco con el titular; vacío si es independiente
   // Situación del alumno: estudia, trabaja, ambos o ninguna
   occupationStatus?: 'estudiando' | 'trabajando' | 'ambos' | 'ninguna';
@@ -90,18 +92,23 @@ export interface Student {
 
 export interface Enrollment {
   id: string;
-  date: string;
+  /** Fecha de la matrícula (AAAA-MM-DD): el único formato guardado; el texto «24 Mar 2024» se arma al mostrar. */
+  dateISO: string;
+  /** Alumno de la matrícula (por id). */
+  studentId: string;
+  /** Copia del nombre para listar y buscar; se corrige con `syncStudentName` (utils/identity.ts). */
   student: string;
+  /** Programa, nivel y sede: el id manda; el texto es una copia que se corrige con `syncCatalogLabels`. */
+  programId: string;
   program: string;
-  programId?: string;
-  level: string;
   levelId?: string;
+  level: string;
+  branchId: string;
   sede?: string;
-  branchId?: string;
   asesor?: string;
   origen?: string;
-  status: string;
-  plan: string;
+  /** Guardado: «Caída» es un hecho de la matrícula. El estado del plan se deriva (utils/planState.ts). */
+  status: EnrollmentStatus;
   verificationStatus?: 'Pendiente' | 'Verificado Incompleto' | 'Verificado Completo';
   verifiedItems?: string[]; // IDs of items delivered
   verificationDate?: string;
@@ -109,9 +116,8 @@ export interface Enrollment {
   verificationObservation?: string;
 
   // Datos del registro de matrícula (asistente)
-  studentId?: string;
-  guardianIds?: string[];
-  dateISO?: string;
+  /** Titulares que firmaron la matrícula (el primero es el principal). Vacío = alumno independiente. */
+  guardianIds: string[];
   asesorId?: string;
   origenId?: string;
   observation?: string;
@@ -327,16 +333,60 @@ export interface PromotionGroup {
   paymentId?: string; // Pago grupal único
 }
 
+/** Pago aplicado a una cuota (el pago completo, con sus partes y su comprobante, está en `Payment`). */
+export interface InstallmentPayment {
+  id: string;
+  /** Pago global del que viene este cobro: permite reversarlo y reponer exactamente esta cuota. */
+  paymentId?: string;
+  /** Fecha del cobro (AAAA-MM-DD). */
+  date: string;
+  amount: number;
+  receipt: string;
+}
+
+/** Cuota u obligación de un plan. La fecha de vencimiento se guarda solo en ISO (el texto se arma al mostrar). */
+export interface Installment {
+  id: string;
+  name: string;
+  amount: number;
+  balance: number;
+  /** Vencimiento (AAAA-MM-DD). */
+  dueDateISO: string;
+  /** Se guarda al registrar cada cobro, pero lo que se muestra es el estado calculado a hoy (`installmentState`): «Vencida» nunca se guarda. */
+  status: InstallmentStatus;
+  payments: InstallmentPayment[];
+  /** Contado en 2 partes: el monto de la parte se define al cobrar. */
+  variable?: boolean;
+  /** Mora cobrada como cuota aparte y la cuota que la originó. */
+  isMora?: boolean;
+  moraOf?: string;
+  moraCharged?: number;
+  /** Refinanciación: cuota de origen y cuota nueva. */
+  refinancedFrom?: string;
+  refinancedTo?: string;
+  /** Reactivación de una matrícula caída: vencimiento anterior (AAAA-MM-DD). */
+  reactivatedFrom?: string;
+  /** Cuota futura anulada por la caída de la matrícula (se restituye si se reactiva). */
+  dropAnnulled?: boolean;
+  /** Deuda vencida condonada al aprobar la caída (no se restituye). */
+  forgiven?: boolean;
+  note?: string;
+  createdAt?: string;
+}
+
+/**
+ * Plan de pagos de una matrícula. El titular no se guarda (sale de la matrícula, `holderNameOfPlan`) ni la próxima cuota (sale
+ * de las cuotas abiertas). `balance` y `status` son un resumen guardado que solo escribe `recomputePlan`.
+ */
 export interface Plan {
   id: string;
+  /** Matrícula a la que pertenece. */
   mat: string;
-  titular: string;
   type: string;
   total: number;
   balance: number;
-  next: string;
-  status: string;
-  installments: any[];
+  status: PlanStatus;
+  installments: Installment[];
 }
 
 /**
@@ -357,13 +407,15 @@ export interface PaymentPart {
 
 export interface Payment {
   id: string;
+  /** Fecha del pago (AAAA-MM-DD). */
   date: string;
+  /** Constancia: nombre del alumno el día del pago. NO se reescribe si luego cambia (un comprobante no cambia). */
   student: string;
   concept: string;
   amount: number;
   method: string;
   receipt: string;
-  status: string;
+  status: PaymentStatus;
   /** Comprobante que la empresa entrega (boleta / factura). `receipt` es su texto: «B001-000123». */
   document?: PaymentDocument;
   /** Si el pago se reversó: cuándo, quién, por qué y si se devolvió el dinero. */
@@ -700,7 +752,7 @@ export interface Schedule {
   /** @deprecated No existe modalidad virtual. */
   modality?: string;
   status: string; // Reservado | Reprogramado | Asistió | Faltó | Cancelado
-  studentId?: string; // Alumno registrado al que pertenece la reserva
+  studentId: string; // Alumno al que pertenece la reserva (por id; `student` es solo una copia del nombre)
   /** Sede de la asesoría = sede del alumno (cada sede tiene sus propios bloques, cupos y cronogramas). */
   branchId?: string;
   observations?: string;
@@ -859,8 +911,8 @@ export interface Staff {
   names: string;
   lastNameP: string;
   lastNameM: string;
+  /** Fecha de nacimiento (AAAA-MM-DD): de aquí sale la edad. */
   birthDate: string;
-  age: number;
   gender?: string;
   civilStatus?: string;
   hasChildren?: boolean;
@@ -884,7 +936,7 @@ export interface Contract {
   type: string;
   startDate: string;
   endDate?: string;
-  status: string;
+  status: ContractStatus;
   shift?: string;
   pensionSystem?: string;
   pensionFund?: string;
@@ -1272,10 +1324,10 @@ interface DataContextType {
   /** Crea el alumno (correlativo ALU-000) y suma uno al contador de alumnos de sus titulares. */
   addStudent: (student: Omit<Student, 'id'>) => Student;
   updateStudent: (id: string, student: Partial<Student>) => void;
-  deleteStudent: (id: string) => void;
-  addGuardian: (guardian: Omit<Guardian, 'id' | 'students' | 'enrollments' | 'balance'>) => Guardian;
+  deleteStudent: (id: string) => StockResult;
+  addGuardian: (guardian: Omit<Guardian, 'id'>) => Guardian;
   updateGuardian: (id: string, guardian: Partial<Guardian>) => void;
-  deleteGuardian: (id: string) => void;
+  deleteGuardian: (id: string) => StockResult;
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
   /** Habilita el período de extensión (garantía) de una matrícula por vencer o con la duración base terminada. */
@@ -1385,78 +1437,17 @@ interface DataContextType {
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
 
+/** Semilla de personas, matrículas, planes, pagos y caja (se arma una vez al abrir la página, con fechas relativas a hoy). */
+const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
+
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [guardians, setGuardians] = useState<Guardian[]>([
-    { id: '1', name: 'Juan Ruiz', doc: '45678901', phone: '987654321', email: 'juan@email.com', students: 1, enrollments: 1, balance: '$800' },
-    { id: '2', name: 'María Castro', doc: '45678902', phone: '987654322', email: 'maria@email.com', students: 1, enrollments: 1, balance: '$100' },
-    { id: '3', name: 'Pedro Vega', doc: '45678903', phone: '987654323', email: 'pedro@email.com', students: 1, enrollments: 1, balance: '$1,750' },
-    { id: '4', name: 'Ana Silva', doc: '45678904', phone: '987654324', email: 'ana@email.com', students: 1, enrollments: 1, balance: '$0' },
-    { id: '5', name: 'Carlos Torres', doc: '45678905', phone: '987654325', email: 'carlos@email.com', students: 1, enrollments: 1, balance: '$0' },
-  ]);
-
-  const [students, setStudents] = useState<Student[]>([
-    { id: 'ALU-001', doc: '76543210', name: 'Mateo Ruiz', age: 8, program: 'Kids - Nivel 1', titular: 'Juan Ruiz', status: 'Activo' },
-    { id: 'ALU-002', doc: '76543211', name: 'Sofia Castro', age: 14, program: 'Kids - Nivel 2', titular: 'María Castro', status: 'Activo' },
-    { id: 'ALU-003', doc: '76543212', name: 'Lucas Vega', age: 9, program: 'Kids - Nivel 3', titular: 'Pedro Vega', status: 'Inactivo' },
-    { id: 'ALU-004', doc: '76543213', name: 'Valentina Silva', age: 5, program: 'Pre-Kids - Nivel 1', titular: 'Ana Silva', status: 'Activo' },
-    { id: 'ALU-005', doc: '76543214', name: 'Diego Torres', age: 15, program: 'Kids - Nivel 1', titular: 'Carlos Torres', status: 'Activo' },
-  ]);
-
-  const [enrollments, setEnrollments] = useState<Enrollment[]>([
-    { id: 'MAT-2024-001', date: '24 Mar 2024', student: 'Mateo Ruiz', program: 'Kids', programId: '1', level: 'Nivel 1', levelId: '1', sede: 'Piura', branchId: 'FIL-PIU', status: 'Activa', plan: 'Al día' },
-    { id: 'MAT-2024-002', date: '23 Mar 2024', student: 'Sofia Castro', program: 'Kids', programId: '1', level: 'Nivel 2', levelId: '2', sede: 'Chiclayo', branchId: 'FIL-CHI', status: 'Activa', plan: 'Parcial' },
-    { id: 'MAT-2024-003', date: '22 Mar 2024', student: 'Lucas Vega', program: 'Kids', programId: '1', level: 'Nivel 3', levelId: '3', sede: 'Piura', branchId: 'FIL-PIU', status: 'Caída', plan: 'Atrasado' },
-    { id: 'MAT-2024-004', date: '20 Mar 2024', student: 'Valentina Silva', program: 'Pre-Kids', programId: '2', level: 'Nivel 1', levelId: '4', sede: 'Chiclayo', branchId: 'FIL-CHI', status: 'Activa', plan: 'Al día' },
-    { id: 'MAT-2024-005', date: '19 Mar 2024', student: 'Diego Torres', program: 'Kids', programId: '1', level: 'Nivel 1', levelId: '1', sede: 'Piura', branchId: 'FIL-PIU', status: 'Activa', plan: 'Al día' },
-  ]);
-
-  const [plans, setPlans] = useState<Plan[]>([
-    { 
-      id: 'PLN-001', mat: 'MAT-2024-001', titular: 'Juan Ruiz', type: 'Plan 6 Cuotas', total: 1200, balance: 800, next: '15 Abr 2024', status: 'Al día',
-      installments: [
-        { id: 'C1', name: 'Cuota 1', amount: 200, balance: 0, dueDate: '15 Feb 2024', status: 'Pagada', payments: [{ id: 'P1', date: '10 Feb 2024', amount: 200, receipt: 'B001-000123' }] },
-        { id: 'C2', name: 'Cuota 2', amount: 200, balance: 0, dueDate: '15 Mar 2024', status: 'Pagada', payments: [{ id: 'P2', date: '12 Mar 2024', amount: 200, receipt: 'B001-000456' }] },
-        { id: 'C3', name: 'Cuota 3', amount: 200, balance: 200, dueDate: '15 Abr 2024', status: 'Pendiente', payments: [] },
-        { id: 'C4', name: 'Cuota 4', amount: 200, balance: 200, dueDate: '15 May 2024', status: 'Pendiente', payments: [] },
-        { id: 'C5', name: 'Cuota 5', amount: 200, balance: 200, dueDate: '15 Jun 2024', status: 'Pendiente', payments: [] },
-        { id: 'C6', name: 'Cuota 6', amount: 200, balance: 200, dueDate: '15 Jul 2024', status: 'Pendiente', payments: [] },
-      ]
-    },
-    { 
-      id: 'PLN-002', mat: 'MAT-2024-002', titular: 'María Castro', type: 'Plan 6 Cuotas', total: 1200, balance: 100, next: '15 Abr 2024', status: 'Parcial',
-      installments: [
-        { id: 'C1', name: 'Cuota 1', amount: 200, balance: 0, dueDate: '15 Feb 2024', status: 'Pagada', payments: [{ id: 'P1', date: '10 Feb 2024', amount: 200, receipt: 'B001-000123' }] },
-        { id: 'C2', name: 'Cuota 2', amount: 200, balance: 0, dueDate: '15 Mar 2024', status: 'Pagada', payments: [{ id: 'P2', date: '12 Mar 2024', amount: 200, receipt: 'B001-000456' }] },
-        { id: 'C3', name: 'Cuota 3', amount: 200, balance: 100, dueDate: '15 Abr 2024', status: 'Parcial', payments: [{ id: 'P3', date: '10 Abr 2024', amount: 100, receipt: 'B001-000501' }] },
-        { id: 'C4', name: 'Cuota 4', amount: 200, balance: 200, dueDate: '15 May 2024', status: 'Pendiente', payments: [] },
-        { id: 'C5', name: 'Cuota 5', amount: 200, balance: 200, dueDate: '15 Jun 2024', status: 'Pendiente', payments: [] },
-        { id: 'C6', name: 'Cuota 6', amount: 200, balance: 200, dueDate: '15 Jul 2024', status: 'Pendiente', payments: [] },
-      ]
-    },
-    { 
-      id: 'PLN-003', mat: 'MAT-2024-003', titular: 'Pedro Vega', type: 'Plan 12 Cuotas', total: 2100, balance: 1750, next: '05 Abr 2024', status: 'Atrasado',
-      installments: [
-        { id: 'C1', name: 'Cuota 1', amount: 175, balance: 0, dueDate: '05 Ene 2024', status: 'Pagada', payments: [{ id: 'P3', date: '04 Ene 2024', amount: 175, receipt: 'F001-000890' }] },
-        { id: 'C2', name: 'Cuota 2', amount: 175, balance: 0, dueDate: '05 Feb 2024', status: 'Pagada', payments: [{ id: 'P4', date: '05 Feb 2024', amount: 175, receipt: 'F001-000912' }] },
-        { id: 'C3', name: 'Cuota 3', amount: 175, balance: 75, dueDate: '05 Mar 2024', status: 'Parcial', payments: [{ id: 'P5', date: '10 Mar 2024', amount: 100, receipt: 'B001-000501' }] },
-        { id: 'C4', name: 'Cuota 4', amount: 175, balance: 175, dueDate: '05 Abr 2024', status: 'Vencida', payments: [] },
-      ]
-    },
-    { 
-      id: 'PLN-004', mat: 'MAT-2024-004', titular: 'Ana Silva', type: 'Contado', total: 1000, balance: 0, next: '-', status: 'Al día',
-      installments: []
-    },
-    { 
-      id: 'PLN-005', mat: 'MAT-2024-005', titular: 'Carlos Torres', type: 'Contado', total: 1500, balance: 0, next: '-', status: 'Al día',
-      installments: []
-    },
-  ]);
-
-  const [payments, setPayments] = useState<Payment[]>([
-    { id: 'PAG-001', date: '24 Mar 2024', student: 'Mateo Ruiz', concept: 'Cuota 1', amount: 250.00, method: 'Transferencia', receipt: 'B001-000123', status: 'Aprobado' },
-    { id: 'PAG-002', date: '23 Mar 2024', student: 'Sofia Castro', concept: 'Matrícula', amount: 150.00, method: 'Yape', receipt: 'B001-000124', status: 'Aprobado' },
-    { id: 'PAG-003', date: '22 Mar 2024', student: 'Lucas Vega', concept: 'Artículos', amount: 80.00, method: 'Efectivo', receipt: 'B001-000125', status: 'Aprobado' },
-  ]);
+  const allocId = useRef(createIdAllocator()).current;
+  // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
+  const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
+  const [students, setStudents] = useState<Student[]>(() => structuredClone(PEOPLE_SEED.students));
+  const [enrollments, setEnrollments] = useState<Enrollment[]>(() => structuredClone(PEOPLE_SEED.enrollments));
+  const [plans, setPlans] = useState<Plan[]>(() => structuredClone(PEOPLE_SEED.plans));
+  const [payments, setPayments] = useState<Payment[]>(() => structuredClone(PEOPLE_SEED.payments));
 
   const [items, setItems] = useState<Item[]>([
     { 
@@ -1539,11 +1530,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     },
   ]);
 
-  const [cashMovements, setCashMovements] = useState<CashMovement[]>([
-    { id: 'CJ-001', date: '2026-10-09T10:30:00.000Z', kind: 'Ingreso', concept: 'Ingreso Cuota', reference: 'PLN-001 / Juan Ruiz', currency: 'PEN', amount: 1200, amountUSD: 0, method: 'Transferencia', user: 'Ana G.', status: 'Aplicado' },
-    { id: 'CJ-002', date: '2026-10-09T09:15:00.000Z', kind: 'Ingreso', concept: 'Ingreso Matrícula', reference: 'MAT-2024-002 / María Castro', currency: 'PEN', amount: 950, amountUSD: 0, method: 'Efectivo', user: 'Carlos R.', status: 'Aplicado' },
-    { id: 'CJ-003', date: '2026-10-08T17:45:00.000Z', kind: 'Egreso', concept: 'Egreso', reference: 'Pago Proveedor Limpieza', currency: 'PEN', amount: 350, amountUSD: 0, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
-  ]);
+  const [cashMovements, setCashMovements] = useState<CashMovement[]>(() => structuredClone(PEOPLE_SEED.cashMovements));
   const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [cashClosures, setCashClosures] = useState<CashClosure[]>([]);
@@ -1566,7 +1553,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addCashMovement = (m: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }): CashMovement => {
     const created: CashMovement = {
       ...m,
-      id: `CJ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: allocId('CJ', cashMovements.map(x => x.id)),
       date: m.date ?? new Date().toISOString(),
       user: currentUser.name,
       status: 'Aplicado',
@@ -1707,30 +1694,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'DEV-2024-001', date: '2024-03-05', branch: 'Piura', material: 'Cartuchera', type: 'Devolución', qty: 1, reason: 'Devolución', user: 'Ventas Piura' },
   ]);
 
-  // Reservas de ejemplo con fechas relativas a hoy (siempre en días con atención y en horarios permitidos)
-  const seedDay = (offset: number) => {
-    const d = new Date();
-    d.setDate(d.getDate() + offset);
-    while (d.getDay() === 0) d.setDate(d.getDate() + 1); // domingo: sin atención
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  // Reservas de ejemplo con fechas relativas a hoy (siempre en días con atención y en horarios permitidos): `data/seedPeople.ts`
   // Diego Torres: su primera asesoría fue hace casi 3 meses, así que su duración base está por vencer (ejemplo de la alerta)
-  const expiringStart = (() => {
-    const d = addMonths(addDaysISO(todayLocalISO(), 10), -3);
-    return weekdayIndex(d) === 6 ? addDaysISO(d, 1) : d;
-  })();
-  const [schedules, setSchedules] = useState<Schedule[]>([
-    { id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-1', enrollmentId: 'MAT-2024-001' },
-    { id: '2', student: 'Sofia Castro', studentId: 'ALU-002', branchId: 'FIL-CHI', program: 'Kids', level: 'Nivel 2', date: seedDay(0), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado' },
-    { id: '3', student: 'Lucas Vega', studentId: 'ALU-003', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 3', date: seedDay(1), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Cancelado' },
-    { id: '4', student: 'Valentina Silva', studentId: 'ALU-004', branchId: 'FIL-CHI', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true, registrationId: 'REG-SEED-2', enrollmentId: 'MAT-2024-004' },
-    { id: '5', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(3), time: '18:00', duration: 60, responsible: 'Lic. María Torres', status: 'Reservado' },
-    { id: '6', student: 'Diego Torres', studentId: 'ALU-005', branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: expiringStart, time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-3', enrollmentId: 'MAT-2024-005' },
-  ]);
+  const expiringStart = PEOPLE_SEED.expiringStart;
+  const [schedules, setSchedules] = useState<Schedule[]>(() => buildScheduleSeed(PEOPLE_SEED));
 
   // Historial de Psicopedagogía: cada cambio de la agenda deja un evento
   const [psyEvents, setPsyEvents] = useState<PsyEvent[]>([
-    { id: 'EVT-0001', at: new Date(Date.now() - 86400000).toISOString(), by: 'Superadmin', subject: 'asesoria', refId: '3', studentId: 'ALU-003', type: 'Cancelada', initiator: 'Alumno o titular', reason: 'Enfermedad del alumno', detail: 'Avisó la mañana anterior.', from: { date: seedDay(1), time: '16:00', responsible: 'Lic. María Torres' } },
+    { id: 'EVT-0001', at: new Date(Date.now() - 86400000).toISOString(), by: 'Superadmin', subject: 'asesoria', refId: 'SES-003', studentId: 'ALU-003', type: 'Cancelada', initiator: 'Alumno o titular', reason: 'Enfermedad del alumno', detail: 'Avisó la mañana anterior.', from: { date: seedDay(1), time: '16:00', responsible: 'Lic. María Torres' } },
   ]);
   const eventSeq = useRef(2);
   const nextEventId = () => `EVT-${String(eventSeq.current++).padStart(4, '0')}`;
@@ -1750,7 +1721,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   );
 
   const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
-    const created: Schedule = { ...data, id: nextNumericId(schedules.map(x => x.id)) };
+    const created: Schedule = { ...data, id: allocId('SES', schedules.map(x => x.id)) };
     setSchedules(prev => [...prev, created]);
     pushEvents(buildScheduleEvents(undefined, created, undefined, currentUser.name, new Date().toISOString(), nextEventId));
     return created;
@@ -1786,14 +1757,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const [trackings, setTrackings] = useState<Tracking[]>([
-    { id: '1', studentId: 'ALU-001', date: '2026-03-24', status: 'Asistió', metrics: { modulo: 'Módulo 3', velocidad: 250, comprension: 85 }, observations: 'Buen progreso en lectura rápida.' },
-    { id: '2', studentId: 'ALU-001', date: '2026-03-17', status: 'Asistió', metrics: { modulo: 'Módulo 3', velocidad: 220, comprension: 80 }, observations: 'Se recomienda repasar ejercicios de fijación.' },
-    { id: '3', studentId: 'ALU-001', date: '2026-03-10', status: 'Faltó', metrics: null, observations: 'Avisó con anticipación por motivos de salud.' },
-    { id: '4', studentId: 'ALU-002', date: '2026-03-25', status: 'Asistió', metrics: { modulo: 'Módulo 5', velocidad: 300, comprension: 90 }, observations: 'Excelente comprensión.' },
-    { id: '6', studentId: 'ALU-005', scheduleId: '6', date: expiringStart, status: 'Asistió', metrics: { nivel: 'Nivel 1', sesion: 'Sesión 1', velocidad: 110, comprension: 75 }, observations: 'Primera asesoría: diagnóstico inicial.', checklist: { guardianAttended: true, methodologyExplained: true, itemsExplained: true } },
-    { id: '5', studentId: 'ALU-004', date: '2026-03-26', status: 'Asistió', metrics: { nivel: 'Nivel 1', sesion: 'Sesión 2', velocidad: 100, comprension: 70 }, observations: 'Mejorando la pronunciación.' },
-  ]);
+  const [trackings, setTrackings] = useState<Tracking[]>(() => buildTrackingSeed(PEOPLE_SEED));
 
   const seedMonth = (iso: string) => ({ mes: MONTHS[Number(iso.split('-')[1]) - 1], anio: Number(iso.split('-')[0]) });
   const [monthlySchedules, setMonthlySchedules] = useState<MonthlySchedule[]>([
@@ -1935,7 +1899,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
-  const [dropRequests, setDropRequests] = useState<DropRequest[]>([]);
+  const [dropRequests, setDropRequests] = useState<DropRequest[]>(() => structuredClone(PEOPLE_SEED.dropRequests));
   const [enrollmentChanges, setEnrollmentChanges] = useState<EnrollmentChange[]>([]);
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
@@ -1957,7 +1921,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addNotification = (notif: Omit<Notification, 'id' | 'date' | 'read'>) => {
     const newNotif: Notification = {
       ...notif,
-      id: `NOT-${Date.now()}`,
+      id: allocId('NOT', notifications.map(n => n.id)),
       date: new Date().toISOString(),
       read: false
     };
@@ -2009,7 +1973,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // Add incident if not ok
       if (ri.status !== 'ok') {
         const newIncident: ReceptionIncident = {
-          id: `INC-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+          id: allocId('INC', incidents.map(x => x.id)),
           docId,
           docType,
           itemId: ri.itemId,
@@ -2046,146 +2010,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const [staff, setStaff] = useState<Staff[]>([
-    { id: '1', code: '000001', docType: 'DNI', docNumber: '12345678', names: 'Juan', lastNameP: 'Pérez', lastNameM: 'García', birthDate: '1985-05-15', age: 38, gender: 'Masculino', civilStatus: 'Casado(a)', hasChildren: true, childrenCount: 2, educationLevel: 'Universitario', profession: 'Psicólogo', specialty: 'Psicopedagogía', phone: '987654321', personalEmail: 'juan.perez.personal@gmail.com', address: 'Av. Larco 123, Miraflores', status: 'Activo', observations: 'Docente principal' },
-    { id: '2', code: '000002', docType: 'DNI', docNumber: '87654321', names: 'María', lastNameP: 'Torres', lastNameM: 'López', birthDate: '1990-08-20', age: 33, gender: 'Femenino', civilStatus: 'Soltero(a)', hasChildren: false, childrenCount: 0, educationLevel: 'Técnico', profession: 'Administradora', specialty: 'Gestión Educativa', phone: '912345678', personalEmail: 'maria.torres.personal@gmail.com', address: 'Calle Lima 456, San Isidro', status: 'Activo', observations: 'Coordinadora de filial' },
-  ]);
+  const [staff, setStaff] = useState<Staff[]>(() => seedStaff());
 
-  const [contracts, setContracts] = useState<Contract[]>([
-    { id: 'CON-001', staffId: '1', type: 'Indeterminado', startDate: '2023-01-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'AFP', pensionFund: 'Integra', grossSalary: 3500, contribution: 466.8, incomeTax: 84.88, familyAllowance: 113, netSalary: 3061.32, observations: 'Contrato inicial' },
-    { id: 'CON-002', staffId: '2', type: 'Plazo Fijo', startDate: '2023-06-01', endDate: '2027-05-31', status: 'Vigente', shift: 'Full time', pensionSystem: 'ONP', grossSalary: 2800, contribution: 364, incomeTax: 8.03, familyAllowance: 0, netSalary: 2427.97, observations: 'Renovación anual' },
-  ]);
+  const [contracts, setContracts] = useState<Contract[]>(() => seedContracts());
 
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
 
-  const [assignments, setAssignments] = useState<Assignment[]>([
-    { id: 'ASG-001', staffId: '1', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicólogo Senior', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-002', staffId: '2', branch: 'Chiclayo', area: 'Administración', role: 'Coordinadora', systemRole: 'Administración', startDate: '2023-06-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-003', staffId: '2', branch: 'Chiclayo', area: 'Psicopedagogía', role: 'Psicopedagoga', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
-  ]);
+  const [assignments, setAssignments] = useState<Assignment[]>(() => seedAssignments());
 
   const [companies, setCompanies] = useState<Company[]>([
     { id: '1', ruc: '20123456789', name: 'Educación y Cultura S.A.C.', commercialName: 'ENSIL Central', status: 'Activo' },
     { id: '2', ruc: '20987654321', name: 'Instituto de Idiomas del Norte S.A.', commercialName: 'ENSIL Norte', status: 'Activo' },
   ]);
 
-  const [branches, setBranches] = useState<Branch[]>([
-    { 
-      id: 'FIL-PIU', 
-      name: 'Piura', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Av. Sullana #280', 
-      reference: 'Frente al Museo Vicus (Almacén Central)',
-      department: 'Piura',
-      province: 'Piura',
-      district: 'Piura',
-      phoneFixed: '073-617445',
-      phoneMobile: '933732053'
-    },
-    { 
-      id: 'FIL-CHI', 
-      name: 'Chiclayo', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Calle Andalucía #150 Urb. San Juan', 
-      reference: 'Altura del Hotel Tumbas Reales',
-      department: 'Lambayeque',
-      province: 'Chiclayo',
-      district: 'Chiclayo',
-      phoneFixed: '074-525632',
-      phoneMobile: '905464734'
-    },
-    { 
-      id: 'FIL-CAJ', 
-      name: 'Cajamarca', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Guadalupe #466', 
-      reference: 'Huánuco y Silva Santiesteban',
-      department: 'Cajamarca',
-      province: 'Cajamarca',
-      district: 'Cajamarca',
-      phoneFixed: '076-772573',
-      phoneMobile: '933722476'
-    },
-    { 
-      id: 'FIL-LOL', 
-      name: 'Los Olivos', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Carlos Monge #233', 
-      reference: 'Espalda cdra. 4 Av. Izaguirre',
-      department: 'Lima',
-      province: 'Lima',
-      district: 'Los Olivos',
-      phoneFixed: '01-7504687',
-      phoneMobile: '960508686'
-    },
-    { 
-      id: 'FIL-SIS', 
-      name: 'San Isidro', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Calle Francisco de Zela #2575', 
-      reference: '1/2 cdra. del Touring',
-      department: 'Lima',
-      province: 'Lima',
-      district: 'San Isidro',
-      phoneMobile: '960508686'
-    },
-    { 
-      id: 'FIL-HUA', 
-      name: 'Huancayo', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Arequipa #218', 
-      reference: 'Complejo Salesiano Sta. Rosa',
-      department: 'Junín',
-      province: 'Huancayo',
-      district: 'El Tambo',
-      phoneFixed: '064-419923',
-      phoneMobile: '992195898'
-    },
-    { 
-      id: 'FIL-PUN', 
-      name: 'Puno', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Moquegua #422 (2° piso)', 
-      reference: 'Frente al Restaurant Tamis',
-      department: 'Puno',
-      province: 'Puno',
-      district: 'Puno',
-      phoneFixed: '051-352969',
-      phoneMobile: '961274101'
-    },
-    { 
-      id: 'FIL-JUL', 
-      name: 'Juliaca', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Bolívar #329', 
-      reference: 'Costado del Mía Market',
-      department: 'Puno',
-      province: 'San Román',
-      district: 'Juliaca',
-      phoneMobile: '913632393'
-    },
-    { 
-      id: 'FIL-TAC', 
-      name: 'Tacna', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Av. Cusco #485', 
-      reference: 'Frente a Mueblería Rony',
-      department: 'Tacna',
-      province: 'Tacna',
-      district: 'Tacna',
-      phoneFixed: '052-638377',
-      phoneMobile: '933746179'
-    },
-  ]);
+  const [branches, setBranches] = useState<Branch[]>(() => seedBranches());
 
   const [roles, setRoles] = useState<Role[]>([
     { id: 'ROL-001', name: 'Administrador Global', desc: 'Acceso total al sistema y configuraciones', users: 3, status: 'Activo' },
@@ -2195,12 +2033,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'ROL-005', name: 'Cajero', desc: 'Gestión de caja y pagos', users: 8, status: 'Activo' },
   ]);
 
-  const [users, setUsers] = useState<User[]>([
-    { id: 'USR-001', name: 'Admin Sistema', email: 'admin@ensil.edu.pe', role: 'Administrador Global', branch: 'Todas', lastAccess: 'Hace 5 min', status: 'Activo' },
-    { id: 'USR-002', name: 'Laura Martínez', email: 'lmartinez@ensil.edu.pe', role: 'Director Académico', branch: 'Piura', lastAccess: 'Ayer 14:30', status: 'Activo' },
-    { id: 'USR-003', name: 'Jorge Torres', email: 'jtorres@ensil.edu.pe', role: 'Coordinador de Ventas', branch: 'Chiclayo', lastAccess: 'Hace 2 días', status: 'Inactivo' },
-    { id: 'USR-004', name: 'Juan Pérez', email: 'jperez@ensil.edu.pe', role: 'Docente', branch: 'Piura', lastAccess: 'Nunca', status: 'Activo', staffId: '1', document: '12345678', phone: '987654321' },
-  ]);
+  const [users, setUsers] = useState<User[]>(() => seedUsers());
 
   const [permissions, setPermissions] = useState<Permission[]>([
     { roleId: 'ROL-002', permissions: ['org-usuarios:view', 'op-matriculas:view', 'op-matriculas:create', 'op-caja:view'] }
@@ -2214,20 +2047,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: '5', name: 'WhatsApp', status: 'active' },
   ]);
 
-  const [programs, setPrograms] = useState<Program[]>([
-    { id: '1', code: 'PRG-KIDS', name: 'Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },
-    { id: '2', code: 'PRG-PK', name: 'Pre-Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },
-    { id: '3', code: 'PRG-PL', name: 'Pre-lectura', hasLevels: false, durationBase: 3, warranty: 3, allBranches: false, enabledBranches: ['FIL-PIU', 'FIL-CHI'], status: 'Activo' },
-    { id: '4', code: 'PRG-ESP', name: 'Especialización', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
-    { id: '5', code: 'PRG-PROF', name: 'Profesional', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
-  ]);
+  const [programs, setPrograms] = useState<Program[]>(() => seedPrograms());
 
-  const [levels, setLevels] = useState<Level[]>([
-    { id: '1', programId: '1', code: 'NVL-KIDS-1', name: 'Nivel 1', order: 1, status: 'Activo' },
-    { id: '2', programId: '1', code: 'NVL-KIDS-2', name: 'Nivel 2', order: 2, status: 'Activo' },
-    { id: '3', programId: '1', code: 'NVL-KIDS-3', name: 'Nivel 3', order: 3, status: 'Activo' },
-    { id: '4', programId: '2', code: 'NVL-PK-1', name: 'Nivel 1', order: 1, status: 'Activo' },
-  ]);
+  const [levels, setLevels] = useState<Level[]>(() => seedLevels());
 
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([
     { id: '1', code: 'TP-CONT', name: 'Contado', installments: 1, termDays: 0, scheduleMode: 'inmediato', applicablePrograms: ['1', '2', '3', '4'], status: 'Activo' },
@@ -2410,7 +2232,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const addLeadSource = (name: string) => {
     const newSource: LeadSource = {
-      id: Date.now().toString(),
+      id: nextNumericId(leadSources.map(x => x.id)),
       name,
       status: 'active'
     };
@@ -2479,10 +2301,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     const nextList = idx >= 0
       ? list.map((x, i) => i === idx ? { ...x, stock: newBalance } : x)
-      : [...list, { id: `STK-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, itemId, branchId, stock: newBalance, minStock: 0 }];
+      : [...list, { id: allocId('STK', list.map(x => x.id)), itemId, branchId, stock: newBalance, minStock: 0 }];
 
     const entry: KardexEntry = {
-      id: `KDX-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: allocId('KDX', kardex.map(k => k.id)),
       date: new Date().toISOString().replace('T', ' ').slice(0, 16),
       branch: branches.find(b => b.id === branchId)?.name || branchId,
       material: items.find(i => i.id === itemId)?.name || itemId,
@@ -2513,7 +2335,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     const dayBefore = new Date(Date.parse(price.validFrom + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
     const newPrice: ItemPrice = {
-      id: `PRC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: allocId('PRC', itemPrices.map(p => p.id)),
       ...price,
       amount: Math.round(price.amount * 100) / 100,
       createdAt: new Date().toISOString(),
@@ -2535,7 +2357,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     const newAdjustment: Adjustment = {
       ...adjData,
-      id: `ADJ-${Date.now()}`,
+      id: allocId('ADJ', adjustments.map(a => a.id)),
       date: new Date().toISOString().replace('T', ' ').slice(0, 16),
       user: currentUser.name
     };
@@ -2675,8 +2497,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const targetIdx = plan.installments.findIndex(inst => inst.id === installmentId);
       if (targetIdx < 0) return plan;
       const target = plan.installments[targetIdx];
-      const newPayment = {
-        id: `P-${Date.now()}`,
+      const newPayment: InstallmentPayment = {
+        id: paymentId,
         paymentId, // vínculo con el pago global: permite reversarlo y reponer exactamente esta cuota
         date: paymentData.date,
         amount: paymentData.amount,
@@ -2688,61 +2510,41 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (target.variable && nextIdx >= 0) {
         const paid = Math.min(paymentData.amount, plan.balance);
         const remaining = Math.max(0, plan.balance - paid);
-        const updated = plan.installments.map((inst, i) => {
+        const updated: Installment[] = plan.installments.map((inst, i) => {
           if (i === targetIdx) {
             return {
               ...inst,
               // El monto de la parte queda fijado en lo realmente cobrado (antes tenía como tope el total del plan)
-              amount: inst.payments.reduce((acc: number, pay: any) => acc + pay.amount, 0) + paid,
+              amount: inst.payments.reduce((acc, pay) => acc + pay.amount, 0) + paid,
               balance: 0,
-              status: 'Pagada',
+              status: 'Pagada' as const,
               payments: [...inst.payments, { ...newPayment, amount: paid }]
             };
           }
           if (i === nextIdx) {
-            return { ...inst, amount: remaining, balance: remaining, status: remaining === 0 ? 'Pagada' : 'Pendiente' };
+            return { ...inst, amount: remaining, balance: remaining, status: remaining === 0 ? ('Pagada' as const) : ('Pendiente' as const) };
           }
           return inst;
         });
-        return {
-          ...plan,
-          balance: remaining,
-          status: remaining === 0 ? 'Completado' : plan.status,
-          installments: updated
-        };
+        return recomputePlan({ ...plan, installments: updated }, todayISO);
       }
 
-      let planBalanceReduction = 0;
-      const updatedInstallments = plan.installments.map(inst => {
-        if (inst.id === installmentId) {
-          const newBalance = Math.max(0, inst.balance - paymentData.amount);
-          planBalanceReduction = inst.balance - newBalance;
-          return {
-            ...inst,
-            balance: newBalance,
-            status: newBalance === 0 ? 'Pagada' : 'Parcial',
-            payments: [...inst.payments, newPayment]
-          };
-        }
-        return inst;
+      const updatedInstallments: Installment[] = plan.installments.map(inst => {
+        if (inst.id !== installmentId) return inst;
+        const newBalance = Math.max(0, inst.balance - paymentData.amount);
+        return { ...inst, balance: newBalance, status: newBalance === 0 ? ('Pagada' as const) : ('Parcial' as const), payments: [...inst.payments, newPayment] };
       });
-
-      const newPlanBalance = Math.max(0, plan.balance - planBalanceReduction);
-      return {
-        ...plan,
-        balance: newPlanBalance,
-        status: newPlanBalance === 0 ? 'Completado' : plan.status,
-        installments: updatedInstallments
-      };
+      // El saldo y el estado del plan los calcula recomputePlan (única función que los escribe)
+      return recomputePlan({ ...plan, installments: updatedInstallments }, todayISO);
     }));
 
     // Pago global (una parte por medio usado, un comprobante) y un movimiento de caja por parte
     const planRef = plans.find(pl => pl.id === planId);
     const enrollmentRef = enrollments.find(e => e.id === planRef?.mat);
-    const studentName = enrollmentRef?.student || planRef?.titular || 'Alumno';
+    const studentName = enrollmentRef?.student || 'Alumno';
     const built = buildPaymentRecord({
       id: paymentId,
-      date: formatDisplayDate(paymentData.date),
+      date: paymentData.date,
       student: studentName,
       concept: `Pago de ${instNow.name}`,
       amountUSD: paymentData.amount,
@@ -2777,7 +2579,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const addStaff = (staffData: Omit<Staff, 'id'>): Staff => {
-    const newStaff: Staff = { ...staffData, id: nextNumericId(staff.map(s => s.id)) };
+    const newStaff: Staff = { ...staffData, id: nextSequentialId('STF', staff.map(s => s.id)) };
     setStaff(prev => [...prev, newStaff]);
     return newStaff;
   };
@@ -2811,41 +2613,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setStaff(prev => prev.filter(s => s.id !== id));
   };
 
-  /** Ajusta el contador de alumnos de los titulares cuando un alumno se vincula o se desvincula. */
-  const shiftGuardianStudents = (ids: string[], delta: number) => {
-    if (ids.length === 0) return;
-    setGuardians(prev => prev.map(g => (ids.includes(g.id) ? { ...g, students: Math.max(0, g.students + delta) } : g)));
-  };
-
   const addStudent = (studentData: Omit<Student, 'id'>): Student => {
     const newStudent: Student = { ...studentData, id: nextSequentialId('ALU', students.map(s => s.id)) };
     setStudents(prev => [...prev, newStudent]);
-    shiftGuardianStudents(newStudent.guardianIds ?? [], 1);
     return newStudent;
   };
 
+  /**
+   * Edita al alumno. Si cambia su nombre, se corrige también la copia que guardan sus matrículas y su agenda (una sola puerta:
+   * `syncStudentName`); los comprobantes ya emitidos conservan el nombre de ese día.
+   */
   const updateStudent = (id: string, studentData: Partial<Student>) => {
-    const before = students.find(s => s.id === id)?.guardianIds ?? [];
-    if (studentData.guardianIds) {
-      shiftGuardianStudents(studentData.guardianIds.filter(g => !before.includes(g)), 1);
-      shiftGuardianStudents(before.filter(g => !studentData.guardianIds!.includes(g)), -1);
-    }
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...studentData } : s));
+    if (studentData.name !== undefined) {
+      const synced = syncStudentName(id, studentData.name, enrollments, schedules);
+      if (synced.changed) { setEnrollments(synced.enrollments); setSchedules(synced.schedules); }
+    }
   };
 
-  const deleteStudent = (id: string) => {
-    shiftGuardianStudents(students.find(s => s.id === id)?.guardianIds ?? [], -1);
+  /** Un alumno con matrículas, asesorías o seguimiento no se elimina: es historial (ya no tendría a quién mostrar). */
+  const deleteStudent = (id: string): StockResult => {
+    if (enrollments.some(e => e.studentId === id) || schedules.some(s => s.studentId === id) || trackings.some(t => t.studentId === id)) {
+      return { ok: false, error: 'El alumno tiene matrículas, asesorías o seguimiento registrados: no se puede eliminar.' };
+    }
     setStudents(prev => prev.filter(s => s.id !== id));
+    return { ok: true };
   };
 
-  const addGuardian = (guardianData: Omit<Guardian, 'id' | 'students' | 'enrollments' | 'balance'>): Guardian => {
-    const newGuardian: Guardian = {
-      ...guardianData,
-      id: nextNumericId(guardians.map(g => g.id)),
-      students: 0,
-      enrollments: 0,
-      balance: '$0',
-    };
+  const addGuardian = (guardianData: Omit<Guardian, 'id'>): Guardian => {
+    const newGuardian: Guardian = { ...guardianData, id: nextSequentialId('TIT', guardians.map(g => g.id)) };
     setGuardians(prev => [...prev, newGuardian]);
     return newGuardian;
   };
@@ -2854,8 +2650,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setGuardians(prev => prev.map(g => g.id === id ? { ...g, ...guardianData } : g));
   };
 
-  const deleteGuardian = (id: string) => {
+  /** Un titular con alumnos o matrículas a su cargo no se elimina. */
+  const deleteGuardian = (id: string): StockResult => {
+    if (students.some(s => s.guardianIds.includes(id)) || enrollments.some(e => e.guardianIds.includes(id))) {
+      return { ok: false, error: 'El titular tiene alumnos o matrículas a su cargo: no se puede eliminar.' };
+    }
     setGuardians(prev => prev.filter(g => g.id !== id));
+    return { ok: true };
   };
 
   const registerEnrollments = (draft: EnrollmentDraft) => {
@@ -2893,7 +2694,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setSchedules(prev => [...prev, ...b.schedules]);
     setCashMovements(prev => [
       ...b.cashMovements.map((m, i) => ({
-        ...m, id: `CJ-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`, user: currentUser.name,
+        ...m, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name,
       })),
       ...prev,
     ]);
@@ -2949,8 +2750,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const forgive = opts.forgiveOverdue && preview.overdue.length > 0;
     const effects = summarizeDrop(preview, forgive);
 
-    setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída', plan: 'Caída', dropDate: request.effectiveDate, dropRequestId: request.id } : e)));
-    if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive) : p)));
+    setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e)));
+    if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p)));
     if (preview.scheduleIds.length > 0) {
       setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
       logSystemCancel(preview.scheduleIds, 'Caída de la matrícula');
@@ -2964,9 +2765,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         ),
       })));
     }
-    if (preview.studentDeactivated) {
-      setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, status: 'Inactivo' } : st)));
-    }
+    // El estado del alumno no se guarda: pasa a «Inactivo» solo, porque ya no le queda ninguna matrícula activa (utils/identity.ts)
     setDropRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r)));
     return { ok: true };
   };
@@ -2985,7 +2784,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const at = new Date().toISOString();
     setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e)));
     setEnrollmentChanges(prev => [
-      ...changes.map((c, i) => ({ id: `COR-${Date.now()}-${i}`, enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
+      ...changes.map(c => ({ id: allocId('COR', enrollmentChanges.map(x => x.id)), enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
       ...prev,
     ]);
     return { ok: true };
@@ -3246,7 +3045,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const problems = validateDeposit(input, cashMovements, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDeposit(input, cashMovements, currentUser.name, new Date(`${input.date}T12:00:00`).toISOString());
-    const created: CashMovement = { ...built.egress, id: `CJ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, user: currentUser.name, status: 'Aplicado' };
+    const created: CashMovement = { ...built.egress, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name, status: 'Aplicado' };
     const ids = new Set(built.selected.map(m => m.id));
     setCashMovements(prev => [created, ...prev.map(m => (ids.has(m.id) ? { ...m, depositedIn: built.code } : m))]);
     return { ok: true, code: built.code };
@@ -3378,7 +3177,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const c = changeContext(requestId);
     const today = c.today;
     const log = (field: string, label: string, from: string, to: string) =>
-      setEnrollmentChanges(prev => [{ id: `COR-${Date.now()}-${field}`, enrollmentId: enrollment.id, at, by: currentUser.name, field, label, from, to, reason: request.reason }, ...prev]);
+      setEnrollmentChanges(prev => [{ id: allocId('COR', enrollmentChanges.map(x => x.id)), enrollmentId: enrollment.id, at, by: currentUser.name, field, label, from, to, reason: request.reason }, ...prev]);
     const plan = plans.find(p => p.mat === enrollment.id);
     const effects: string[] = [];
 
@@ -3387,9 +3186,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (problems.length > 0) return { ok: false, error: problems[0] };
       const startDate = request.payload.startDate || today;
       const preview = previewReactivation(enrollment, c, startDate);
-      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa', plan: 'Al día', dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e)));
+      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa' as const, dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e)));
       if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyReactivationToPlan(p, preview, today) : p)));
-      if (preview.studentReactivates) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, status: 'Activo' } : st)));
       log('reactivation', 'Reactivación de la matrícula', 'Caída', 'Activa');
       effects.push(`Matrícula reactivada desde el ${startDate}.`, `${preview.restored.length} cuota(s) restituida(s) por USD ${preview.restoredUSD.toFixed(2)}, con el calendario corrido ${preview.shiftDays} día(s).`);
       if (preview.keptDebt.length > 0) effects.push(`Sigue pendiente la deuda vencida de USD ${preview.keptDebtUSD.toFixed(2)}.`);
@@ -3407,13 +3205,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
         verificationStatus: preview.verificationReset ? 'Pendiente' : e.verificationStatus,
       } : e)));
       if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyProgramChangeToPlan(p, preview, today) : p)));
-      const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && (o.studentId && enrollment.studentId ? o.studentId === enrollment.studentId : o.student === enrollment.student));
+      const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && o.studentId === enrollment.studentId);
       setSchedules(prev => prev.map(sc => {
-        const mine = enrollment.studentId && sc.studentId ? sc.studentId === enrollment.studentId : sc.student === enrollment.student;
+        const mine = sc.studentId === enrollment.studentId;
         const target = otherActive ? sc.isFirst && sc.enrollmentId === enrollment.id : mine;
         return target && sc.date >= today && ['Reservado', 'Reprogramado'].includes(sc.status) ? { ...sc, program: preview.program.name, level: preview.level?.name ?? 'Sin nivel' } : sc;
       }));
-      if (!otherActive) setStudents(prev => prev.map(st => (st.id === enrollment.studentId || (!enrollment.studentId && st.name === enrollment.student) ? { ...st, program: toLabel } : st)));
+      // El programa del alumno tampoco se guarda: sale de su matrícula más reciente
       log('program', 'Cambio de programa o nivel', preview.fromLabel, toLabel);
       effects.push(`${preview.fromLabel} → ${toLabel}.`, `Precio: USD ${preview.oldTotal.toFixed(2)} → USD ${preview.newTotal.toFixed(2)}; cobrado USD ${preview.paidUSD.toFixed(2)}; saldo USD ${preview.remaining.toFixed(2)}.`);
       if (preview.verificationReset) effects.push('La verificación vuelve a «Pendiente» para entregar los materiales del programa nuevo.');
@@ -3460,12 +3258,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return undefined;
     const today = todayLocalISO();
-    const student = students.find(s => s.id === enrollment.studentId) ?? students.find(s => s.name === enrollment.student);
-    const linked = (enrollment.guardianIds && enrollment.guardianIds.length > 0 ? enrollment.guardianIds : student?.guardianIds ?? [])
+    const student = students.find(s => s.id === enrollment.studentId);
+    const guardiansOf = (enrollment.guardianIds.length > 0 ? enrollment.guardianIds : student?.guardianIds ?? [])
       .map(id => guardians.find(g => g.id === id)).filter((g): g is Guardian => !!g);
-    // Registros antiguos: sin vínculo, el titular se reconoce por el nombre guardado
-    const legacy = linked.length === 0 && student && student.titular && student.titular !== student.name ? guardians.find(g => g.name === student.titular) : undefined;
-    const guardiansOf = legacy ? [legacy] : linked;
     const program = programOf(enrollment, programs);
     const branch = branches.find(b => b.id === enrollment.branchId);
     return {
@@ -3568,7 +3363,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addTracking = (trackingData: Omit<Tracking, 'id'>): Tracking => {
     const newTracking: Tracking = {
       ...trackingData,
-      id: `TRK-${Date.now().toString().slice(-4)}`
+      id: allocId('TRK', trackings.map(t => t.id))
     };
     setTrackings(prev => [newTracking, ...prev]);
     if (newTracking.scheduleId) {
@@ -3584,13 +3379,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addProgram = (programData: Omit<Program, 'id'>) => {
     const newProgram = {
       ...programData,
-      id: Date.now().toString(),
+      id: nextNumericId(programs.map(x => x.id)),
     };
     setPrograms(prev => [...prev, newProgram]);
   };
 
+  /** Las matrículas y la agenda copian el nombre del programa, del nivel y de la sede: al renombrar un catálogo se corrigen (syncCatalogLabels). */
+  const relabelFrom = (catalogs: { branches: Branch[]; programs: Program[]; levels: Level[] }) => {
+    const synced = syncCatalogLabels(enrollments, schedules, catalogs);
+    setEnrollments(synced.enrollments);
+    setSchedules(synced.schedules);
+  };
+
   const updateProgram = (id: string, programData: Partial<Program>) => {
-    setPrograms(prev => prev.map(p => p.id === id ? { ...p, ...programData } : p));
+    const next = programs.map(p => p.id === id ? { ...p, ...programData } : p);
+    setPrograms(next);
+    if (programData.name !== undefined) relabelFrom({ branches, programs: next, levels });
   };
 
   const deleteProgram = (id: string) => {
@@ -3600,13 +3404,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addLevel = (levelData: Omit<Level, 'id'>) => {
     const newLevel = {
       ...levelData,
-      id: Date.now().toString(),
+      id: nextNumericId(levels.map(x => x.id)),
     };
     setLevels(prev => [...prev, newLevel]);
   };
 
   const updateLevel = (id: string, levelData: Partial<Level>) => {
-    setLevels(prev => prev.map(l => l.id === id ? { ...l, ...levelData } : l));
+    const next = levels.map(l => l.id === id ? { ...l, ...levelData } : l);
+    setLevels(next);
+    if (levelData.name !== undefined) relabelFrom({ branches, programs, levels: next });
   };
 
   const deleteLevel = (id: string) => {
@@ -3614,7 +3420,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const addPaymentType = (data: Omit<PaymentType, 'id'>) => {
-    setPaymentTypes(prev => [...prev, { ...data, id: Date.now().toString() }]);
+    setPaymentTypes(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
   };
 
   const updatePaymentType = (id: string, data: Partial<PaymentType>) => {
@@ -3626,7 +3432,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const addTariff = (data: Omit<Tariff, 'id'>) => {
-    setTariffs(prev => [...prev, { ...data, id: Date.now().toString() }]);
+    setTariffs(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
   };
 
   const updateTariff = (id: string, data: Partial<Tariff>) => {
@@ -3638,7 +3444,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const addPromotion = (data: Omit<Promotion, 'id'>) => {
-    setPromotions(prev => [...prev, { ...data, id: Date.now().toString() }]);
+    setPromotions(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
   };
 
   const updatePromotion = (id: string, data: Partial<Promotion>) => {
@@ -3654,7 +3460,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBranch = (id: string, branchData: Partial<Branch>) => {
-    setBranches(prev => prev.map(b => b.id === id ? { ...b, ...branchData } : b));
+    const next = branches.map(b => b.id === id ? { ...b, ...branchData } : b);
+    setBranches(next);
+    if (branchData.name !== undefined) {
+      relabelFrom({ branches: next, programs, levels });
+      // Las asignaciones y las cuentas de personal guardan la sede por nombre: se corrigen igual
+      const before = branches.find(b => b.id === id)?.name;
+      if (before && before !== branchData.name) {
+        setAssignments(prev => prev.map(a => (a.branch === before ? { ...a, branch: branchData.name as string } : a)));
+        setUsers(prev => prev.map(u => (u.branch === before ? { ...u, branch: branchData.name as string } : u)));
+      }
+    }
   };
 
   const deleteBranch = (id: string) => {

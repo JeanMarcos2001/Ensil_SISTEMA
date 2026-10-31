@@ -7,6 +7,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Search, Plus, Building2, MapPin, Phone, Mail, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
+import { nextSequentialId } from '../../utils/ids';
 
 interface CompaniesProps {
   onNavigate?: (item: string) => void;
@@ -126,7 +127,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
       } else {
         addCompany({
           ...newCompanyData,
-          id: `EMP-${Date.now().toString().slice(-3)}`
+          id: nextSequentialId('EMP', companies.map(x => x.id))
         });
       }
       setIsFormOpen(false);

@@ -13,6 +13,7 @@ import type {
   ScheduleMode,
   Tariff,
   TariffInstallment,
+  Installment,
 } from '../context/DataContext';
 
 export interface TariffContext {
@@ -159,7 +160,7 @@ export const countObligations = (lines: TariffInstallment[]): number =>
  * Compatible con `Plan.installments` actual; las líneas variables conservan `variable: true`
  * (la parte 1 arranca con el total objetivo como tope y la parte 2 en 0 hasta registrar el primer cobro).
  */
-export function buildPlanInstallments(tariff: Tariff, startDateISO: string, variableDatesISO?: string[]) {
+export function buildPlanInstallments(tariff: Tariff, startDateISO: string, variableDatesISO?: string[]): Installment[] {
   const total = tariffTotal(tariff);
   const firstVariableSeen = { value: false };
   let variableIndex = 0;
@@ -179,11 +180,10 @@ export function buildPlanInstallments(tariff: Tariff, startDateISO: string, vari
         name: line.concept,
         amount,
         balance: amount,
-        dueDate: formatDisplayDate(iso),
         dueDateISO: iso,
-        status: 'Pendiente',
+        status: 'Pendiente' as const,
         variable: !!line.variable,
-        payments: [] as { id: string; date: string; amount: number; receipt: string }[],
+        payments: [],
       };
     });
 }

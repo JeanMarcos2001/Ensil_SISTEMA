@@ -17,6 +17,8 @@ import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { INACTIVATION_REASONS, inactivationCheck, statusNote } from '../utils/staffStatus';
 import { accessCheck, userOfStaff } from '../utils/staffAccess';
 import { PERM } from '../utils/authority';
+import { formatDisplayDate } from '../utils/tariffs';
+import { ageText, staffAge } from '../utils/identity';
 
 export function StaffPage() {
   const { staff, contracts, assignments, branches, schedules, monthlySchedules, users, inactivateStaff, reactivateStaff, can } = useData();
@@ -309,7 +311,7 @@ export function StaffPage() {
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Fecha de Nacimiento</label>
-                  <p className="text-sm font-medium text-text-primary mt-1">{selectedStaff.birthDate} ({selectedStaff.age} años)</p>
+                  <p className="text-sm font-medium text-text-primary mt-1">{formatDisplayDate(selectedStaff.birthDate)} ({ageText(staffAge(selectedStaff, todayLocalISO()))})</p>
                 </div>
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Género</label>

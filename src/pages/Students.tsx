@@ -11,10 +11,12 @@ import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { useNavigate } from 'react-router-dom';
 import { StudentFormModal } from './people/StudentFormModal';
-import { ACTIVE_STATUSES, studentProgramLabel, todayLocalISO } from '../utils/schedule';
+import { ACTIVE_STATUSES, branchOfStudent, studentProgramLabel, todayLocalISO } from '../utils/schedule';
+import { STUDENT_STATUSES, ageText, holderNameOfStudent, studentAge, studentStatus } from '../utils/identity';
+import { formatDisplayDate } from '../utils/tariffs';
 
 export function Students() {
-  const { students, enrollments, schedules, trackings, branches } = useData();
+  const { students, guardians, enrollments, schedules, trackings, branches } = useData();
   const today = todayLocalISO();
   const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -36,11 +38,10 @@ export function Students() {
       s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.doc.toLowerCase().includes(searchTerm.toLowerCase());
     
-    // Check student's enrollment sede if available
-    const studentEnrollment = enrollments.find(e => e.studentId === s.id || e.student === s.name);
-    const matchesBranch = !selectedBranch || (studentEnrollment && studentEnrollment.sede === selectedBranch);
+    // Sede del alumno = la de su matrícula más reciente; estado derivado de sus matrículas
+    const matchesBranch = !selectedBranch || branchOfStudent(s, enrollments) === selectedBranch;
 
-    const matchesStatus = !selectedStatus || s.status === selectedStatus;
+    const matchesStatus = !selectedStatus || studentStatus(s.id, enrollments) === selectedStatus;
 
     return matchesSearch && matchesBranch && matchesStatus;
   });
@@ -51,7 +52,7 @@ export function Students() {
     downloadCsv(
       csvFileName('Alumnos', today),
       ['Código', 'Documento', 'Alumno', 'Edad', 'Programa', 'Titular', 'Estado'],
-      filteredStudents.map(s => [s.id, `${s.docType ?? 'DNI'} ${s.doc}`, s.name, s.age, studentProgramLabel(s, enrollments) || 'Sin matrícula', s.titular, s.status])
+      filteredStudents.map(s => [s.id, `${s.docType ?? 'DNI'} ${s.doc}`, s.name, ageText(studentAge(s, today)), studentProgramLabel(s, enrollments) || 'Sin matrícula', holderNameOfStudent(s, guardians), studentStatus(s.id, enrollments)])
     );
   };
 
@@ -74,10 +75,10 @@ export function Students() {
     setIsFormOpen(true);
   };
 
-  const studentEnrollments = enrollments.filter(e => e.studentId === selectedStudent?.id || e.student === selectedStudent?.name);
+  const studentEnrollments = enrollments.filter(e => e.studentId === selectedStudent?.id);
   // Próxima asesoría: la más cercana que sigue activa (reservada o reprogramada) desde hoy
   const nextSchedule = schedules
-    .filter(s => (s.studentId === selectedStudent?.id || s.student === selectedStudent?.name) && s.date >= today && ['Reservado', 'Reprogramado'].includes(s.status))
+    .filter(s => s.studentId === selectedStudent?.id && s.date >= today && ['Reservado', 'Reprogramado'].includes(s.status))
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   const latestTracking = trackings.filter(t => t.studentId === selectedStudent?.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
@@ -122,7 +123,7 @@ export function Students() {
             >
               <option value="">Todas las sedes</option>
               {branches.map(b => (
-                <option key={b.id} value={b.name}>{b.name}</option>
+                <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
             <select
@@ -131,10 +132,7 @@ export function Students() {
               className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
             >
               <option value="">Todos los estados</option>
-              <option value="Activo">Activo</option>
-              <option value="Inactivo">Inactivo</option>
-              <option value="Sin matrícula">Sin matrícula</option>
-              <option value="Egresado">Egresado</option>
+              {STUDENT_STATUSES.map(st => <option key={st} value={st}>{st}</option>)}
             </select>
             <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
@@ -164,11 +162,11 @@ export function Students() {
                     <div className="text-xs text-text-muted">{row.doc}</div>
                   </td>
                   <td className="px-6 py-4 font-medium text-text-primary">{row.name}</td>
-                  <td className="px-6 py-4 text-text-secondary">{row.age} años</td>
+                  <td className="px-6 py-4 text-text-secondary">{ageText(studentAge(row, today))}</td>
                   <td className="px-6 py-4 text-text-secondary">{studentProgramLabel(row, enrollments) || 'Sin matrícula'}</td>
-                  <td className="px-6 py-4 text-text-secondary">{row.titular}</td>
+                  <td className="px-6 py-4 text-text-secondary">{holderNameOfStudent(row, guardians)}</td>
                   <td className="px-6 py-4">
-                    <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
+                    <Badge variant={studentStatus(row.id, enrollments) === 'Activo' ? 'success' : 'neutral'}>{studentStatus(row.id, enrollments)}</Badge>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <ActionMenu 
@@ -241,12 +239,12 @@ export function Students() {
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-3 flex-wrap">
                   <h3 className="text-2xl font-bold text-text-primary tracking-tight">{selectedStudent.name}</h3>
-                  <Badge variant={selectedStudent.status === 'Activo' ? 'success' : 'neutral'}>{selectedStudent.status}</Badge>
+                  <Badge variant={studentStatus(selectedStudent.id, enrollments) === 'Activo' ? 'success' : 'neutral'}>{studentStatus(selectedStudent.id, enrollments)}</Badge>
                 </div>
                 <div className="flex flex-wrap gap-4 text-sm text-text-secondary">
                   <span className="flex items-center gap-1.5"><User size={14} /> DNI: {selectedStudent.doc}</span>
                   <span className="flex items-center gap-1.5"><GraduationCap size={14} /> {selectedStudent.grado || 'Sin grado'}</span>
-                  <span className="flex items-center gap-1.5"><Calendar size={14} /> {selectedStudent.age} años</span>
+                  <span className="flex items-center gap-1.5"><Calendar size={14} /> {ageText(studentAge(selectedStudent, today))}</span>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -284,7 +282,7 @@ export function Students() {
                       </div>
                       <div>
                         <p className="text-xs text-text-muted">Titular / Responsable</p>
-                        <p className="text-sm font-bold text-text-primary">{selectedStudent.titular}</p>
+                        <p className="text-sm font-bold text-text-primary">{holderNameOfStudent(selectedStudent, guardians)}</p>
                       </div>
                     </div>
                   </div>
@@ -356,7 +354,7 @@ export function Students() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-text-primary">{e.program}</p>
-                        <p className="text-xs text-text-secondary">{e.date}</p>
+                        <p className="text-xs text-text-secondary">{formatDisplayDate(e.dateISO)}</p>
                       </div>
                     </div>
                     <Badge variant={e.status === 'Activa' ? 'success' : 'danger'}>{e.status}</Badge>

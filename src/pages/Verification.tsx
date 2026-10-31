@@ -13,6 +13,7 @@ import { longDayLabel, to12h, todayLocalISO } from '../utils/schedule';
 import { firstSessionOf } from '../utils/validity';
 import { GATE_LABEL, compareGates } from '../utils/verificationGate';
 import { DateInput } from '../components/ui/DateInput';
+import { formatDisplayDate } from '../utils/tariffs';
 import {
   availableComponents,
   canSplitKit,
@@ -303,7 +304,7 @@ export function Verification() {
                     <div>{row.program}</div>
                     <div className="text-xs text-text-muted">{row.level || 'N/A'}</div>
                   </td>
-                  <td className="px-6 py-3 text-text-secondary text-xs">{row.date}</td>
+                  <td className="px-6 py-3 text-text-secondary text-xs">{formatDisplayDate(row.dateISO)}</td>
                   <td className="px-6 py-3 text-xs">
                     {(() => {
                       const gate = waiting[row.id];

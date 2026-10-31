@@ -25,7 +25,7 @@ import {
 } from './enrollment';
 
 export const MIN_GUARDIAN_AGE = 18;
-export const NO_ENROLLMENT = 'Sin matrícula';
+export { NO_ENROLLMENT } from './identity';
 export const RELATIONSHIPS = ['Hijo(a)', 'Nieto(a)', 'Sobrino(a)', 'Hermano(a)', 'Otro familiar', 'Otro'];
 
 export type StudentMode = 'apoderado' | 'independiente';
@@ -116,23 +116,21 @@ export function validateStudentInput(input: StudentInput, students: Student[], g
   return e;
 }
 
-/** Alumno listo para guardar (sin id). Al crearlo queda «Sin matrícula»; al editarlo se conservan programa y estado. */
-export function buildStudent(
-  input: StudentInput, guardians: Guardian[], today: string, existing?: Pick<Student, 'program' | 'fechaInicio' | 'status'>
-): Omit<Student, 'id'> {
+/**
+ * Alumno listo para guardar (sin id). Titular, estado (al crearlo queda «Sin matrícula»), programa y edad no se guardan: se derivan
+ * (`utils/identity.ts`). Al editarlo se conserva la fecha de inicio.
+ */
+export function buildStudent(input: StudentInput, existing?: Pick<Student, 'fechaInicio'>): Omit<Student, 'id'> {
   const { mode, student: ds, guardianIds } = input;
   const p = ds.person;
   const ids = mode === 'apoderado' ? guardianIds : [];
-  const principal = guardians.find(g => g.id === ids[0]);
   return {
     doc: p.docNumber.trim(), docType: p.docType, name: fullName(p),
     names: p.names.trim(), lastNameP: p.lastNameP.trim(), lastNameM: p.lastNameM.trim(),
-    birthDate: p.birthDate, age: p.birthDate ? (ageOn(p.birthDate, today) ?? 0) : 0,
+    birthDate: p.birthDate,
     phone: mode === 'apoderado' ? '' : p.phone.trim(), email: p.email.trim(), address: p.address.trim(),
     guardianIds: ids, relationship: mode === 'apoderado' ? ds.relationship : '',
-    titular: mode === 'apoderado' ? principal?.name ?? '' : fullName(p),
     ...situationData(ds),
-    program: existing?.program ?? '', fechaInicio: existing?.fechaInicio,
-    status: existing?.status ?? NO_ENROLLMENT,
+    fechaInicio: existing?.fechaInicio,
   };
 }

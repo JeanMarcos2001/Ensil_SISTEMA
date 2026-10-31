@@ -60,12 +60,10 @@ const emptyForm = (date: string): FormState => ({
   studentId: '', student: '', branchId: '', program: '', level: '', date, time: '', responsible: '', observations: '',
 });
 
-/** Programa y nivel vigentes del alumno según su matrícula más reciente. */
+/** Programa y nivel vigentes del alumno según su matrícula más reciente (vacíos si no tiene). */
 function programOf(student: Student, enrollments: ReturnType<typeof useData>['enrollments']) {
   const latest = latestEnrollment(student, enrollments);
-  if (latest) return { program: latest.program, level: latest.level };
-  const [program = '', level = ''] = (student.program || '').split(' - ');
-  return { program, level };
+  return { program: latest?.program ?? '', level: latest?.level ?? '' };
 }
 
 export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defaultStudentId }: Props) {
