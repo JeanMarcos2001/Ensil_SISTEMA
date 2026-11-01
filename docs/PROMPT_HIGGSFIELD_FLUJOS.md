@@ -62,7 +62,7 @@ CONEXIÓN VERDE QUE DEBE VERSE CLARA: cobrar una cuota mueve a la vez Plan, Caja
 
 PUNTOS ROTOS E INCONSISTENCIAS (cuadro inferior, numerados):
 E1 «Planilla pagada no genera egreso en Caja» (flecha roja Planilla ✖ Caja).
-E2 «Sede activa solo filtra 3 módulos; el resto muestra todas las sedes».
+E2 «Sin sesión no hay alcance por sede: cada usuario verá solo sus sedes cuando existan roles (el selector del encabezado es temporal)».
 E3 «Permisos sin aplicar en Matrículas y Verificación» (no llaman a can()).
 E4 «Sin facturación electrónica: comprobante solo es texto y serie manual».
 E5 «Recordatorios de cobro: WhatsApp manual, sin envío automático».
@@ -93,7 +93,7 @@ E3 «Permisos sin aplicar en Stock, Envíos y Transferencias».
 E4 «Stock bajo solo es un contador del Dashboard: no hay centro de alertas».
 E5 «Adjuntos de envío: solo se guarda el nombre del archivo, no el archivo».
 E6 «Cajas de envío con id temporal (box-hora): no es un id del sistema».
-E7 «Sede activa no filtra Envíos ni Transferencias de forma central».
+E7 «Envíos y Transferencias aún no se limitan a las sedes del usuario (depende de la sesión)».
 ```
 
 ### G3 · PSICOPEDAGOGÍA (Programación · Historial del alumno · Cronogramas mensuales · Recordatorios)
@@ -171,14 +171,14 @@ E5 «Tarifas y recetas con vigencia vencida dejan al programa sin precio o sin r
 E6 «Cobranza: una sola política para todas las sedes y programas».
 ```
 
-### G6 · ORGANIZACIÓN (Empresas · Sedes · Roles · Usuarios · Permisos)
+### G6 · ORGANIZACIÓN (Empresas · Filiales · Roles · Permisos · Usuarios)
 
 ```
 TÍTULO: «ORGANIZACIÓN — sedes, roles y accesos». Subtítulo: «Estado actual · 30 oct 2026».
 
 FLUJO PRINCIPAL:
-1. «Empresas» (razón social, RUC) → «Sedes» (dirección, empresa) → alimenta contrato y ficha de la matrícula.
-2. «Sede» → selector «Vista Global / sede» del encabezado → filtra solo 3 módulos (flecha ámbar a esos 3; flechas rojas ✖ al resto).
+1. «Empresas» (razón social, RUC) → «Filiales» (sedes: dirección, empresa) → alimenta contrato y ficha de la matrícula.
+2. «Sede» → selector «Vista Global / sede» del encabezado, marcado «TEMPORAL (solo pruebas)» en gris punteado; flecha ámbar a 3 módulos. Flecha roja ✖ discontinua de «Sesión + asignaciones» hacia todos los módulos: así se limitará por sede en el futuro.
 3. «Roles» → «Permisos» (catálogo de 67 acciones) → hexágono «can(PERM.x)» → pantallas.
 4. «Usuarios» ← creados desde «Personal»; hoy el único usuario es el «Superusuario» (todo permitido).
 5. «Inicio de sesión»: nodo gris punteado con ✖ (no existe).
@@ -187,7 +187,7 @@ PUNTOS ROTOS E INCONSISTENCIAS:
 E1 «No existe inicio de sesión ni roles reales: Usuarios y Roles no tienen efecto».
 E2 «De 67 permisos solo ~40 se consultan; muchas pantallas no llaman a can()».
 E3 «El ‘N usuarios asignados’ de cada rol es un número fijo, no calculado».
-E4 «Selector de sede solo afecta a 3 módulos».
+E4 «El alcance por sede no existe: depende de sesión y asignaciones (por id, hoy por nombre)».
 E5 «Dos listas de roles (Organización vs rol del sistema de la asignación)».
 E6 «Auditoría muestra siempre ‘Superadmin’ porque no hay usuarios que ingresen».
 Resuelto ✓: «Renombrar una sede corrige asignaciones, cuentas y copias en matrículas».
@@ -266,7 +266,7 @@ Flechas VERDES entre grupos que funcionan: Oferta comercial → Operación (prec
 Operación → Psicopedagogía (primera asesoría), Personas → Operación (titular y alumno), todos → Reportes, todos → Sistema/Auditoría.
 Flechas ROJAS ✖: Personas(Planilla) → Operación(Caja); Personas(Contratos) → Psicopedagogía(Agenda); Organización(Sede) → todos los
 módulos; Organización(Roles) → todas las pantallas; Operación → mensajes automáticos (WhatsApp/correo); Operación → facturación electrónica (SUNAT).
-Cuadro inferior «LOS 6 HUECOS GRANDES»: E1 persistencia, E2 inicio de sesión y roles, E3 sede activa central, E4 facturación electrónica,
+Cuadro inferior «LOS 6 HUECOS GRANDES»: E1 persistencia, E2 inicio de sesión y roles, E3 alcance por sede según la sesión, E4 facturación electrónica,
 E5 envío automático de mensajes, E6 almacenamiento de archivos.
 ```
 

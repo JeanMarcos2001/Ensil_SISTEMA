@@ -5,7 +5,7 @@ import { MODULE_DATA, getAllItemsForModule } from '../../config/modules';
 import { useData } from '../../context/DataContext';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', icon: Home, label: 'Dashboard' },
+  { id: 'dashboard', icon: Home, label: 'Dashboard', isDirect: true },
   { id: 'mensajeria', icon: Mail, label: 'Mensajería', isDirect: true },
   { id: 'operacion', icon: Briefcase, label: 'Operación' },
   { id: 'logistica', icon: Package, label: 'Logística' },

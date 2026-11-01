@@ -265,7 +265,7 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 
 ## 10. Reportes: cómo se calculan y qué responde cada uno ✅
 
-**Principio:** un reporte **no guarda datos propios**; se calcula en el momento con lo que ya guardan las pantallas operativas, así que nunca las contradice. Todos arrancan con la sede del selector del encabezado (se puede cambiar), filtran por período con atajos (este mes, mes anterior, 30 días, este año, todo el historial), exportan **CSV y PDF** y piden `reportView` / `reportExport`. Las reglas viven en `src/utils/report*.ts` y `audit.ts`.
+**Principio:** un reporte **no guarda datos propios**; se calcula en el momento con lo que ya guardan las pantallas operativas, así que nunca las contradice. Todos arrancan con la sede del selector del encabezado (temporal: luego será la sede de la sesión; se puede cambiar), filtran por período con atajos (este mes, mes anterior, 30 días, este año, todo el historial), exportan **CSV y PDF** y piden `reportView` / `reportExport`. Las reglas viven en `src/utils/report*.ts` y `audit.ts`.
 
 | Reporte | Qué responde | Reglas que conviene recordar |
 |---|---|---|
@@ -274,7 +274,7 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 | **Caja** | Ingresos y egresos por moneda, depósitos, devoluciones, reversas, efectivo sin depositar, cierres con su diferencia y caja chica. | Una caja por moneda. Los depósitos y las devoluciones **no** son egresos operativos. El saldo es el actual, no el del período. Caja chica siempre en soles y sin filtro de sede. |
 | **Stock** | Foto del inventario por sede, valor a costo y, sobre todo, si **alcanza** para lo que las recetas piden a las matrículas que aún esperan sus materiales. | Faltante = lo que piden las recetas vigentes de matrículas activas sin verificar − stock disponible de su sede. «Sin movimiento» = 90 días o más según el kardex. |
 | **Personal** | Plantilla, contrato (vigente, por vencer en 30 días o vencido), cuenta de acceso, asignación, bajas del período y costo de la última planilla cerrada por sede. | Activos sin contrato vigente o sin asignación se listan para corregirlos. Las vacaciones se muestran a 60 días, pero **aún no bloquean la agenda**. |
-| **Auditoría** | Quién hizo qué y cuándo, en una sola línea de tiempo con enlace a la pantalla de origen. | No hay tabla de auditoría: se **deriva** de las constancias de cada módulo (correcciones, solicitudes, reversas, notas de crédito, depósitos, cierres y reaperturas, agenda, planilla, contratos, cobranza, ajustes). |
+| **Auditoría** (vive solo en Sistema → Auditoría, ya no en Reportes) | Quién hizo qué y cuándo, en una sola línea de tiempo con enlace a la pantalla de origen. | No hay tabla de auditoría: se **deriva** de las constancias de cada módulo (correcciones, solicitudes, reversas, notas de crédito, depósitos, cierres y reaperturas, agenda, planilla, contratos, cobranza, ajustes). |
 | Cartera, Psicopedagogía | Ver §6 y §8. | — |
 
 **Falta:** cortes históricos (todo se calcula al día), que la auditoría registre cambios de precios, recetas y permisos, y que Cartera y Psicopedagogía usen las piezas compartidas.
@@ -313,10 +313,36 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 
 ---
 
-## 12. Qué se probó
+## 12. Funciones y roles: un solo registro, con sus conexiones ✅ (base; las guardas por pantalla vienen después)
+
+**El problema:** el catálogo de permisos estaba escrito a mano (67 acciones) y cada pantalla decidía por su cuenta qué mostrar; 109 acciones del contexto modifican datos y casi la mitad no tenía permiso. Armar roles así obliga a adivinar qué depende de qué.
+
+**La regla:** cada cosa que una persona puede hacer es una **función** declarada **una sola vez** en `src/utils/capabilityRegistry.ts`. De ese registro se derivan el catálogo de Organización → Permisos, el constructor de roles, el reparto de avisos y el cuadro `docs/CATALOGO_DE_FUNCIONES.md` (generado con `npx tsx scripts/doc-capabilities.ts`; no se edita a mano).
+
+| Dato de cada función | Para qué sirve |
+|---|---|
+| Identificador `funcionalidad:acción` (el permiso de siempre) | Los roles y los `can(PERM.x)` existentes siguen valiendo; los 67 identificadores anteriores se conservan |
+| **Requiere** (mismo usuario) | Al marcar una función se marcan solas las que necesita; no se puede quitar una que otra marcada necesita. Toda función que no es «ver» exige poder ver su pantalla |
+| **Contraparte** (otra persona) | Lo que alguien más debe poder hacer. **Obligatoria**: sin ella la función no se ofrece y se dice por qué (enviar, sin nadie que reciba en la sede destino). **Recomendada**: se ofrece y se avisa (agendar, sin Psicopedagogía en la sede) |
+| Lee / escribe | Los datos que toca; alimentan el mapa de conexiones |
+| Avisos que dispara | Cada aviso llega a quien tenga cierta función en la sede que corresponde (no a un nombre de rol); si nadie la tiene, a quien tenga «Recibir los avisos que nadie más puede recibir» |
+| Sensibilidad | 💲 dinero · sueldos · control (pide motivo y deja historial) |
+| Acciones del contexto que protege | Verificado: las 120 acciones del contexto están dentro de una función o declaradas como «no es una función» con su razón |
+
+- **Contrapartes y sedes:** se resuelven con las cuentas activas de roles activos y su sede (principal y adicionales). Quien tiene «Ver y operar todas las sedes» cubre cualquiera. **El Superusuario no cuenta como contraparte**: es un rol técnico y, si contara, nunca se notaría que falta crear al receptor real.
+- **Separación de funciones:** nueve combinaciones que un rol no debería reunir sin razón (cobrar + reversar + cerrar caja, reversar + reabrir caja, pedir + aprobar cada tipo de solicitud, generar + pagar planilla, definir permisos + asignar roles, despachar + recibir + ajustar stock). Se muestran como advertencia y piden un motivo para guardar.
+- **Sueldos:** una función propia, «Ver remuneraciones y costo de planilla»; Planilla la exige. Contratos, Personal y Auditoría la usarán para ocultar importes (paso de guardas).
+- **Funciones reservadas** (sin proceso detrás, no se ofrecen): editar borrador y confirmar matrícula, guardar vistas de reportes.
+- **Qué falta:** que las pantallas y las acciones pregunten por estas funciones (hoy 35 archivos modifican datos sin `can()`), el constructor de roles y los avisos dirigidos.
+
+---
+
+## 13. Qué se probó
+Funciones y roles: `check-capabilities.ts` (estructura del registro, dependencias, contrapartes, datos y avisos que existen, cobertura de las 120 acciones del contexto y de todo el menú, compatibilidad con los 67 permisos anteriores y con `PERM`, cierre de dependencias, advertencias y el caso del almacenero: sin receptor en Piura no se ofrece enviar, con uno sí, uno de Piura no sirve para Arequipa, cuenta o rol inactivo no cuentan). Se comprobó que los controles detectan fallos rompiendo el registro a propósito.
+
 Modelo de datos: `check-integrity.ts` (los datos de ejemplo cumplen todas las reglas de integridad; los casos rotos a propósito se detectan; titular, estado, programa y edad derivados; sincronía de nombres; planes; ids) y los demás scripts actualizados; en el navegador: renombrar al alumno corrige su matrícula y su agenda pero no el comprobante; cobrar la cuota vencida de Sofia pasa el plan de «Atrasado» a «Al día» y mueve la caja y el saldo del titular.
 
-Reportes: `check-reports.ts` (rangos y atajos, conteos, embudo y tasas de Matrículas, Verificación, Caja y Caja chica, Stock con faltantes, Personal con contratos y planilla, y Auditoría con sus filtros); en el navegador: las ocho rutas de Reportes y Sistema → Auditoría abren sin errores y Caja separa por sede.
+Reportes: `check-reports.ts` (rangos y atajos, conteos, embudo y tasas de Matrículas, Verificación, Caja y Caja chica, Stock con faltantes, Personal con contratos y planilla, y Auditoría con sus filtros); en el navegador: las siete rutas de Reportes y Sistema → Auditoría abren sin errores y Caja separa por sede.
 
 Personal, usuarios y planilla: `check-payroll.ts` (motor, flujo, boleta y acceso del personal); en el navegador: generar la planilla de octubre (Juan Pérez S/ 3 077.96 y María Torres S/ 2 429.55 de neto), agregar un ajuste (sin motivo se rechaza), cerrar, reabrir con motivo, volver a cerrar y registrar el pago (desaparece «Reabrir»); cerrar un contrato ya pagado (se rechaza); crear la cuenta de María desde Personal (formulario prellenado con sus datos y sede); inactivar a Juan (aviso previo, y su cuenta queda inactiva con constancia; activarla se rechaza mientras la ficha siga inactiva).
 

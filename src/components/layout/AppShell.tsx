@@ -97,7 +97,6 @@ export function AppShell() {
       if (activeItem === 'Stock') return <StockReport />;
       if (activeItem === 'Psicopedagogía') return <PsychopedagogyReport />;
       if (activeItem === 'Personal') return <StaffReport />;
-      if (activeItem === 'Auditoría') return <AuditReport />;
     }
 
     // Operation Module

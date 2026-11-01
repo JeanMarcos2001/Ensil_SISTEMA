@@ -2,7 +2,7 @@ export const MODULE_DATA: Record<string, { title: string, groups: { title?: stri
   dashboard: {
     title: 'Dashboard',
     groups: [
-      { items: ['Resumen general', 'Alertas del sistema', 'Actividad reciente'] }
+      { items: ['Resumen general'] }
     ]
   },
   operacion: {
@@ -44,7 +44,7 @@ export const MODULE_DATA: Record<string, { title: string, groups: { title?: stri
   reportes: {
     title: 'Reportes',
     groups: [
-      { items: ['Matrículas', 'Cartera', 'Caja', 'Verificación', 'Stock', 'Psicopedagogía', 'Personal', 'Auditoría'] }
+      { items: ['Matrículas', 'Cartera', 'Caja', 'Verificación', 'Stock', 'Psicopedagogía', 'Personal'] }
     ]
   },
   sistema: {

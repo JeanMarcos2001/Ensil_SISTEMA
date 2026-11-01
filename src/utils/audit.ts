@@ -2,7 +2,7 @@
  * Auditoría: un solo registro de «quién hizo qué y cuándo» (funciones puras).
  *
  * No hay una tabla de auditoría aparte: cada módulo ya guarda la constancia de sus acciones con control (quién, cuándo, por qué).
- * Aquí se **reúnen** en una sola línea de tiempo, para que Sistema → Auditoría y Reportes → Auditoría respondan en un solo lugar.
+ * Aquí se **reúnen** en una sola línea de tiempo, para que Sistema → Auditoría responda en un solo lugar.
  * Como se calcula de lo que ya existe, nunca queda desfasada de las pantallas de origen.
  *
  * Fuentes: correcciones y solicitudes de cambio de matrícula (caída, reactivación, cambio de programa, traslado), contrato y ficha,

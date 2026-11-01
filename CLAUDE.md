@@ -14,7 +14,7 @@ Los identificadores del código van en inglés o español según el archivo veci
 React 19 · TypeScript · Vite 6 · Tailwind 4 · react-router 7. Sin pruebas de interfaz: se verifica con scripts.
 
 - `npm run dev` (puerto 3000) · `npm run build` · `npm run lint` (= `npx tsc --noEmit`)
-- Verificación de reglas: `npx tsx scripts/check-<tema>.ts` (hay 17). **Antes de dar algo por terminado**: `tsc` sin errores,
+- Verificación de reglas: `npx tsx scripts/check-<tema>.ts` (hay 18). **Antes de dar algo por terminado**: `tsc` sin errores,
   `vite build` y todos los `check-*` en verde.
 
 ## Arquitectura: «reglas puras primero»
@@ -23,8 +23,11 @@ React 19 · TypeScript · Vite 6 · Tailwind 4 · react-router 7. Sin pruebas de
 2. `src/context/DataContext.tsx` (muy grande) guarda el estado y expone **acciones** que validan con esas reglas y devuelven
    `{ ok, error }` (`StockResult`). Las pantallas nunca saltan la validación.
 3. Las pantallas (`src/pages/**`, `src/components/**`) solo muestran y llaman acciones. Modales y paneles pequeños y modulares.
-4. Los permisos se consultan siempre con `can(PERM.x)` (`utils/authority.ts`, catálogo en `pages/organization/Permissions.tsx`).
-   Hoy el único usuario es el Superusuario (todo permitido); al definir roles basta marcar casillas.
+4. Los permisos se consultan siempre con `can(PERM.x)` (`utils/authority.ts`). Cada función del sistema se declara **una sola vez**
+   en `utils/capabilityRegistry.ts` (con lo que requiere, su contraparte, los datos que toca y los avisos que dispara); de ahí salen
+   el catálogo de Permisos, el constructor de roles y los avisos (`utils/capabilities.ts`). **Una función nueva se agrega al registro**
+   y `check-capabilities.ts` falla si queda una acción del contexto o un ítem de menú sin función. Hoy el único usuario es el
+   Superusuario (todo permitido); al definir roles basta marcar casillas.
 5. Lo **derivable no se guarda**: estados de cuotas y planes, vigencia, urgencias, etc. se calculan al mostrar.
 6. Los cambios con control (reversas, cierres, cancelaciones, bajas) piden **motivo** (`ReasonDialog`) y dejan **historial**.
 7. Datos de ejemplo con fechas **relativas a hoy** (`seedDay`) para que siempre haya casos visibles.
@@ -35,7 +38,8 @@ del plan solo los escribe `recomputePlan`). Datos de ejemplo en `src/data/seed*.
 
 Mapa rápido de `src/utils`: matrícula (`enrollment*`, `validity`, `verification*`), dinero (`payments`, `planState`,
 `collections`, `cash*`, `pettyCash`, `creditNotes`, `refinance`), Psicopedagogía (`schedule`, `psy*`, `sessionMetrics`),
-Personas (`assignments`, `staff*`, `payroll*`, `staffAccess`), catálogo (`tariffs`, `promotions`, `inventory`).
+Personas (`assignments`, `staff*`, `payroll*`, `staffAccess`), catálogo (`tariffs`, `promotions`, `inventory`),
+funciones y roles (`authority`, `capabilityRegistry`, `capabilities`).
 
 ## Reglas de negocio que no hay que romper
 
@@ -57,10 +61,12 @@ catálogos de venta; el botón inferior «Configuración» abre la ventana de pa
 
 - `docs/REGLAS_DE_NEGOCIO.md` — qué se resolvió y cómo funciona, por tema. **Actualizarlo al cambiar una regla.**
 - `docs/PENDIENTES_SISTEMA.md` — lo que falta; marcar ✅ lo resuelto y sumar una «tanda» al final.
+- `docs/PLAN_ROLES_Y_MODELO_DE_DATOS.md` — roles de partida, constructor de roles, avisos dirigidos y paso a paso (con su estado).
+- `docs/CATALOGO_DE_FUNCIONES.md` — **generado** del registro (`npx tsx scripts/doc-capabilities.ts`); no se edita a mano.
 - `docs/REVISION_PROYECTO.md`, `docs/INFORME_CONEXIONES_SISTEMA.md` — revisión y mapa de conexiones entre módulos.
 
-Pendientes grandes conocidos: facturación electrónica (OSE/PSE), inicio de sesión y roles, persistencia, selector de sede,
-almacenamiento de archivos, envío automático de WhatsApp/correo, liquidación de beneficios al cese.
+Pendientes grandes conocidos: facturación electrónica (OSE/PSE), inicio de sesión y roles, persistencia, alcance por sede según la sesión
+(el selector de sede del encabezado es temporal y desaparecerá), almacenamiento de archivos, envío automático de WhatsApp/correo, liquidación de beneficios al cese.
 
 ## Cómo trabajar
 

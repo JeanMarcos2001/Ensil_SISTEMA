@@ -18,11 +18,11 @@ Revisión hecha después de las tandas de reglas de negocio, verificación, Psic
 
 | | Tema | Estado comprobado |
 |---|---|---|
-| 🔴 | **Sede activa** | Ver la fila de la sección 1: el selector solo afecta a 3 módulos; el resto muestra todas las sedes. Es el hueco funcional más visible. |
+| 🟠 | **Alcance por sede** | El selector de sede del encabezado («Vista Global») es una herramienta TEMPORAL para ver el sistema desde distintas perspectivas mientras no hay sesiones ni roles: no va a existir. La sede que ve cada persona saldrá de su sesión y de sus asignaciones activas (un rol con permiso «todas las sedes» verá todo). **Se resuelve dentro de «sesión y roles»**, no extendiendo el selector. Requisito previo: asignaciones y cuentas por id de sede. |
 | 🔴 | **Permisos sin aplicar** | El catálogo tiene **67 acciones** y solo se consultan unas 40 (`PERM`). Ninguna de estas pantallas llama a `can()`: Matrículas, Alumnos, Titulares, Contratos, Asignaciones, Verificación, Usuarios, Roles, Tarifarios, Promociones, Programas, Stock, Envíos y Transferencias. Hoy no importa (solo existe el Superusuario), pero al activar roles no restringirían nada. |
 | 🔴 | **Inicio de sesión y roles** | No existe. Usuarios y Roles son catálogos sin efecto; el «N usuarios asignados» de cada rol es un número **fijo**, no calculado. |
 | 🔴 | **Persistencia** | Todo en memoria. El andamiaje de Supabase (`lib/supabase.ts`, `services/api.ts`, `hooks/useSupabaseQuery.ts`) **no lo importa nadie**: es código muerto hasta decidir la capa de datos. |
-| 🟠 | **Centro de alertas** | «Alertas del sistema» y «Actividad reciente» (Dashboard) son dos ítems que abren el mismo Dashboard. |
+| 🟠 | **Centro de alertas** | Los ítems «Alertas del sistema» y «Actividad reciente» se retiraron del menú (eran copias del Dashboard). Falta el centro de avisos con destinatario por función y sede (ver `PLAN_ROLES_Y_MODELO_DE_DATOS.md` §5). |
 | ✅ | **Reportes** | Los ocho reportes son reales (Matrículas, Cartera, Caja, Verificación, Stock, Psicopedagogía, Personal y Auditoría): filtros de período y sede, exportan CSV y PDF y respetan `reportView` / `reportExport`. Ver `REGLAS_DE_NEGOCIO.md` §10. Falta: cortes históricos (se calculan siempre al día). |
 | 🟠 | **Planilla → Caja** | Pagar la planilla no genera el egreso ni cuenta en el cierre de caja. |
 | 🟠 | **Contratos** | Sin renovación de contrato ni alerta de vencimiento (el Dashboard avisa cuotas y matrículas, no contratos). Sin liquidación de beneficios al cese. |
@@ -47,7 +47,7 @@ Revisión hecha después de las tandas de reglas de negocio, verificación, Psic
 **Fase 1 — La base** (cada módulo nuevo se apoya en ella; migrarla cuesta más cada semana):
 1. Cambiar nombres por ids (sede, responsable de asesoría, programa y nivel de la matrícula), con una función de migración de los datos de ejemplo.
 2. Un solo formato de fecha (ISO) y la edad calculada.
-3. Un selector central de datos por sede que usen **todas** las pantallas.
+3. ~~Selector central por sede~~ **Descartado:** el alcance por sede saldrá de la sesión y las asignaciones (fase 3).
 4. Un generador de ids único.
 5. Integración continua (`tsc`, `vite build` y los 16 scripts en cada subida) y pasar los scripts a un ejecutor estándar (vitest).
 
@@ -77,7 +77,7 @@ Revisión hecha después de las tandas de reglas de negocio, verificación, Psic
 |---|---|
 | 🔴 **Persistencia** | Todo vive en memoria (`DataContext`). Al recargar se pierde todo. Supabase está creado (`lib/supabase.ts`, `hooks/useSupabaseQuery.ts`, `services/api.ts`) pero sin uso. Solo el borrador del asistente de matrícula usa `localStorage`. |
 | 🔴 **Autenticación y permisos** | Sigue sin haber inicio de sesión (usuario fijo «Superadmin»). **Avance:** existe un motor de permisos (`can()`) que ya consultan las acciones de control (solicitudes, reversas, cierres, documentos, cobranza): cuando haya roles basta marcar las casillas del rol. Falta: login, vincular Usuarios con Personal y Roles, y que el resto de pantallas también consulten los permisos. |
-| 🟠 **Sede del encabezado** | El selector de sede del Topbar («Vista Global») solo lo respetan **Logística, Caja y el asistente de matrícula**. Matrículas, Pagos, Planes, Verificación, Alumnos, Titulares, Programación, Personal, Contratos y Planilla muestran todas las sedes. Programación tiene además su propio filtro. Ver sección 0 (B1). |
+| 🟡 **Sede del encabezado (temporal)** | El selector de sede del Topbar («Vista Global») es una ayuda de pruebas que desaparecerá con las sesiones; hoy solo lo respetan **Logística, Caja y el asistente de matrícula**. Matrículas, Pagos, Planes, Verificación, Alumnos, Titulares, Programación, Personal, Contratos y Planilla muestran todas las sedes. Programación tiene además su propio filtro. Ver sección 0 (B1). |
 | 🟠 **Archivos y evidencias** | Los vouchers, capturas y fotos solo guardan el **nombre** del archivo; no hay almacenamiento. El detalle del pago dice «Vista previa no disponible». |
 | ✅ **Auditoría** | Hay una línea de tiempo única (Sistema y Reportes) que reúne matrículas, pagos, cajas, planilla, contratos, agenda, cobranza y ajustes de stock. Sigue sin registrarse: quién cambia precios, recetas, tarifarios y permisos (cuando haya inicio de sesión). |
 | 🟡 **Enrutado por nombre** | `AppShell` decide la pantalla por el **nombre** del ítem. Los reportes que comparten nombre con una pantalla operativa se resuelven antes con `activeModule === 'reportes'`; lo ideal es enrutar por módulo + ítem. |
@@ -88,7 +88,7 @@ Revisión hecha después de las tandas de reglas de negocio, verificación, Psic
 - ✅ **Reportes:** los ocho son reales (ver la fila de la sección 1 y `REGLAS_DE_NEGOCIO.md` §10).
 - 🟠 **Sistema:** ✅ **Solicitudes pendientes** (4 tipos), **Cierres** y **Reaperturas** ya funcionan. ✅ **Auditoría** ya funciona. Siguen «en construcción»: Preferencias y Ayuda.
 - ✅ **Exportar:** los botones descargan CSV de lo que se ve (con filtros); Kardex y Cronogramas también PDF (impresión) e imagen. «Guardar vista» (Matrículas) guarda los filtros en el navegador.
-- ✅ **Filtros:** los filtros de las tablas filtran de verdad y el botón de embudo ahora limpia los filtros. Queda pendiente que el selector de sede del encabezado se respete en las pantallas operativas (ver el informe).
+- ✅ **Filtros:** los filtros de las tablas filtran de verdad y el botón de embudo ahora limpia los filtros. El selector de sede del encabezado es temporal: no se extenderá a las pantallas operativas (el alcance por sede vendrá de la sesión).
 
 ## 3. Acciones con menú pero sin función (`onClick` vacío)
 
@@ -170,3 +170,5 @@ Resuelto el 2026-10-30. La lógica completa (qué se guarda, qué se calcula y p
 - **Undécima tanda (Reportes, 2026-10-30):** los seis reportes que faltaban (`reportEnrollments`, `reportCash`, `reportStock`, `reportStaff` y `audit` en `utils`, con `reportCommon` y `components/reports/ReportParts`); Sistema → Auditoría y Reportes → Auditoría comparten la misma línea de tiempo; enrutado de Reportes antes que las pantallas operativas; permisos `reportView` y `reportExport`; `check-reports.ts` (89 casos). Los movimientos de caja de ejemplo ahora tienen sede. Pendiente: cortes históricos, que Cartera y Psicopedagogía usen las piezas compartidas y unificar sus permisos con `reportView`.
 
 - **Duodécima tanda (modelo de datos, 2026-10-30):** se limpió la sección 5 completa: datos derivados que ya no se guardan (titular, estado, programa y edad del alumno; contadores del titular; próxima cuota del plan), relaciones por id, fechas solo ISO, estados tipados, ids con una sola política, datos de ejemplo coherentes y verificados (`check-integrity.ts`, 17 scripts en total). Quedan de la sección B: pasar a ids las asignaciones y las cuentas de usuario (hoy guardan la sede por nombre, aunque ya se corrigen al renombrar), el responsable de la asesoría (texto), y las pendientes de la fase 1 (selector central de sede, integración continua).
+
+- **Decimotercera tanda (roles y funciones, 2026-10-31):** menú sin copias (Dashboard directo, Auditoría solo en Sistema) y **registro único de funciones** (`capabilityRegistry.ts`): 51 funcionalidades, 175 funciones, 17 avisos con destinatario y 9 combinaciones a separar; el catálogo de Permisos se deriva de él y conserva los 67 permisos anteriores; `check-capabilities.ts` (18 scripts en total) verifica que las 120 acciones del contexto y todo el menú tengan función. Cuadro de referencia generado: `docs/CATALOGO_DE_FUNCIONES.md`. Siguen: avisos dirigidos, guardas en las 35 pantallas (incluida `setRecipes`, que escribe el estado directo, y `updateStock`, que algunas pantallas llaman sin pasar por una función), constructor de roles y usuario activo.
