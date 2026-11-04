@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**51 funcionalidades · 175 funciones** (3 reservadas) · 17 avisos · 9 combinaciones a separar.
+**52 funcionalidades · 186 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -35,17 +35,17 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Alumno, Titular, Plan de pago, Programa, Nivel → — | — |
-| **Crear matrícula** 💲<br><code>op-matriculas:create</code> | crear | Ver matrículas | Registrar la entrega de materiales en la misma sede (recomendada) | Programa, Nivel, Tarifario, Promoción, Tipo de pago → Matrícula, Alumno, Titular, Plan de pago, Pago, Movimiento de caja, Verificación de materiales, Asesoría | — |
+| **Crear matrícula** 💲<br><code>op-matriculas:create</code> | crear | Ver matrículas | Registrar la entrega de materiales en la misma sede (recomendada)<br>Crear programación (agendar asesorías) en la misma sede (recomendada) | Programa, Nivel, Tarifario, Promoción, Tipo de pago → Matrícula, Alumno, Titular, Plan de pago, Pago, Movimiento de caja, Verificación de materiales, Asesoría | — |
 | **Editar borrador** _(reservada)_<br><code>op-matriculas:edit_draft</code> | editar | Ver matrículas | — | — → — | — |
 | **Confirmar matrícula** _(reservada)_<br><code>op-matriculas:confirm</code> | operar | Ver matrículas | — | — → — | — |
 | **Solicitar caída**<br><code>op-matriculas:req_drop</code> | operar | Ver matrículas | Aprobar caída en cualquier sede (recomendada) | — → Solicitud sobre una matrícula | Solicitud de caída pendiente |
-| **Aprobar caída** 🛡 control<br><code>op-matriculas:approve_drop</code> | aprobar | Ver matrículas | — | Solicitud sobre una matrícula → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
+| **Aprobar caída** 🛡 control<br><code>op-matriculas:approve_drop</code> | aprobar | Ver matrículas, Ver solicitudes pendientes | — | Solicitud sobre una matrícula → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
 | **Solicitar reactivación**<br><code>op-matriculas:req_reactivation</code> | operar | Ver matrículas | Aprobar reactivación en cualquier sede (recomendada) | — → Solicitud sobre una matrícula | Solicitud de reactivación pendiente |
-| **Aprobar reactivación** 🛡 control<br><code>op-matriculas:approve_reactivation</code> | aprobar | Ver matrículas | — | Solicitud sobre una matrícula → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
+| **Aprobar reactivación** 🛡 control<br><code>op-matriculas:approve_reactivation</code> | aprobar | Ver matrículas, Ver solicitudes pendientes | — | Solicitud sobre una matrícula → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
 | **Solicitar cambio de programa o nivel**<br><code>op-matriculas:req_program_change</code> | operar | Ver matrículas | Aprobar cambio de programa o nivel en cualquier sede (recomendada) | — → Solicitud sobre una matrícula | Solicitud de cambio de programa pendiente |
-| **Aprobar cambio de programa o nivel** 🛡 control<br><code>op-matriculas:approve_program_change</code> | aprobar | Ver matrículas | — | Solicitud sobre una matrícula, Tarifario → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
+| **Aprobar cambio de programa o nivel** 🛡 control<br><code>op-matriculas:approve_program_change</code> | aprobar | Ver matrículas, Ver solicitudes pendientes | — | Solicitud sobre una matrícula, Tarifario → Matrícula, Plan de pago, Cuota, Solicitud sobre una matrícula | Solicitud resuelta |
 | **Solicitar traslado de sede**<br><code>op-matriculas:req_transfer</code> | operar | Ver matrículas | Aprobar traslado de sede en cualquier sede (recomendada) | — → Solicitud sobre una matrícula | Solicitud de traslado de sede pendiente |
-| **Aprobar traslado de sede** 🛡 control<br><code>op-matriculas:approve_transfer</code> | aprobar | Ver matrículas | — | Solicitud sobre una matrícula, Filial → Matrícula, Asesoría, Solicitud sobre una matrícula | Solicitud resuelta |
+| **Aprobar traslado de sede** 🛡 control<br><code>op-matriculas:approve_transfer</code> | aprobar | Ver matrículas, Ver solicitudes pendientes | — | Solicitud sobre una matrícula, Filial → Matrícula, Asesoría, Solicitud sobre una matrícula | Solicitud resuelta |
 | **Renovar matrícula** 💲<br><code>op-matriculas:renew</code> | crear | Ver matrículas | — | — → Matrícula, Plan de pago, Pago, Movimiento de caja | — |
 | **Corregir datos administrativos** 🛡 control<br><code>op-matriculas:edit_data</code> | editar | Ver matrículas | — | — → Matrícula | — |
 | **Generar contrato y ficha**<br><code>op-matriculas:documents</code> | operar | Ver matrículas | — | Matrícula, Plantilla de contrato → Contrato y ficha | — |
@@ -56,7 +56,7 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver pagos** 💲 · menú «Pagos»<br><code>op-pagos:view</code> | ver | — | — | Pago, Plan de pago, Cuota → — | — |
-| **Registrar pago o cobro de cuota** 💲<br><code>op-pagos:register</code> | crear | Ver pagos | — | Plan de pago, Cuota → Pago, Cuota, Plan de pago, Movimiento de caja | — |
+| **Registrar pago o cobro de cuota** 💲<br><code>op-pagos:register</code> | crear | Ver pagos | Cerrar caja en la misma sede (recomendada) | Plan de pago, Cuota → Pago, Cuota, Plan de pago, Movimiento de caja | — |
 | **Reversar pago** 🛡 control<br><code>op-pagos:reverse_payment</code> | operar | Ver pagos | — | — → Pago, Cuota, Plan de pago, Movimiento de caja, Nota de crédito | Pago reversado |
 | **Emitir nota de crédito** 🛡 control<br><code>op-pagos:credit_note</code> | operar | Ver pagos | — | — → Nota de crédito | — |
 
@@ -65,7 +65,7 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver verificación** · menú «Verificación»<br><code>op-verificacion:view</code> | ver | — | — | Verificación de materiales, Matrícula, Receta de materiales, Stock → — | — |
-| **Registrar la entrega de materiales**<br><code>op-verificacion:deliver</code> | operar | Ver verificación, Ver el stock | — | Receta de materiales, Stock → Verificación de materiales, Stock, Kardex | — |
+| **Registrar la entrega de materiales**<br><code>op-verificacion:deliver</code> | operar | Ver verificación, Ver el stock | Confirmar la recepción de un envío en la misma sede (recomendada) | Receta de materiales, Stock → Verificación de materiales, Stock, Kardex | — |
 
 ### Caja `op-caja`
 
@@ -78,6 +78,7 @@ Cómo leerlo:
 | **Crear lote de depósito** 💲<br><code>op-caja:deposit</code> | operar | Ver caja | — | — → Lote de depósito, Movimiento de caja | — |
 | **Cerrar caja** 🛡 control<br><code>op-caja:close_box</code> | operar | Ver caja | — | Movimiento de caja → Cierre de caja | — |
 | **Reabrir caja** 🛡 control<br><code>op-caja:reopen_box</code> | operar | Ver caja | — | — → Cierre de caja | Caja reabierta |
+| **Vender un artículo en caja** 💲<br><code>op-caja:sell_item</code> | crear | Ver caja | — | Artículo, Precio de artículo, Stock → Movimiento de caja, Stock, Kardex | — |
 
 ### Caja chica `op-caja-chica`
 
@@ -87,6 +88,7 @@ Cómo leerlo:
 | **Registrar ingreso o gasto de caja chica** 💲<br><code>op-caja-chica:reg_movement</code> | crear | Ver caja chica | — | — → Caja chica | — |
 | **Reversar movimiento** 🛡 control<br><code>op-caja-chica:reverse_movement</code> | operar | Ver caja chica | — | — → Caja chica | — |
 | **Hacer arqueo y cierre** 🛡 control<br><code>op-caja-chica:count</code> | operar | Ver caja chica | — | — → Cierre de caja | — |
+| **Reabrir cierre de caja chica** 🛡 control<br><code>op-caja-chica:reopen_box</code> | operar | Ver caja chica | — | — → Cierre de caja | Caja reabierta |
 | **Configurar fondo y tope por gasto**<br><code>op-caja-chica:config</code> | configurar | Ver caja chica | — | — → Caja chica | — |
 
 ### Cobranza y cartera `op-cobranza`
@@ -106,6 +108,8 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver el catálogo de artículos** · menú «Catálogo de artículos»<br><code>log-catalogo:view</code> | ver | — | — | Artículo, Precio de artículo → — | — |
+| **Crear artículos (uno a uno o por carga masiva)**<br><code>log-catalogo:create</code> | crear | Ver el catálogo de artículos | — | — → Artículo, Precio de artículo | — |
+| **Editar, activar y desactivar artículos**<br><code>log-catalogo:edit</code> | editar | Ver el catálogo de artículos | — | — → Artículo | — |
 | **Registrar el precio de un artículo** 💲<br><code>log-catalogo:edit_price</code> | editar | Ver el catálogo de artículos | — | — → Precio de artículo | — |
 
 ### Stock `log-stock`
@@ -115,33 +119,34 @@ Cómo leerlo:
 | **Ver el stock** · menú «Stock»<br><code>log-stock:view</code> | ver | — | — | Stock, Artículo, Filial → — | — |
 | **Definir el stock mínimo**<br><code>log-stock:edit_min</code> | editar | Ver el stock | — | — → Stock | — |
 | **Armar y abrir paquetes**<br><code>log-stock:pack</code> | operar | Ver el stock | — | Artículo → Stock, Kardex | — |
+| **Registrar un ingreso de stock (compra o reposición)** 🛡 control<br><code>log-stock:entry</code> | crear | Ver el stock | — | Artículo → Stock, Kardex | — |
 
 ### Envíos `log-envios`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver envíos** · menú «Envíos»<br><code>log-envios:view</code> | ver | — | — | Envío, Filial → — | — |
-| **Preparar un envío**<br><code>log-envios:create</code> | crear | Ver envíos, Ver el stock | — | Stock, Filial → Envío | — |
+| **Preparar un envío**<br><code>log-envios:create</code> | crear | Ver envíos, Ver el stock | Realizar el envío (despachar) en cualquier sede (recomendada) | Stock, Filial → Envío | — |
 | **Editar un envío**<br><code>log-envios:edit</code> | editar | Ver envíos | — | — → Envío | — |
 | **Eliminar un envío** 🛡 control<br><code>log-envios:delete</code> | eliminar | Ver envíos | — | — → Envío | — |
-| **Realizar el envío (despachar)**<br><code>log-envios:dispatch</code> | operar | Ver envíos, Ver el stock | Confirmar la recepción de un envío en la sede destino (obligatoria) | Stock, Envío, Filial → Envío, Stock, Kardex | Envío despachado |
+| **Realizar el envío (despachar)**<br><code>log-envios:dispatch</code> | operar | Ver envíos, Ver el stock | Confirmar la recepción de un envío en la sede destino (obligatoria) | Stock, Envío, Filial → Envío, Stock, Kardex | Envío despachado, Envío cancelado |
 
 ### Transferencias `log-transfer`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver transferencias** · menú «Transferencias»<br><code>log-transfer:view</code> | ver | — | — | Transferencia, Filial → — | — |
-| **Solicitar transferencia**<br><code>log-transfer:req_transfer</code> | crear | Ver transferencias, Ver el stock | — | Stock, Filial → Transferencia | — |
-| **Aprobar transferencia** 🛡 control<br><code>log-transfer:approve_transfer</code> | aprobar | Ver transferencias | — | — → Transferencia | — |
+| **Solicitar transferencia**<br><code>log-transfer:req_transfer</code> | crear | Ver transferencias, Ver el stock | Aprobar transferencia en cualquier sede (recomendada) | Stock, Filial → Transferencia | Transferencia solicitada |
+| **Aprobar transferencia** 🛡 control<br><code>log-transfer:approve_transfer</code> | aprobar | Ver transferencias | — | — → Transferencia | Transferencia aprobada o rechazada |
 | **Despachar transferencia**<br><code>log-transfer:dispatch</code> | operar | Ver transferencias, Ver el stock | Recepcionar transferencia en la sede destino (obligatoria) | Stock, Transferencia → Transferencia, Stock, Kardex | Transferencia en tránsito |
-| **Recepcionar transferencia**<br><code>log-transfer:receive</code> | operar | Ver transferencias | — | Transferencia → Transferencia, Stock, Kardex, Recepción | Recepción confirmada, Recepción con faltante o daño |
+| **Recepcionar transferencia**<br><code>log-transfer:receive</code> | operar | Ver transferencias | — | Transferencia → Transferencia, Stock, Kardex, Recepción | Transferencia recibida, Recepción con faltante o daño |
 
 ### Recepciones `log-recepciones`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver recepciones** · menú «Recepciones»<br><code>log-recepciones:view</code> | ver | — | — | Envío, Transferencia, Recepción → — | — |
-| **Confirmar la recepción de un envío**<br><code>log-recepciones:confirm</code> | operar | Ver recepciones | — | Envío → Recepción, Envío, Stock, Kardex | Recepción confirmada, Recepción con faltante o daño |
+| **Confirmar la recepción de un envío**<br><code>log-recepciones:confirm</code> | operar | Ver recepciones | — | Envío → Recepción, Envío, Stock, Kardex | Envío recibido, Recepción con faltante o daño |
 
 ### Kardex `log-kardex`
 
@@ -233,9 +238,10 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver contratos** · menú «Contratos»<br><code>per-contratos:view</code> | ver | — | — | Contrato de trabajo, Personal, Planilla → — | — |
-| **Crear contrato** 👁‍🗨 sueldos<br><code>per-contratos:create</code> | crear | Ver contratos, Ver remuneraciones y costo de planilla | — | — → Contrato de trabajo | — |
+| **Crear contrato** 👁‍🗨 sueldos<br><code>per-contratos:create</code> | crear | Ver contratos, Ver remuneraciones y costo de planilla | Generar y eliminar borradores de planilla en cualquier sede (recomendada) | — → Contrato de trabajo | — |
 | **Editar contrato (cambio de condiciones con motivo)** 👁‍🗨 sueldos<br><code>per-contratos:edit</code> | editar | Ver contratos, Ver remuneraciones y costo de planilla | — | — → Contrato de trabajo | — |
 | **Cerrar contrato** 🛡 control<br><code>per-contratos:close</code> | operar | Ver contratos | — | — → Contrato de trabajo, Asignación | — |
+| **Renovar contrato** 👁‍🗨 sueldos<br><code>per-contratos:renew</code> | operar | Ver contratos, Ver remuneraciones y costo de planilla | — | — → Contrato de trabajo | — |
 
 ### Asignaciones `per-asignaciones`
 
@@ -250,10 +256,9 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver planillas y boletas** 👁‍🗨 sueldos · menú «Planilla»<br><code>per-planilla:view</code> | ver | Ver remuneraciones y costo de planilla | — | Planilla, Contrato de trabajo, Personal → — | — |
-| **Generar y eliminar borradores de planilla** 👁‍🗨 sueldos<br><code>per-planilla:generate</code> | crear | Ver planillas y boletas | — | Contrato de trabajo → Planilla | — |
+| **Generar y eliminar borradores de planilla** 👁‍🗨 sueldos<br><code>per-planilla:generate</code> | crear | Ver planillas y boletas | Cerrar planilla en cualquier sede (recomendada) | Contrato de trabajo → Planilla | — |
 | **Agregar ajustes (bonos, descuentos)** 👁‍🗨 sueldos<br><code>per-planilla:adjust</code> | editar | Ver planillas y boletas | — | — → Planilla | — |
 | **Cerrar planilla** 🛡 control<br><code>per-planilla:close</code> | operar | Ver planillas y boletas | — | — → Planilla | — |
-| **Registrar el pago de la planilla** 💲<br><code>per-planilla:pay</code> | operar | Ver planillas y boletas | — | — → Planilla | — |
 | **Reabrir planilla cerrada** 🛡 control<br><code>per-planilla:reopen</code> | operar | Ver planillas y boletas | — | — → Planilla | — |
 
 ### Remuneraciones `per-remuneracion`
@@ -314,7 +319,9 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver recetas de materiales** · menú «Recetas de materiales»<br><code>com-recetas:view</code> | ver | — | — | Receta de materiales, Artículo, Programa, Nivel, Filial → — | — |
-| **Crear, editar y activar recetas**<br><code>com-recetas:edit</code> | editar | Ver recetas de materiales | — | — → Receta de materiales | — |
+| **Crear y duplicar recetas**<br><code>com-recetas:create</code> | crear | Ver recetas de materiales | — | Artículo, Programa, Nivel → Receta de materiales | — |
+| **Editar recetas**<br><code>com-recetas:edit</code> | editar | Ver recetas de materiales | — | Artículo, Programa, Nivel → Receta de materiales | — |
+| **Activar y desactivar recetas** 🛡 control<br><code>com-recetas:deactivate</code> | operar | Ver recetas de materiales | — | — → Receta de materiales | — |
 
 ## Organización
 
@@ -344,14 +351,14 @@ Cómo leerlo:
 | **Crear rol**<br><code>org-roles:create</code> | crear | Ver roles | — | — → Rol | — |
 | **Editar rol**<br><code>org-roles:edit</code> | editar | Ver roles | — | — → Rol | — |
 | **Eliminar rol** 🛡 control<br><code>org-roles:delete</code> | eliminar | Ver roles | — | — → Rol | — |
-| **Configurar permisos** 🛡 control · menú «Permisos»<br><code>org-roles:config_perms</code> | configurar | Ver roles | — | Rol, Permisos del rol → Permisos del rol | — |
+| **Configurar permisos** 🛡 control · menú «Permisos»<br><code>org-roles:config_perms</code> | configurar | Ver roles | — | Rol, Permisos del rol → Permisos del rol | Permisos de un rol modificados |
 
 ### Usuarios `org-usuarios`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver usuarios** · menú «Usuarios»<br><code>org-usuarios:view</code> | ver | — | — | Cuenta de usuario, Rol, Personal, Filial → — | — |
-| **Crear usuario**<br><code>org-usuarios:create</code> | crear | Ver usuarios | — | — → Cuenta de usuario | — |
+| **Crear usuario**<br><code>org-usuarios:create</code> | crear | Ver usuarios, Ver el personal | — | — → Cuenta de usuario | — |
 | **Editar usuario**<br><code>org-usuarios:edit</code> | editar | Ver usuarios | — | — → Cuenta de usuario | — |
 | **Desactivar usuario** 🛡 control<br><code>org-usuarios:deactivate</code> | operar | Ver usuarios | — | — → Cuenta de usuario | — |
 | **Resetear acceso** 🛡 control<br><code>org-usuarios:reset_access</code> | operar | Ver usuarios | — | — → Cuenta de usuario | — |
@@ -443,6 +450,7 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver la bandeja de avisos**<br><code>sis-avisos:view</code> | ver | — | — | Aviso → — | — |
+| **Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos)** 🛡 control<br><code>sis-avisos:supervise</code> | ver | Ver la bandeja de avisos | — | Aviso → — | — |
 | **Recibir los avisos que nadie más puede recibir**<br><code>sis-avisos:fallback</code> | ver | Ver la bandeja de avisos | — | Aviso → — | — |
 
 ## Configuración
@@ -456,6 +464,14 @@ Cómo leerlo:
 | **Editar origen de lead**<br><code>cfg-leads:edit</code> | editar | Ver orígenes de leads | — | — → Origen de lead | — |
 | **Eliminar origen de lead** 🛡 control<br><code>cfg-leads:delete</code> | eliminar | Ver orígenes de leads | — | — → Origen de lead | — |
 
+### Couriers y métodos de envío `cfg-couriers`
+
+| Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
+|---|---|---|---|---|---|
+| **Ver los couriers y métodos de envío**<br><code>cfg-couriers:view</code> | ver | — | — | Courier, Método de envío → — | — |
+| **Crear couriers y métodos de envío**<br><code>cfg-couriers:create</code> | crear | Ver los couriers y métodos de envío | — | — → Courier, Método de envío | — |
+| **Editar, activar y desactivar couriers y métodos de envío**<br><code>cfg-couriers:edit</code> | editar | Ver los couriers y métodos de envío | — | — → Courier, Método de envío | — |
+
 ### Plantillas de contrato y ficha `cfg-plantillas`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
@@ -467,25 +483,30 @@ Cómo leerlo:
 
 El aviso llega a quien tenga la función indicada en la sede que corresponde, no a un nombre de rol. Si nadie la tiene, llega a quien tenga «Recibir los avisos que nadie más puede recibir».
 
-| Aviso | Lo dispara | Llega a quien tenga… | Dónde |
-|---|---|---|---|
-| Envío despachado | Realizar el envío (despachar) | Confirmar la recepción de un envío | sede destino |
-| Transferencia en tránsito | Despachar transferencia | Recepcionar transferencia | sede destino |
-| Recepción confirmada | Recepcionar transferencia · Confirmar la recepción de un envío | Realizar el envío (despachar) | sede origen |
-| Recepción con faltante o daño | Recepcionar transferencia · Confirmar la recepción de un envío | Registrar un ajuste o una merma | sede origen |
-| Solicitud de caída pendiente | Solicitar caída | Aprobar caída | cualquier sede |
-| Solicitud de reactivación pendiente | Solicitar reactivación | Aprobar reactivación | cualquier sede |
-| Solicitud de cambio de programa pendiente | Solicitar cambio de programa o nivel | Aprobar cambio de programa o nivel | cualquier sede |
-| Solicitud de traslado de sede pendiente | Solicitar traslado de sede | Aprobar traslado de sede | cualquier sede |
-| Solicitud resuelta | Aprobar caída · Aprobar reactivación · Aprobar cambio de programa o nivel · Aprobar traslado de sede | Quien hizo la solicitud | — |
-| Pago reversado | Reversar pago | Ver la auditoría | cualquier sede |
-| Movimiento de caja reversado | Reversar movimiento | Ver la auditoría | cualquier sede |
-| Caja reabierta | Reabrir caja | Ver la auditoría | cualquier sede |
-| Cuota refinanciada | Refinanciar una cuota | Ver cartera y reportes de cobranza | sede del alumno o documento |
-| Cuota vencida | La regla del sistema (por fecha o estado) | Enviar recordatorios | sede del alumno o documento |
-| Primera asesoría sin materiales entregados | La regla del sistema (por fecha o estado) | Registrar la entrega de materiales | sede del alumno o documento |
-| Contrato por vencer | La regla del sistema (por fecha o estado) | Ver contratos | cualquier sede |
-| Stock por debajo del mínimo | La regla del sistema (por fecha o estado) | Registrar un ajuste o una merma | sede del alumno o documento |
+| Aviso | Lo dispara | Llega a quien tenga… (y dónde) |
+|---|---|---|
+| Envío despachado | Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
+| Envío cancelado | Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
+| Envío recibido | Confirmar la recepción de un envío | Realizar el envío (despachar) (sede origen) |
+| Transferencia solicitada | Solicitar transferencia | Aprobar transferencia (cualquier sede) |
+| Transferencia aprobada o rechazada | Aprobar transferencia | Quien hizo la solicitud |
+| Transferencia en tránsito | Despachar transferencia | Recepcionar transferencia (sede destino) |
+| Transferencia recibida | Recepcionar transferencia | Despachar transferencia (sede origen) |
+| Recepción con faltante o daño | Recepcionar transferencia · Confirmar la recepción de un envío | Registrar un ajuste o una merma (sede origen)<br>Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Stock por debajo del mínimo | La regla del sistema (por fecha o estado) | Solicitar transferencia (sede del alumno o documento)<br>Preparar un envío (cualquier sede) |
+| Solicitud de caída pendiente | Solicitar caída | Aprobar caída (cualquier sede) |
+| Solicitud de reactivación pendiente | Solicitar reactivación | Aprobar reactivación (cualquier sede) |
+| Solicitud de cambio de programa pendiente | Solicitar cambio de programa o nivel | Aprobar cambio de programa o nivel (cualquier sede) |
+| Solicitud de traslado de sede pendiente | Solicitar traslado de sede | Aprobar traslado de sede (cualquier sede) |
+| Solicitud resuelta | Aprobar caída · Aprobar reactivación · Aprobar cambio de programa o nivel · Aprobar traslado de sede | Quien hizo la solicitud |
+| Primera asesoría sin materiales entregados | La regla del sistema (por fecha o estado) | Registrar la entrega de materiales (sede del alumno o documento)<br>Marcar la asistencia de la asesoría (sede del alumno o documento) |
+| Pago reversado | Reversar pago | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Movimiento de caja reversado | Reversar movimiento | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Caja reabierta | Reabrir caja · Reabrir cierre de caja chica | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Cuota refinanciada | Refinanciar una cuota | Ver cartera y reportes de cobranza (sede del alumno o documento)<br>Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Cuotas vencidas | La regla del sistema (por fecha o estado) | Enviar recordatorios (sede del alumno o documento) |
+| Contratos por vencer | La regla del sistema (por fecha o estado) | Editar contrato (cambio de condiciones con motivo) (cualquier sede) |
+| Permisos de un rol modificados | Configurar permisos | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
 
 ## Combinaciones que conviene separar
 
@@ -494,29 +515,36 @@ Si un rol reúne **todas** las funciones de la fila, el constructor avisa y pide
 | Funciones | Por qué |
 |---|---|
 | Registrar pago o cobro de cuota + Reversar pago + Cerrar caja | Quien cobra, reversa los pagos y cierra la caja puede ocultar una diferencia sin que nadie más lo vea. |
+| Registrar pago o cobro de cuota + Emitir nota de crédito | Quien cobra y también emite notas de crédito puede devolver dinero de lo que él mismo cobró. |
 | Reversar movimiento + Reabrir caja | Quien reversa movimientos y también reabre los cierres puede modificar un día ya arqueado. |
+| Reversar movimiento + Reabrir cierre de caja chica | Quien reversa gastos de la caja chica y también reabre sus cierres puede modificar un conteo ya hecho. |
+| Registrar egreso + Reversar movimiento + Cerrar caja | Quien registra egresos, los reversa y cierra la caja puede esconder una salida de dinero. |
+| Registrar ingreso o gasto de caja chica + Reversar movimiento + Hacer arqueo y cierre | Quien gasta de la caja chica, reversa los gastos y hace el arqueo puede cuadrar la caja a su favor. |
 | Solicitar caída + Aprobar caída | Quien pide una caída y la aprueba no tiene quien lo revise. |
 | Solicitar reactivación + Aprobar reactivación | Quien pide una reactivación y la aprueba no tiene quien lo revise. |
 | Solicitar cambio de programa o nivel + Aprobar cambio de programa o nivel | Quien pide un cambio de programa y lo aprueba no tiene quien lo revise. |
 | Solicitar traslado de sede + Aprobar traslado de sede | Quien pide un traslado y lo aprueba no tiene quien lo revise. |
-| Generar y eliminar borradores de planilla + Registrar el pago de la planilla | Quien arma la planilla y también registra su pago concentra todo el ciclo del dinero del personal. |
+| Realizar el envío (despachar) + Confirmar la recepción de un envío | Quien despacha un envío y también lo recibe puede dar por recibida mercadería que nunca llegó. |
+| Aprobar transferencia + Despachar transferencia + Recepcionar transferencia | Quien aprueba, despacha y recepciona una transferencia controla todo el movimiento sin contrapeso. |
+| Crear ficha de personal + Crear usuario + Asignar rol | Quien crea la ficha, la cuenta y le asigna el rol puede inventar a un trabajador con acceso. |
 | Configurar permisos + Asignar rol | Quien define los permisos y también asigna los roles puede darse a sí mismo cualquier acceso. |
-| Registrar un ajuste o una merma + Confirmar la recepción de un envío + Realizar el envío (despachar) | Quien despacha, recibe y ajusta el stock puede mover mercadería sin contrapeso. |
 
 ## Lo que no es una función
 
 Acciones del contexto que no pertenecen a una persona (consultas, ayudas internas, estado de la interfaz):
 
 - `can`: Consulta de permisos.
+- `availabilityOf`: Consulta (si la función se ofrece según sus contrapartes).
 - `gateOfSchedule`: Consulta (puerta de verificación antes de la primera asesoría).
 - `attendanceBlockOf`: Consulta (bloqueo de asistencia).
 - `pendingFirstSessions`: Consulta (primeras asesorías pendientes).
 - `payrollLinesOf`: Consulta (líneas de una planilla).
 - `documentContextOf`: Consulta (datos para armar un documento).
-- `addNotification`: Interna: la dispara cada función con su aviso (paso de avisos dirigidos).
-- `updateStock`: Interna: la mueven el despacho, la recepción, la entrega de materiales y los ajustes; las pantallas no deberían llamarla directo (paso de guardas).
 - `setIsEnrollmentWizardOpen`: Estado de la interfaz (abrir el asistente de matrícula).
-- `setCurrentBranchId`: Selector de sede TEMPORAL de pruebas: desaparece con las sesiones.
+- `selectBranch`: Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).
+- `switchUser`: Sesión: cambio rápido de usuario con PIN (quien sabe el PIN de una cuenta entra a ella).
+- `lockSession`: Sesión: bloquear (nadie trabaja hasta que una cuenta entre con su PIN).
+- `changeOwnPin`: Sesión: cada persona cambia su propio PIN.
 
 Ítems del menú sin función todavía:
 

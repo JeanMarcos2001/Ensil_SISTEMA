@@ -14,7 +14,7 @@ import { todayLocalISO } from '../../utils/schedule';
 import { nextSequentialId } from '../../utils/ids';
 
 export function Recipes() {
-  const { recipes, setRecipes, programs, levels, branches, items } = useData();
+  const { recipes, saveRecipe, duplicateRecipe, setRecipeStatus, programs, levels, branches, items, can } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
 
@@ -37,6 +37,8 @@ export function Recipes() {
   });
 
   const [formErrors, setFormErrors] = useState<string[]>([]);
+  /** Error de una acción de la lista (duplicar, activar o desactivar). */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const filteredRecipes = recipes.filter(r => {
     const program = programs.find(p => p.id === r.programId);
@@ -104,74 +106,11 @@ export function Recipes() {
     setIsFormOpen(true);
   };
 
-  const validateOverlap = (data: Partial<Recipe>) => {
-    const errors: string[] = [];
-    
-    // Check for overlaps with other active recipes
-    const overlapping = recipes.find(r => {
-      if (r.id === selectedRecipe?.id) return false;
-      if (r.status !== 'Activo' || data.status !== 'Activo') return false;
-      if (r.programId !== data.programId) return false;
-      
-      // Check level overlap: 
-      // - If both are 'All Levels' (empty) -> Overlap
-      // - If one is 'All Levels' and the other is specific -> Overlap
-      // - If both are specific and same -> Overlap
-      const levelOverlap = !r.levelId || !data.levelId || r.levelId === data.levelId;
-      if (!levelOverlap) return false;
-
-      // Check branches
-      const branchOverlap = data.applyToAllBranches || r.applyToAllBranches || 
-        data.branchIds?.some(id => r.branchIds.includes(id));
-
-      if (!branchOverlap) return false;
-
-      // Check dates
-      const startA = new Date(r.startDate).getTime();
-      const endA = r.endDate ? new Date(r.endDate).getTime() : Infinity;
-      const startB = new Date(data.startDate!).getTime();
-      const endB = data.endDate ? new Date(data.endDate).getTime() : Infinity;
-
-      return (startB <= endA && endB >= startA);
-    });
-
-    if (overlapping) {
-      errors.push(`Ya existe una receta activa ("${overlapping.name}") que se solapa en programa, nivel, sede y período.`);
-    }
-
-    return errors;
-  };
-
   const handleSaveRecipe = () => {
-    const errors: string[] = [];
-    if (!formData.name) errors.push('El nombre es obligatorio.');
-    if (!formData.programId) errors.push('El programa es obligatorio.');
-    if (formData.items?.length === 0) errors.push('Debe agregar al menos un artículo.');
-    const recipeItems = formData.items ?? [];
-    if (recipeItems.some(ri => !ri.itemId)) errors.push('Seleccione el artículo en todas las filas.');
-    if (new Set(recipeItems.map(ri => ri.itemId)).size !== recipeItems.length) errors.push('Hay artículos repetidos en la receta.');
-    if (recipeItems.some(ri => !(ri.quantity >= 1))) errors.push('Las cantidades deben ser mayores a 0.');
-    const previousIds = selectedRecipe?.items.map(ri => ri.itemId) ?? [];
-    const invalid = recipeItems.filter(ri => ri.itemId && !getRecipeSelectableItems(items, previousIds).some(i => i.id === ri.itemId));
-    if (invalid.length > 0) errors.push('Hay artículos inactivos o no habilitados para matrícula en la receta.');
-    if (!formData.startDate) errors.push('La fecha de inicio es obligatoria.');
-
-    const overlapErrors = validateOverlap(formData);
-    const allErrors = [...errors, ...overlapErrors];
-
-    if (allErrors.length > 0) {
-      setFormErrors(allErrors);
+    const result = saveRecipe({ ...(formData as Recipe), id: selectedRecipe?.id ?? '' });
+    if (!result.ok) {
+      setFormErrors((result.error ?? 'No se pudo guardar la receta.').split(/\n/));
       return;
-    }
-
-    if (selectedRecipe) {
-      setRecipes(recipes.map(r => r.id === selectedRecipe.id ? { ...formData as Recipe } : r));
-    } else {
-      const newRecipe: Recipe = {
-        ...formData as Recipe,
-        id: nextSequentialId('REC', recipes.map(x => x.id))
-      };
-      setRecipes([newRecipe, ...recipes]);
     }
     setIsFormOpen(false);
   };
@@ -205,12 +144,21 @@ export function Recipes() {
           <p className="text-sm text-text-secondary">Reglas de entrega de artículos por matrícula</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nueva Receta
-          </Button>
+          {can('com-recetas:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nueva Receta
+            </Button>
+          )}
         </div>
       </div>
+
+      {actionError && (
+        <div className="mb-4 bg-danger-tint/50 border border-danger-text/20 rounded-xl p-3 flex items-start justify-between gap-3 text-sm text-danger-text">
+          <p>{actionError}</p>
+          <button type="button" className="text-xs font-medium hover:underline shrink-0" onClick={() => setActionError(null)}>Cerrar</button>
+        </div>
+      )}
 
       {/* Main Content Card */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -328,31 +276,28 @@ export function Recipes() {
                     <td className="px-6 py-3 text-right">
                       <ActionMenu 
                         items={[
-                          { label: 'Editar receta', onClick: () => handleOpenForm(row) },
+                          { label: 'Editar receta', hidden: !can('com-recetas:edit'), onClick: () => handleOpenForm(row) },
                           { 
-                            label: 'Duplicar', 
+                            label: 'Duplicar', hidden: !can('com-recetas:create'),
                             onClick: () => openConfirm({
                               title: 'Duplicar Receta',
                               description: `¿Está seguro de que desea duplicar la receta "${row.name}"?`,
                               onConfirm: () => {
-                                const newRecipe = {
-                                  ...row,
-                                  id: nextSequentialId('REC', recipes.map(x => x.id)),
-                                  name: `${row.name} (Copia)`
-                                };
-                                setRecipes([newRecipe, ...recipes]);
+                                const result = duplicateRecipe(row.id);
+                                setActionError(result.ok ? null : result.error ?? 'No se pudo duplicar la receta.');
                               },
                               variant: 'primary',
                               confirmLabel: 'SÍ, DUPLICAR'
                             }) 
                           },
                           { 
-                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-recetas:deactivate'),
                             onClick: () => openConfirm({
                               title: row.status === 'Activo' ? 'Desactivar Receta' : 'Activar Receta',
                               description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} la receta "${row.name}"?`,
                               onConfirm: () => {
-                                setRecipes(recipes.map(r => r.id === row.id ? { ...r, status: r.status === 'Activo' ? 'Inactivo' : 'Activo' } : r));
+                                const result = setRecipeStatus(row.id, row.status === 'Activo' ? 'Inactivo' : 'Activo');
+                                setActionError(result.ok ? null : result.error ?? 'No se pudo cambiar el estado de la receta.');
                               },
                               variant: row.status === 'Activo' ? 'warning' : 'primary',
                               confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
@@ -419,7 +364,7 @@ export function Recipes() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSaveRecipe}>Guardar Receta</Button>
+            {can(selectedRecipe ? 'com-recetas:edit' : 'com-recetas:create') && <Button variant="primary" onClick={handleSaveRecipe}>Guardar Receta</Button>}
           </div>
         }
       >

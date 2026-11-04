@@ -20,7 +20,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const { branches, companies, addCompany, updateCompany, deleteCompany } = useData();
+  const { branches, companies, addCompany, updateCompany, deleteCompany, can } = useData();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -157,10 +157,12 @@ export function Companies({ onNavigate }: CompaniesProps) {
           <p className="text-sm text-text-secondary">Gestión de razones sociales y empresas del grupo</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nueva Empresa
-          </Button>
+          {can('org-empresas:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nueva Empresa
+            </Button>
+          )}
         </div>
       </div>
 
@@ -218,12 +220,12 @@ export function Companies({ onNavigate }: CompaniesProps) {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Editar empresa', onClick: () => handleOpenForm(row.id) },
-                        { label: 'Gestionar filiales', onClick: () => onNavigate?.('Filiales') },
+                        { label: 'Editar empresa', hidden: !can('org-empresas:edit'), onClick: () => handleOpenForm(row.id) },
+                        { label: 'Gestionar filiales', hidden: !can('org-filiales:view'), onClick: () => onNavigate?.('Filiales') },
                         row.status === 'Activo' 
-                          ? { label: 'Desactivar', onClick: () => handleDeactivate(row.id) }
-                          : { label: 'Activar', onClick: () => handleActivate(row.id) },
-                        { label: 'Eliminar', onClick: () => handleDelete(row.id), danger: true },
+                          ? { label: 'Desactivar', hidden: !can('org-empresas:edit'), onClick: () => handleDeactivate(row.id) }
+                          : { label: 'Activar', hidden: !can('org-empresas:edit'), onClick: () => handleActivate(row.id) },
+                        { label: 'Eliminar', hidden: !can('org-empresas:delete'), onClick: () => handleDelete(row.id), danger: true },
                       ]} 
                     />
                   </td>
@@ -281,7 +283,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => handleOpenForm(selectedCompany || undefined)}>Editar Datos</Button>
+            {can('org-empresas:edit') && <Button variant="primary" onClick={() => handleOpenForm(selectedCompany || undefined)}>Editar Datos</Button>}
           </div>
         }
       >

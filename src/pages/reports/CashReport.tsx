@@ -22,7 +22,7 @@ export function CashReport() {
   const ctx = useMemo(() => ({ cashMovements, pettyCashMovements, cashClosures, branches, fund: pettyFund }), [cashMovements, pettyCashMovements, cashClosures, branches, pettyFund]);
   const caja = useMemo(() => cashReport(ctx, { range, branchId, currency }), [ctx, range, branchId, currency]);
   const chica = useMemo(() => pettyReport(ctx, range), [ctx, range]);
-  if (!can(PERM.reportView)) return <NoAccess />;
+  if (!can(PERM.reportCash)) return <NoAccess />;
 
   const sym = currency;
   const rows = cashMovements

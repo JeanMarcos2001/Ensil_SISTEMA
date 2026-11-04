@@ -4,6 +4,8 @@
  */
 import type { Branch, CashMovement, ChangeRequest, DropRequest, Enrollment, Guardian, Payment, Plan, StockItem, Student } from '../context/DataContext';
 import { cashBalance } from './cash';
+import { capabilitiesOfAction, menuVisible } from './guards';
+import { slugify } from './string';
 import { holderNameOfEnrollment } from './identity';
 import { localDateOf } from './schedule';
 import { formatDisplayDate, roundMoney } from './tariffs';
@@ -23,6 +25,27 @@ export interface DashboardContext {
 }
 
 const isVoidPayment = (p: Payment) => /anulad|revers/i.test(p.status);
+
+/**
+ * Los datos del Dashboard que corresponden a una sede (`'all'` = todos). Cada cifra sale de lo que pasó en esa sede: sus matrículas,
+ * los planes y pagos de esas matrículas, su caja, su stock y las solicitudes de sus matrículas.
+ */
+export function scopeDashboard(ctx: DashboardContext, branchId: string): DashboardContext {
+  if (branchId === 'all') return ctx;
+  const enrollments = ctx.enrollments.filter(e => e.branchId === branchId);
+  const mine = new Set(enrollments.map(e => e.id));
+  return {
+    ...ctx,
+    branches: ctx.branches.filter(b => b.id === branchId),
+    enrollments,
+    plans: ctx.plans.filter(p => mine.has(p.mat)),
+    payments: ctx.payments.filter(p => (p.enrollmentIds ?? []).some(id => mine.has(id))),
+    cashMovements: ctx.cashMovements.filter(m => m.branchId === branchId),
+    stockItems: ctx.stockItems.filter(s => s.branchId === branchId),
+    dropRequests: ctx.dropRequests.filter(r => mine.has(r.enrollmentId)),
+    changeRequests: ctx.changeRequests?.filter(r => mine.has(r.enrollmentId)),
+  };
+}
 
 export interface DueItem {
   planId: string;
@@ -154,3 +177,66 @@ export function relativeTime(iso: string, now: Date): string {
 
 export const initials = (name: string): string => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('') || '·';
 
+// ------------------------------------------------------------------------------------------------------------------ Qué muestra el Dashboard a cada rol
+
+export type DashboardCardId = 'matriculas' | 'cartera' | 'pagos' | 'verificaciones' | 'por-vencer' | 'stock' | 'solicitudes';
+
+export interface QuickLink { id: string; label: string; to: string }
+
+export interface DashboardLayout {
+  /** Las tarjetas de indicadores que se ven (cada una lleva a una pantalla que el rol abre). */
+  cards: DashboardCardId[];
+  /** «Resumen por sedes»: matrículas e ingresos de cada sede. */
+  sedes: boolean;
+  /** Caja por moneda y vencimientos cercanos (dinero). */
+  cashPanel: boolean;
+  /** Actividad reciente (movimientos de caja, reversas…: dinero). */
+  activity: boolean;
+  /** Hasta 4 accesos: los de administración primero y, si sobran lugares, las pantallas de trabajo del rol. */
+  quickLinks: QuickLink[];
+}
+
+/** Los accesos «Nuevo…» se ofrecen solo a quien puede crear eso (no basta con poder ver la pantalla). */
+const ADMIN_LINKS: { label: string; module: string; item: string; creates: string }[] = [
+  { label: 'Nueva Promoción', module: 'configuracion', item: 'Promociones', creates: 'addPromotion' },
+  { label: 'Nuevo Tarifario', module: 'configuracion', item: 'Tarifarios', creates: 'addTariff' },
+  { label: 'Nuevo Usuario', module: 'organizacion', item: 'Usuarios', creates: 'addUser' },
+  { label: 'Nueva Filial', module: 'organizacion', item: 'Filiales', creates: 'addBranch' },
+];
+
+/** Pantallas de trabajo que completan los accesos rápidos de quien no administra. */
+const WORK_LINKS: [string, string][] = [
+  ['operacion', 'Matrículas'], ['operacion', 'Pagos'], ['operacion', 'Caja'], ['operacion', 'Verificación'],
+  ['psicopedagogia', 'Programación'], ['psicopedagogia', 'Historial del alumno'], ['psicopedagogia', 'Cronogramas mensuales'], ['psicopedagogia', 'Recordatorios'],
+  ['logistica', 'Stock'], ['logistica', 'Envíos'], ['logistica', 'Transferencias'], ['logistica', 'Recepciones'],
+  ['personas', 'Alumnos'], ['personas', 'Personal'], ['personas', 'Planilla'],
+];
+
+/**
+ * Lo que ve cada rol en el Dashboard: cada tarjeta, panel y enlace aparece solo si el rol abre la pantalla a la que lleva; el dinero
+ * (cartera, cobros, caja, vencimientos y la actividad reciente) pide además «Ver cifras de dinero».
+ */
+export function dashboardLayout(can: (capabilityId: string) => boolean): DashboardLayout {
+  const opens = (moduleId: string, item: string) => menuVisible(moduleId, item, can);
+  const money = can('dash-resumen:view_money');
+  const cards: [DashboardCardId, boolean][] = [
+    ['matriculas', opens('operacion', 'Matrículas')],
+    ['cartera', money && opens('operacion', 'Planes y cartera')],
+    ['pagos', money && opens('operacion', 'Pagos')],
+    ['verificaciones', opens('operacion', 'Verificación')],
+    ['por-vencer', opens('operacion', 'Matrículas')],
+    ['stock', opens('logistica', 'Stock')],
+    ['solicitudes', opens('sistema', 'Solicitudes pendientes')],
+  ];
+  const links: (QuickLink & { module: string; item: string })[] = [
+    ...ADMIN_LINKS.filter(l => capabilitiesOfAction(l.creates).some(can)).map(l => ({ id: `${l.module}/${l.item}`, label: l.label, to: `/${l.module}/${slugify(l.item)}`, module: l.module, item: l.item })),
+    ...WORK_LINKS.map(([module, item]) => ({ id: `${module}/${item}`, label: item, to: `/${module}/${slugify(item)}`, module, item })),
+  ];
+  return {
+    cards: cards.filter(([, shown]) => shown).map(([id]) => id),
+    sedes: opens('operacion', 'Matrículas') || money,
+    cashPanel: money && opens('operacion', 'Caja'),
+    activity: money,
+    quickLinks: links.filter(l => opens(l.module, l.item)).slice(0, 4).map(({ id, label, to }) => ({ id, label, to })),
+  };
+}

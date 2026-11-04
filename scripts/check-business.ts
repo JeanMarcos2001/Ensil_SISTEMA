@@ -33,7 +33,7 @@ const check = (name: string, ok: boolean, detail = '') => {
 const TODAY = '2026-10-23';
 
 // ================================================================ Autoridad
-const roles: Role[] = [{ id: 'ROL-2', name: 'Administrador de sede', desc: '', users: 0, status: 'Activo' }];
+const roles: Role[] = [{ id: 'ROL-2', name: 'Administrador de sede', desc: '', status: 'Activo' }];
 const perms = [{ roleId: 'ROL-2', permissions: [PERM.dropRequest, PERM.reactivationRequest] }];
 const su = { user: { role: 'Superusuario', name: 'Root' }, roles, permissions: perms };
 const adm = { user: { role: 'Administrador de sede', name: 'Ana' }, roles, permissions: perms };
@@ -41,7 +41,8 @@ check('El Superusuario puede todo', can(su, PERM.reverseCash) && can(su, 'cualqu
 check('Un rol solo puede lo que tiene marcado', can(adm, PERM.dropRequest) && !can(adm, PERM.dropApprove) && !can(adm, PERM.reversePayment));
 check('Un rol inexistente no puede nada', !can({ ...adm, user: { role: 'Fantasma' } }, PERM.dropRequest));
 check('Pedir y resolver usan permisos distintos', canRequest(adm, 'Caída').ok && !canRequest(adm, 'Traslado de sede').ok && !canResolve(adm, 'Caída', 'Otro').ok && canResolve(su, 'Traslado de sede', 'Root').ok);
-check('Hoy se permite resolver la propia solicitud (un solo usuario)', APPROVAL_POLICY.allowSelfApproval === true);
+const approver = { user: { role: 'Administrador de sede', name: 'Ana' }, roles, permissions: [{ roleId: 'ROL-2', permissions: [PERM.dropApprove] }] };
+check('Quien pide una solicitud no la resuelve (salvo el Superusuario, rol técnico)', APPROVAL_POLICY.allowSelfApproval === false && !canResolve(approver, 'Caída', 'Ana').ok && canResolve({ ...approver, user: { ...approver.user, name: 'Luis' } }, 'Caída', 'Ana').ok && canResolve({ ...su, user: { role: 'Superusuario', name: 'Ana' } }, 'Caída', 'Ana').ok && true);
 
 // ================================================================ Notas de crédito
 const pay = (over: Partial<Payment> = {}): Payment => ({ id: 'PAG-1', date: '2026-10-01', student: 'Mateo', concept: 'Cuota 1', amount: 200, method: 'Efectivo', receipt: 'B001-000123', status: 'Aprobado', currency: 'USD', enrollmentIds: ['MAT-1'], ...over });

@@ -44,6 +44,8 @@ export interface ResponsibleContext {
   staff: Staff[];
   assignments: Assignment[];
   branches: { id: string; name: string }[];
+  /** Por qué una persona no está disponible en una fecha (vacaciones, cese); `null` = disponible. Lo aporta `staffAvailability.ts`. */
+  unavailable?: (staffId: string, date: string) => string | null;
 }
 
 const area = strip(INTERVIEWER_AREA);
@@ -61,8 +63,10 @@ export function needsResponsible(a: Pick<FlatActivity, 'date' | 'responsible' | 
 }
 
 /** Cruces del trabajador con una actividad: otra actividad suya o una asesoría activa a esa hora. */
-export function responsibleConflicts(activity: FlatActivity, staff: Staff, ctx: Pick<ResponsibleContext, 'schedules' | 'activities'>): string[] {
+export function responsibleConflicts(activity: FlatActivity, staff: Staff, ctx: Pick<ResponsibleContext, 'schedules' | 'activities' | 'unavailable'>): string[] {
   const out: string[] = [];
+  const away = ctx.unavailable?.(staff.id, activity.date);
+  if (away) out.push(`${away} el ${activity.date}`);
   const range = { start: activity.start, end: activity.end };
   for (const other of ctx.activities) {
     if (other.id === activity.id || other.date !== activity.date) continue;

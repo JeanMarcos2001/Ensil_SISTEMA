@@ -17,7 +17,7 @@ import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { allActivities, todayLocalISO } from '../utils/schedule';
 
 export function AssignmentsPage() {
-  const { assignments, staff, branches, schedules, monthlySchedules, closeAssignment } = useData();
+  const { assignments, staff, branches, schedules, monthlySchedules, closeAssignment, can } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';
@@ -95,10 +95,12 @@ export function AssignmentsPage() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
-            <MapPin size={16} />
-            Nueva asignación
-          </Button>
+          {can('per-asignaciones:save') && (
+            <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
+              <MapPin size={16} />
+              Nueva asignación
+            </Button>
+          )}
         </div>
       </div>
 
@@ -188,8 +190,8 @@ export function AssignmentsPage() {
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(asg) },
                         { label: 'Ver trabajador', onClick: () => navigate(`/personas/personal?ficha=${asg.staffId}`) },
                         ...(isActive(asg) ? [
-                          { label: 'Editar asignación', onClick: () => openEdit(asg) },
-                          { label: 'Cerrar asignación', onClick: () => setToClose(asg), danger: true },
+                          { label: 'Editar asignación', hidden: !can('per-asignaciones:save'), onClick: () => openEdit(asg) },
+                          { label: 'Cerrar asignación', hidden: !can('per-asignaciones:close'), onClick: () => setToClose(asg), danger: true },
                         ] : []),
                       ]} 
                     />

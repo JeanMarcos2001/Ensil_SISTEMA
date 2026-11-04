@@ -9,6 +9,7 @@ import { PERM } from '../../utils/authority';
 import { isStudentWorkable } from '../../utils/validity';
 import { activityState, attendanceBlock, attendanceSummary, canRemoveEnrollment, hasResponsible, isStaffNamed, responsibleOptions, staffLabel } from '../../utils/psyActivities';
 import { reasonsFor } from '../../utils/psyHistory';
+import { unavailableOn } from '../../utils/staffAvailability';
 import {
   allActivities,
   canChangeWithNotice,
@@ -37,7 +38,7 @@ const capText = (capacity: number | null, enrolled: number) => (capacity === nul
 /** Actividades especiales de los cronogramas mensuales: ver y administrar los alumnos inscritos. */
 export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: Props) {
   const {
-    monthlySchedules, students, enrollments, schedules, programs, staff, assignments, branches, can,
+    monthlySchedules, students, enrollments, schedules, programs, staff, assignments, branches, contracts, can,
     setActivityResponsible, enrollInActivity, unenrollFromActivity, markActivityAttendance,
   } = useData();
   const today = todayLocalISO();
@@ -91,7 +92,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   const mayAssign = can(PERM.psiActivityLead);
   const mayMark = can(PERM.psiActivityAttendance);
   const options = selected
-    ? responsibleOptions(selected, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches })
+    ? responsibleOptions(selected, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (id, date) => unavailableOn(id, date, contracts) })
     : [];
   const legacyLead = selected && !selected.responsibleId && selected.responsible.trim() ? staff.find(s => isStaffNamed(s, selected.responsible)) : undefined;
   const leadValue = selected?.responsibleId ?? legacyLead?.id ?? '';

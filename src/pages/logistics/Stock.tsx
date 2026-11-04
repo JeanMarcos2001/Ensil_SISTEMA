@@ -14,7 +14,7 @@ import { useData } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 
 export function Stock() {
-  const { stockItems, items, branches, unpackPackage, packPackage, updateStock, addAdjustment, updateMinStock, currentBranchId } = useData();
+  const { stockItems, items, branches, unpackPackage, packPackage, registerStockEntry, addAdjustment, updateMinStock, currentBranchId, can } = useData();
   const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
@@ -138,10 +138,12 @@ export function Stock() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenNewEntry()}>
-            <Plus size={16} />
-            Registrar ingreso
-          </Button>
+          {can('log-stock:entry') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenNewEntry()}>
+              <Plus size={16} />
+              Registrar ingreso
+            </Button>
+          )}
         </div>
       </div>
 
@@ -253,16 +255,16 @@ export function Stock() {
                       <ActionMenu 
                         items={[
                           { label: 'Ver detalle', onClick: () => handleOpenDetail(row) },
-                          { label: 'Registrar ingreso', onClick: () => handleOpenNewEntry(row) },
-                          { label: 'Ajustar stock', onClick: () => handleOpenAdjust(row) },
-                          { label: 'Transferir', onClick: () => { window.location.href = '/logistics/transfers'; } },
-                          ...(item?.isPackage ? [
+                          { label: 'Registrar ingreso', hidden: !can('log-stock:entry'), onClick: () => handleOpenNewEntry(row) },
+                          { label: 'Ajustar stock', hidden: !can('log-ajustes:create'), onClick: () => handleOpenAdjust(row) },
+                          { label: 'Transferir', hidden: !can('log-transfer:req_transfer'), onClick: () => { window.location.href = '/logistics/transfers'; } },
+                          ...(item?.isPackage && can('log-stock:pack') ? [
                             { label: 'Empaquetar', onClick: () => handleOpenPack(row) }
                           ] : []),
-                          ...(item?.isPackage && item?.allowUnpacking ? [
+                          ...(item?.isPackage && item?.allowUnpacking && can('log-stock:pack') ? [
                             { label: 'Desempaquetar', onClick: () => handleOpenUnpack(row) }
                           ] : []),
-                          { label: 'Ver en Kardex', onClick: () => { window.location.href = '/logistics/kardex'; } },
+                          { label: 'Ver en Kardex', hidden: !can('log-kardex:view'), onClick: () => { window.location.href = '/logistics/kardex'; } },
                         ]} 
                       />
                     </td>
@@ -321,9 +323,11 @@ export function Stock() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenNewEntry(selectedStock); }}>
-              Registrar ingreso
-            </Button>
+            {can('log-stock:entry') && (
+              <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenNewEntry(selectedStock); }}>
+                Registrar ingreso
+              </Button>
+            )}
           </div>
         }
       >
@@ -368,13 +372,15 @@ export function Stock() {
                 <div className="bg-surface border border-border-soft rounded-xl p-4 text-center relative group">
                   <span className="block text-xs text-text-muted mb-1">Mínimo</span>
                   <span className="text-2xl font-bold text-text-secondary">{selectedStock.minStock}</span>
-                  <Button 
-                    variant="ghost" 
-                    className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => handleOpenEditMinStock(selectedStock)}
-                  >
-                    <Plus size={12} />
-                  </Button>
+                  {can('log-stock:edit_min') && (
+                    <Button
+                      variant="ghost"
+                      className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => handleOpenEditMinStock(selectedStock)}
+                    >
+                      <Plus size={12} />
+                    </Button>
+                  )}
                 </div>
                 <div className="bg-surface border border-border-soft rounded-xl p-4 text-center">
                   <span className="block text-xs text-text-muted mb-1">Disponible</span>
@@ -472,29 +478,19 @@ export function Stock() {
               const branchIdToUse = selectedStock ? selectedStock.branchId : entryBranchId;
               const itemIdToUse = selectedStock ? selectedStock.itemId : entryItemId;
 
-              if (!branchIdToUse || !itemIdToUse || !qtyInput.value) {
-                setFormError('Por favor complete los campos obligatorios (Sede, Artículo y Cantidad)');
+              // Las reglas (cantidad entera, documento de respaldo, permiso) y el kardex viven en la acción
+              const entry = registerStockEntry({
+                branchId: branchIdToUse,
+                itemId: itemIdToUse,
+                qty: parseInt(qtyInput.value, 10),
+                doc: docInput.value,
+                reason: reasonInput.value,
+              });
+              if (!entry.ok) {
+                setFormError(entry.error ?? 'No se pudo registrar el ingreso.');
                 return;
               }
 
-              // Find or create stock item
-              let stockItem = stockItems.find(s => s.branchId === branchIdToUse && s.itemId === itemIdToUse);
-              
-              if (!stockItem) {
-                // In a real app, this would be an API call to create the stock item first
-                setFormError('No se encontró el registro de stock para esta sede y artículo. En un entorno real, se crearía automáticamente.');
-                return;
-              }
-
-              updateStock(
-                branchIdToUse,
-                itemIdToUse, 
-                parseInt(qtyInput.value), 
-                'Ingreso', 
-                reasonInput.value || 'Ingreso manual de stock',
-                docInput.value
-              );
-              
               setIsNewEntryOpen(false);
               setEntryBranchId('');
               setEntryItemId('');

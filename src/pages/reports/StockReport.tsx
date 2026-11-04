@@ -28,7 +28,7 @@ export function StockReport() {
     () => stockReport({ stockItems, items, branches, recipes, enrollments, kardex, transfers, shipments, today }, { range, branchId }),
     [stockItems, items, branches, recipes, enrollments, kardex, transfers, shipments, today, range, branchId]
   );
-  if (!can(PERM.reportView)) return <NoAccess />;
+  if (!can(PERM.reportStock)) return <NoAccess />;
 
   const { kpis } = report;
   const q = query.trim().toLowerCase();

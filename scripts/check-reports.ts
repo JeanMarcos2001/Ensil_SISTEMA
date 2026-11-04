@@ -214,7 +214,7 @@ const actx: AuditContext = {
   payrollRuns: [{ id: 'PL1', period: '2026-09', status: 'Cerrada', events: [{ at: '2026-10-02T09:00:00', action: 'Cerrada', by: 'Contadora', detail: '' }] }] as never,
   contracts: [{ id: 'C1', staffId: 'Ana', revisions: [{ at: '2026-10-03T09:00:00', by: 'RRHH', reason: 'Aumento', changes: [{ label: 'Sueldo', from: '1000', to: '1100' }] }] }] as never,
   adjustments: [{ id: 'AJ1', date: '2026-10-04T09:00:00', type: 'Merma', material: 'Libro', branch: 'Lima', qty: 1, reason: 'Dañado', user: 'Almacén' }] as never,
-  staffName: id => id, studentName: id => id,
+  staffName: id => id, studentName: id => id, showPay: true,
 };
 const audit = buildAudit(actx);
 check('Auditoría: reúne las fuentes de varios módulos', ['Matrículas', 'Pagos', 'Caja', 'Caja chica', 'Planilla', 'Contratos', 'Logística'].every(m => audit.some(e => e.module === m)), [...new Set(audit.map(e => e.module))].join());
@@ -230,6 +230,22 @@ check('Filtro: por usuario', filterAudit(audit, { ...todo, user: 'Jefe' }).every
 check('Filtro: por texto sin importar tildes ni mayúsculas', filterAudit(audit, { ...todo, text: 'DIGITACION' }).length === 1);
 check('Filtro: por rango', filterAudit(audit, { ...todo, range: { from: '2026-10-03', to: '2026-10-04' } }).length === 2, String(filterAudit(audit, { ...todo, range: { from: '2026-10-03', to: '2026-10-04' } }).length));
 check('Usuarios del filtro sin repetir ni vacíos', new Set(auditUsers(audit)).size === auditUsers(audit).length && !auditUsers(audit).includes(''));
+
+// Sueldos: sin la función «Ver remuneraciones» los importes de contratos y planilla se ocultan
+const payCtx: AuditContext = {
+  ...actx,
+  payrollRuns: [{ id: 'PL2', period: '2026-09', status: 'Cerrada', events: [{ at: '2026-10-02T09:00:00', action: 'Cerrada', by: 'Contadora', detail: '3 trabajador(es) · neto S/ 8 207.51' }] }] as never,
+  contracts: [{ id: 'C2', staffId: 'Ana', revisions: [{ at: '2026-10-03T09:00:00', by: 'RRHH', reason: 'Aumento por desempeño', changes: [{ label: 'Sueldo bruto', from: '1000', to: '1100' }, { label: 'Jornada', from: 'Mañana', to: 'Tarde' }] }] }] as never,
+};
+const withPay = buildAudit({ ...payCtx, showPay: true });
+const noPay = buildAudit({ ...payCtx, showPay: false });
+const planillaOf = (rows: typeof audit) => rows.find(e => e.module === 'Planilla')!.detail;
+const contratoOf = (rows: typeof audit) => rows.find(e => e.module === 'Contratos')!.detail;
+check('Sueldos: con permiso se ve el neto de la planilla y el cambio de sueldo', planillaOf(withPay).includes('8 207.51') && contratoOf(withPay).includes('1000 → 1100'));
+check('Sueldos: sin permiso la planilla oculta el importe', !planillaOf(noPay).includes('8 207') && planillaOf(noPay).includes('S/ ••••') && planillaOf(noPay).includes('3 trabajador(es)'), planillaOf(noPay));
+check('Sueldos: sin permiso el contrato oculta el valor del sueldo pero deja ver que cambió', !contratoOf(noPay).includes('1000') && !contratoOf(noPay).includes('1100') && contratoOf(noPay).includes('Sueldo bruto: ••••'), contratoOf(noPay));
+check('Sueldos: lo que no es remuneración se sigue viendo (jornada y motivo)', contratoOf(noPay).includes('Jornada: Mañana → Tarde') && contratoOf(noPay).includes('Aumento por desempeño'));
+check('Sueldos: ocultar importes no cambia cuántos registros hay ni quién los hizo', withPay.length === noPay.length && withPay.every((e, i) => e.by === noPay[i].by && e.at === noPay[i].at));
 
 console.log(failed === 0 ? '\nTodo en verde.' : `\n${failed} verificación(es) fallaron.`);
 process.exit(failed === 0 ? 0 : 1);

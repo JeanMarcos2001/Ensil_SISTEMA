@@ -12,7 +12,7 @@ export const ENROLLMENT_STATUSES = ['Activa', 'Caída'] as const;
 export type EnrollmentStatus = (typeof ENROLLMENT_STATUSES)[number];
 
 /** Estado guardado del contrato; «Vencido» no se guarda: sale de la fecha de fin (`contractStatus`). */
-export const CONTRACT_STATUSES = ['Vigente', 'Cesado'] as const;
+export const CONTRACT_STATUSES = ['Vigente', 'Cesado', 'Renovado'] as const;
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
 export const PLAN_STATUSES = ['Al día', 'Atrasado', 'Completado', 'Caída'] as const;

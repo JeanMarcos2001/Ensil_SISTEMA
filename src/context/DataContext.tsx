@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { createIdAllocator, nextNumericId, nextSequentialId } from '../utils/ids';
@@ -7,7 +7,7 @@ import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, prog
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
 import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
 import { deactivationNote, staffDisplayName, syncPatch, validateLinkedUser } from '../utils/staffAccess';
-import { linesOf, runIdOf, validateAdjustment, validateClose, validateGenerate, validatePay, validateReopen as validatePayrollReopen, type BuiltPayroll } from '../utils/payrollRun';
+import { linesOf, runIdOf, validateAdjustment, validateClose, validateGenerate, validateReopen as validatePayrollReopen, type BuiltPayroll } from '../utils/payrollRun';
 import { periodLabel, periodOf, round2, type LineCalc } from '../utils/payrollEngine';
 import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
 import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
@@ -18,8 +18,10 @@ import { partsUSD } from '../utils/payments';
 import { closeAllOf, closeAssignmentIn, closeImpact, isActive as isActiveAssignment, saveAssignment as saveAssignmentIn, validateAssignmentClose, validateAssignmentForm, type AssignmentForm } from '../utils/assignments';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
 import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
+import { buildRenewal, markRenewed, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
+import { ceseAgendaError, sessionResponsibleUnavailable, unavailableOn } from '../utils/staffAvailability';
 import { applyCashReversal, buildDeposit, cashReversalCheck, validateCashReversal, validateDeposit, type DepositInput } from '../utils/cash';
-import { PERM, can as canDo, type AuthorityContext } from '../utils/authority';
+import { PERM, SUPERUSER, can as canDo, type AuthorityContext } from '../utils/authority';
 import { allowedNoteModes, buildCreditNote, validateNoteChoice, type NoteMode } from '../utils/creditNotes';
 import { buildClosure, closedMessage, expectedAt, validateClosure, validateReopen, type ClosureInput } from '../utils/cashClosure';
 import { DEFAULT_FUND, validateFund, type PettyFund } from '../utils/pettyCash';
@@ -38,10 +40,23 @@ import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
-import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers } from '../data/seedCatalog';
+import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPermissions, seedPrograms, seedRoles, seedStaff, seedUsers } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
+import { availability, buildHolders, type Availability } from '../utils/capabilities';
+import { availabilityForViewer, denialMessage, guardActions, unmetClause, userChangeNeeds } from '../utils/guards';
+import { readStoredAccess, restoreAccess, writeStoredAccess } from '../utils/accessStore';
+import {
+  activeAccount, defaultViewBranch, hashPin, initialUserId, lastAccessLabel, lastSuperuserError, NO_BRANCH, parseSession, pinError, pinSetError, readStoredSession,
+  scopeOfUser, selfAccountError, tryChangePin, trySwitch, validView, viewBranchError, writeStoredSession, type PinAttempts, type SessionScope,
+} from '../utils/session';
+import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, seatLimitError, validateRoleInput, type AcceptedRisk } from '../utils/roleBuilder';
+import { markRead, noticesFor, visibility, type NoticeScope } from '../utils/notifications';
+import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
+import { duplicateRecipe as copyRecipe, recipeStatusError, validateRecipe } from '../utils/recipes';
+import { shipmentRouteError, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../utils/logisticsRoutes';
+import { availableStock, getCurrentPrice, itemSaleError, stockEntryError, stockMovesError, validateItem } from '../utils/inventory';
 
 // Types
 export interface Guardian {
@@ -593,6 +608,9 @@ export interface Transfer {
   items: TransferItem[];
   boxes?: TransferBox[];
   reason: string;
+  /** Quién la solicitó (a esa persona le llega el aviso de aprobación o rechazo). */
+  requestedBy?: string;
+  requestedById?: string;
   shippingMethodId?: string;
   courierId?: string;
   trackingNumber?: string;
@@ -621,9 +639,15 @@ export interface Notification {
   message: string;
   type: 'info' | 'success' | 'warning' | 'danger';
   date: string;
-  read: boolean;
-  branchId?: string;
+  /** Qué pasó (`EVENTS` del registro de funciones) y dónde: de ahí se calcula quién lo recibe. Sin evento = aviso general para todos. */
+  eventId?: string;
+  scope?: NoticeScope;
+  /** Quiénes ya lo leyeron (cada usuario lo marca por su cuenta). */
+  readBy?: string[];
 }
+
+/** Un aviso tal como lo ve un usuario: con su marca de leído y si le llega por respaldo. */
+export type NoticeView = Notification & { read: boolean; viaFallback: boolean };
 
 export interface ShipmentBox {
   id: string;
@@ -954,6 +978,8 @@ export interface Contract {
   vacationStart?: string;
   vacationEnd?: string;
   terminationReason?: string;
+  /** Contrato que este renueva (el anterior queda «Renovado»; a cuál dio paso se deduce, no se guarda). */
+  renewsId?: string;
   observations?: string;
   /** Modificaciones del contrato vigente, con motivo (la más reciente primero). */
   revisions?: ContractRevision[];
@@ -1007,25 +1033,22 @@ export interface PayrollLine {
 export interface PayrollEvent {
   at: string;
   by: string;
-  action: 'Generada' | 'Ajuste' | 'Cerrada' | 'Pagada' | 'Reabierta';
+  action: 'Generada' | 'Ajuste' | 'Cerrada' | 'Reabierta';
   detail?: string;
 }
 
-/** Planilla de un mes. Borrador = se recalcula con los contratos; Cerrada y Pagada guardan la foto de las líneas. */
+/** Planilla de un mes (informativa: el sistema no registra pagos al personal). Borrador = se recalcula con los contratos; Cerrada guarda la foto de las líneas. */
 export interface PayrollRun {
   id: string;
   /** AAAA-MM. */
   period: string;
-  status: 'Borrador' | 'Cerrada' | 'Pagada';
+  status: 'Borrador' | 'Cerrada';
   adjustments: PayrollAdjustment[];
   lines?: PayrollLine[];
   createdAt: string;
   createdBy: string;
   closedAt?: string;
   closedBy?: string;
-  payDate?: string;
-  payNote?: string;
-  paidBy?: string;
   events: PayrollEvent[];
 }
 
@@ -1059,10 +1082,16 @@ export interface Role {
   id: string;
   name: string;
   desc: string;
-  users: number;
   status: 'Activo' | 'Inactivo';
-  baseRole?: string;
+  /** Plantilla de partida (`utils/roleTemplates.ts`): solo es el punto de partida, el rol se edita libremente. */
+  templateId?: string;
   observations?: string;
+  /** Cuentas activas que admite el rol por sede (sin valor = sin límite). */
+  branchUserLimit?: number;
+  /** Rol del sistema (Superusuario): no se edita, desactiva ni elimina. */
+  locked?: boolean;
+  /** Combinaciones a separar que se aceptaron al guardar las funciones, con su motivo, quién y cuándo. */
+  acceptedRisks?: AcceptedRisk[];
 }
 
 export interface User {
@@ -1080,6 +1109,8 @@ export interface User {
   staffId?: string;
   /** Por qué y cuándo se desactivó la cuenta (p. ej. el trabajador se inactivó). */
   statusNote?: string;
+  /** Marca irreversible del PIN de acceso rápido (`utils/session.ts`); nunca el PIN. Sin ella la cuenta no puede entrar. */
+  pinHash?: string;
 }
 
 export interface Permission {
@@ -1091,6 +1122,8 @@ export interface Branch {
   id: string; // Código
   name: string; // Nombre de filial
   company: string; // Empresa
+  /** Almacén central de toda la empresa (uno solo): de él salen los envíos y en él termina todo lo que se devuelve. */
+  isWarehouse?: boolean;
   status: 'Activo' | 'Inactivo';
   address: string; // Dirección
   reference?: string; // Referencia
@@ -1199,6 +1232,31 @@ export interface StockResult {
   error?: string;
 }
 
+export interface NewRoleInput {
+  name: string;
+  desc?: string;
+  status?: Role['status'];
+  templateId?: string;
+  observations?: string;
+  branchUserLimit?: number;
+  permissions?: string[];
+  reasons?: Record<string, string>;
+}
+
+export type RolePatch = Partial<Pick<Role, 'name' | 'desc' | 'status' | 'observations' | 'branchUserLimit' | 'templateId'>>;
+
+export interface ItemSaleInput {
+  branchId: string;
+  itemId: string;
+  qty: number;
+  currency: 'PEN' | 'USD';
+  exchangeRate?: number;
+  method: string;
+  customerName: string;
+  receiptType: string;
+  receiptNumber: string;
+}
+
 interface DataContextType {
   guardians: Guardian[];
   students: Student[];
@@ -1206,7 +1264,10 @@ interface DataContextType {
   plans: Plan[];
   payments: Payment[];
   items: Item[];
-  setItems: React.Dispatch<React.SetStateAction<Item[]>>;
+  /** Crea artículos (uno o una carga masiva); un artículo que se vende nace con su precio general (`prices`). Todo o nada. */
+  addItems: (items: Item[], prices?: { itemId: string; amount: number }[]) => StockResult;
+  /** Edita un artículo (también activarlo o desactivarlo). */
+  updateItem: (id: string, item: Item) => StockResult;
   stockItems: StockItem[];
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
@@ -1222,11 +1283,12 @@ interface DataContextType {
   addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => { ok: boolean; error?: string };
   kardex: KardexEntry[];
   transfers: Transfer[];
-  setTransfers: React.Dispatch<React.SetStateAction<Transfer[]>>;
   couriers: Courier[];
-  setCouriers: React.Dispatch<React.SetStateAction<Courier[]>>;
+  addCourier: (courier: Omit<Courier, 'id'>) => StockResult;
+  updateCourier: (id: string, courier: Partial<Omit<Courier, 'id'>>) => StockResult;
   shippingMethods: ShippingMethod[];
-  setShippingMethods: React.Dispatch<React.SetStateAction<ShippingMethod[]>>;
+  addShippingMethod: (method: Omit<ShippingMethod, 'id'>) => StockResult;
+  updateShippingMethod: (id: string, method: Partial<Omit<ShippingMethod, 'id'>>) => StockResult;
   adjustments: Adjustment[];
   addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => StockResult;
   schedules: Schedule[];
@@ -1273,15 +1335,15 @@ interface DataContextType {
   inactivateStaff: (id: string, input: { reason: string; detail: string; date: string }) => StockResult;
   reactivateStaff: (id: string, detail: string) => StockResult;
   roles: Role[];
-  setRoles: React.Dispatch<React.SetStateAction<Role[]>>;
-  addRole: (role: Role) => void;
-  updateRole: (id: string, roleData: Partial<Role>) => void;
-  deleteRole: (id: string) => void;
+  /** Crea el rol; con `permissions` lo deja armado en una sola operación (todo o nada). `reasons` son los motivos de las combinaciones a separar. */
+  addRole: (input: NewRoleInput) => StockResult & { id?: string };
+  updateRole: (id: string, roleData: RolePatch) => StockResult;
+  deleteRole: (id: string) => StockResult;
   users: User[];
-  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   /** Crea una cuenta; si viene de una ficha de personal (`staffId`) hereda sus datos y sedes (ver `utils/staffAccess.ts`). */
-  addUser: (user: User) => StockResult;
-  updateUser: (id: string, userData: Partial<User>) => StockResult;
+  addUser: (user: User & { pin?: string }) => StockResult;
+  /** Cambia datos de una cuenta; `pin` fija un PIN nuevo (lo hace quien administra cuentas; el de un Superusuario, solo otro Superusuario). */
+  updateUser: (id: string, userData: Partial<User> & { pin?: string }) => StockResult;
   payrollRuns: PayrollRun[];
   /** Líneas de una planilla: la foto si ya se cerró; en borrador, se recalculan con los contratos. */
   payrollLinesOf: (run: PayrollRun) => BuiltPayroll;
@@ -1290,15 +1352,15 @@ interface DataContextType {
   addPayrollAdjustment: (runId: string, input: { staffId: string; kind: 'Ingreso' | 'Descuento'; concept: string; amount: number; taxable: boolean; reason: string }) => StockResult;
   removePayrollAdjustment: (runId: string, adjustmentId: string) => StockResult;
   closePayroll: (runId: string) => StockResult;
-  payPayroll: (runId: string, input: { date: string; note: string }) => StockResult;
   reopenPayroll: (runId: string, reason: string) => StockResult;
   /** Cierra un contrato vigente (cese); no se permite si una planilla ya cerrada lo pagó en esas fechas. */
   closeContract: (id: string, date: string, reason: string) => StockResult;
-  deleteUser: (id: string) => void;
+  /** Renueva un contrato con fecha de fin: el anterior queda «Renovado» y nace uno nuevo desde el día siguiente a su fin (con motivo). */
+  renewContract: (id: string, input: RenewalInput) => StockResult;
+  deleteUser: (id: string) => StockResult;
   permissions: Permission[];
-  savePermissions: (roleId: string, newPermissions: string[]) => void;
+  savePermissions: (roleId: string, newPermissions: string[], reasons?: Record<string, string>) => StockResult;
   companies: Company[];
-  setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
   addCompany: (company: Company) => void;
   updateCompany: (id: string, companyData: Partial<Company>) => void;
   deleteCompany: (id: string) => void;
@@ -1310,14 +1372,21 @@ interface DataContextType {
   tariffs: Tariff[];
   promotions: Promotion[];
   recipes: Recipe[];
-  setRecipes: React.Dispatch<React.SetStateAction<Recipe[]>>;
+  /** Crea (id vacío) o edita una receta; valida los datos y que no se solape con otra activa. Los errores vienen separados por saltos de línea. */
+  saveRecipe: (recipe: Recipe) => StockResult & { id?: string };
+  /** La copia nace inactiva (si no, chocaría con la original). */
+  duplicateRecipe: (id: string) => StockResult & { id?: string };
+  setRecipeStatus: (id: string, status: Recipe['status']) => StockResult;
   unpackPackage: (stockId: string) => StockResult;
   packPackage: (stockId: string) => StockResult;
-  updateStock: (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string) => StockResult;
+  /** Vende un artículo en caja: descuenta el stock de la sede y registra el ingreso en una sola operación. */
+  registerItemSale: (input: ItemSaleInput) => StockResult;
+  /** Ingreso de stock (compra o reposición) con el documento que lo respalda; queda en el kardex. */
+  registerStockEntry: (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }) => StockResult;
   updateMinStock: (stockId: string, minStock: number) => void;
   updateTransferStatus: (id: string, status: Transfer['status']) => StockResult;
-  updateTransfer: (id: string, transfer: Partial<Transfer>) => void;
-  addTransfer: (transfer: Omit<Transfer, 'id'>) => void;
+  updateTransfer: (id: string, transfer: Partial<Transfer>) => StockResult;
+  addTransfer: (transfer: Omit<Transfer, 'id'>) => StockResult;
   addStaff: (staff: Omit<Staff, 'id'>) => Staff;
   updateStaff: (id: string, staff: Partial<Staff>) => void;
   deleteStaff: (id: string) => void;
@@ -1379,6 +1448,8 @@ interface DataContextType {
   creditNotes: CreditNote[];
   /** ¿El usuario actual tiene el permiso `funcionalidad:acción`? (el Superusuario puede todo) */
   can: (permission: string) => boolean;
+  /** ¿Se ofrece la función? Depende de sus contrapartes (p. ej. despachar un envío exige quien lo reciba en la sede destino). */
+  availabilityOf: (capabilityId: string, target?: { branchId: string; branchName: string }) => Availability;
   addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
   updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
   /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
@@ -1394,7 +1465,7 @@ interface DataContextType {
     observation?: string;
     date: string;
     verifier: string;
-  }) => void;
+  }, deductions?: { itemId: string; quantity: number }[]) => StockResult;
   addProgram: (program: Omit<Program, 'id'>) => void;
   updateProgram: (id: string, program: Partial<Program>) => void;
   deleteProgram: (id: string) => void;
@@ -1410,9 +1481,9 @@ interface DataContextType {
   addPromotion: (promotion: Omit<Promotion, 'id'>) => void;
   updatePromotion: (id: string, promotion: Partial<Promotion>) => void;
   deletePromotion: (id: string) => void;
-  addBranch: (branch: Branch) => void;
-  updateBranch: (id: string, branch: Partial<Branch>) => void;
-  deleteBranch: (id: string) => void;
+  addBranch: (branch: Branch) => StockResult;
+  updateBranch: (id: string, branch: Partial<Branch>) => StockResult;
+  deleteBranch: (id: string) => StockResult;
   isEnrollmentWizardOpen: boolean;
   setIsEnrollmentWizardOpen: (isOpen: boolean) => void;
   shipments: Shipment[];
@@ -1421,11 +1492,28 @@ interface DataContextType {
   updateShipment: (id: string, shipment: Partial<Shipment>) => StockResult;
   deleteShipment: (id: string) => void;
   notifications: Notification[];
-  addNotification: (notification: Omit<Notification, 'id' | 'date' | 'read'>) => void;
+  /** Los avisos que le corresponden al usuario actual (según las funciones de su rol y su sede), con la marca de leído. */
+  myNotifications: NoticeView[];
+  /** Alertas por regla (cuotas vencidas, materiales pendientes, contratos por vencer, stock bajo el mínimo) que le corresponden al usuario actual. */
+  myAlerts: SystemAlert[];
   markNotificationAsRead: (id: string) => void;
   incidents: ReceptionIncident[];
+  /** Sede que se ve: `'all'` (vista global) solo para quien alcanza todas; el resto, una de las suyas. Sale de la cuenta con la que se trabaja. */
   currentBranchId: string;
-  setCurrentBranchId: (id: string) => void;
+  /** Cambia la sede que se ve, solo entre las que alcanza la cuenta. */
+  selectBranch: (id: string) => StockResult;
+  /** Las sedes que alcanza la cuenta con la que se trabaja. */
+  sessionScope: SessionScope;
+  /** Sin cuenta activa (bloqueada o cerrada): hay que entrar con un PIN. */
+  sessionLocked: boolean;
+  /** Entra a otra cuenta con su PIN (cambio rápido de usuario). */
+  switchUser: (userId: string, pin: string) => StockResult;
+  /** Bloquea la sesión: nadie trabaja hasta que una cuenta entre con su PIN. */
+  lockSession: () => void;
+  /** Cambia el PIN de la cuenta con la que se trabaja. */
+  changeOwnPin: (currentPin: string, nextPin: string) => StockResult;
+  /** Qué pasó con lo guardado en el navegador al arrancar (roles, permisos y cuentas). */
+  accessRestore: { restored: boolean; notes: string[] };
   currentUser: { id: string; name: string; role: string; branchId: string | 'all' };
   confirmReception: (data: {
     docId: string;
@@ -1580,6 +1668,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'STK-008', itemId: 'ITM-MAT-01', branchId: 'FIL-CHI', stock: 15, minStock: 10 },
     { id: 'STK-009', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-CHI', stock: 8, minStock: 3 },
     { id: 'STK-010', itemId: 'ITM-HER-02', branchId: 'FIL-CHI', stock: 10, minStock: 5 },
+    // Almacén central (Los Olivos): de aquí salen los envíos a todas las filiales
+    { id: 'STK-011', itemId: 'ITM-LIB-K1', branchId: 'FIL-LOL', stock: 400, minStock: 100 },
+    { id: 'STK-012', itemId: 'ITM-MAT-01', branchId: 'FIL-LOL', stock: 250, minStock: 60 },
+    { id: 'STK-013', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-LOL', stock: 80, minStock: 20 },
+    { id: 'STK-014', itemId: 'ITM-HER-01', branchId: 'FIL-LOL', stock: 150, minStock: 30 },
+    { id: 'STK-015', itemId: 'ITM-HER-02', branchId: 'FIL-LOL', stock: 150, minStock: 30 },
   ]);
 
   const [kardex, setKardex] = useState<KardexEntry[]>([
@@ -1597,7 +1691,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { 
       id: 'TRF-2024-001', 
       date: '2024-03-15', 
-      originId: 'FIL-PIU', 
+      originId: 'FIL-LOL', 
       destinationId: 'FIL-CHI', 
       status: 'En tránsito', 
       eta: '2024-03-20',
@@ -1614,7 +1708,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       id: 'TRF-2024-002', 
       date: '2024-03-14', 
       originId: 'FIL-CHI', 
-      destinationId: 'FIL-PIU', 
+      destinationId: 'FIL-LOL', 
       status: 'Borrador', 
       items: [
         { itemId: 'ITM-KIT-BIENV', quantity: 2 }
@@ -1626,7 +1720,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { 
       id: 'TRF-2024-003', 
       date: '2024-03-10', 
-      originId: 'FIL-PIU', 
+      originId: 'FIL-LOL', 
       destinationId: 'FIL-CHI', 
       status: 'Recibida', 
       receptionDate: '2024-03-10',
@@ -1644,7 +1738,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     {
       id: 'ENV-2024-001',
       date: '2024-03-15',
-      originId: 'FIL-PIU', // Piura (Almacén Central)
+      originId: 'FIL-LOL', // Los Olivos (Almacén Central)
       destinationId: 'FIL-CHI', // Chiclayo
       status: 'En tránsito',
       boxes: [
@@ -1744,6 +1838,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     // Cancelar o reprogramar exige el motivo (y quién lo pidió); con menos de 24 h solo lo decide la institución
     const cancelling = next.status === 'Cancelado' && target.status !== 'Cancelado';
     const moved = next.status !== 'Cancelado' && (next.date !== target.date || next.time !== target.time || next.responsible.trim() !== target.responsible.trim());
+    // El responsable de una asesoría que se mueve o se reasigna debe trabajar ese día (no de vacaciones ni cesado)
+    if (moved) {
+      const away = sessionResponsibleUnavailable(next.responsible, next.date, staff, contracts);
+      if (away) return { ok: false, reason: away };
+    }
     if (cancelling || moved) {
       const problems = validateChangeMeta(cancelling ? 'cancelar' : 'reprogramar', meta, {
         withNotice: !changeBlockedByNotice(target, new Date()),
@@ -1821,7 +1920,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!can(PERM.psiActivityLead)) return { ok: false, error: 'Su rol no puede asignar el responsable de una actividad.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
-    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches });
+    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, contracts) });
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const member = staffId ? staff.find(s => s.id === staffId) : undefined;
     patchActivity(a, x => ({ ...x, responsable: member ? staffLabel(member) : '', responsableId: member?.id }));
@@ -1904,32 +2003,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
-  const [currentBranchId, setCurrentBranchId] = useState<string>('all');
-  const [currentUser] = useState({
-    id: 'USR-001',
-    name: 'Superadmin',
-    role: 'Superusuario',
-    branchId: 'all'
-  });
-
   const [incidents, setIncidents] = useState<ReceptionIncident[]>([]);
 
   const [notifications, setNotifications] = useState<Notification[]>([
-    { id: '1', title: 'Bienvenido', message: 'Bienvenido al sistema ENSIL', type: 'info', date: new Date().toISOString(), read: false }
+    { id: 'NOT-001', title: 'Bienvenido', message: 'Bienvenido al sistema ENSIL', type: 'info', date: new Date().toISOString(), readBy: [] }
   ]);
 
-  const addNotification = (notif: Omit<Notification, 'id' | 'date' | 'read'>) => {
-    const newNotif: Notification = {
-      ...notif,
-      id: allocId('NOT', notifications.map(n => n.id)),
-      date: new Date().toISOString(),
-      read: false
-    };
-    setNotifications(prev => [newNotif, ...prev]);
+  /** Emite un aviso: guarda qué pasó y dónde; quién lo recibe se calcula al mostrar (`utils/notifications.ts`). */
+  const notify = (eventId: string, n: { title: string; message: string; type: Notification['type']; scope?: NoticeScope }) => {
+    setNotifications(prev => [
+      { id: allocId('NOT', prev.map(x => x.id)), title: n.title, message: n.message, type: n.type, date: new Date().toISOString(), eventId, scope: n.scope, readBy: [] },
+      ...prev,
+    ]);
   };
 
   const markNotificationAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    setNotifications(prev => markRead(prev, id, currentUser.id));
   };
 
   const confirmReception = (data: {
@@ -2002,11 +2091,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
     // 5. Send Notification
-    addNotification({
+    notify(hasDifferences ? 'reception_with_differences' : docType === 'Envío' ? 'shipment_received' : 'transfer_received', {
       title: hasDifferences ? 'Recepción con diferencias' : 'Recepción confirmada',
       message: `El ${docType} ${docId} ha sido recibido en ${branches.find(b => b.id === doc?.destinationId)?.name}. Estado: ${finalStatus}`,
       type: hasDifferences ? 'warning' : 'success',
-      branchId: docType === 'Envío' ? 'all' : doc.originId // Notify central or origin branch
+      scope: { originBranchId: doc.originId, destinationBranchId: doc.destinationId, subjectBranchId: doc.destinationId },
     });
   };
 
@@ -2025,19 +2114,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const [branches, setBranches] = useState<Branch[]>(() => seedBranches());
 
-  const [roles, setRoles] = useState<Role[]>([
-    { id: 'ROL-001', name: 'Administrador Global', desc: 'Acceso total al sistema y configuraciones', users: 3, status: 'Activo' },
-    { id: 'ROL-002', name: 'Director Académico', desc: 'Gestión de programas, docentes y alumnos', users: 5, status: 'Activo' },
-    { id: 'ROL-003', name: 'Coordinador de Ventas', desc: 'Gestión de matrículas, prospectos y caja', users: 12, status: 'Activo' },
-    { id: 'ROL-004', name: 'Docente', desc: 'Acceso a sus cursos, asistencia y notas', users: 45, status: 'Activo' },
-    { id: 'ROL-005', name: 'Cajero', desc: 'Gestión de caja y pagos', users: 8, status: 'Activo' },
-  ]);
+  // Roles, permisos y cuentas se guardan en el navegador (paso 6, provisional hasta la base de datos): al arrancar se lee y depura lo guardado.
+  const [accessRestore] = useState(() => restoreAccess(
+    readStoredAccess(),
+    { roles: seedRoles(), permissions: seedPermissions(), users: seedUsers() },
+    { branchNames: seedBranches().map(b => b.name), staffIds: seedStaff().map(s => s.id) },
+  ));
 
-  const [users, setUsers] = useState<User[]>(() => seedUsers());
+  const [roles, setRoles] = useState<Role[]>(() => accessRestore.snapshot.roles);
 
-  const [permissions, setPermissions] = useState<Permission[]>([
-    { roleId: 'ROL-002', permissions: ['org-usuarios:view', 'op-matriculas:view', 'op-matriculas:create', 'op-caja:view'] }
-  ]);
+  const [users, setUsers] = useState<User[]>(() => accessRestore.snapshot.users);
+
+  const [permissions, setPermissions] = useState<Permission[]>(() => accessRestore.snapshot.permissions);
+
+  useEffect(() => { writeStoredAccess({ roles, permissions, users }); }, [roles, permissions, users]);
+
+  // Sesión (paso 7): quién trabaja sale de las cuentas; la sede que ve, de lo que alcanza esa cuenta.
+  const scopeFor = (account: User | null): SessionScope =>
+    account ? scopeOfUser(account, branches, canDo({ user: account, roles, permissions }, PERM.allBranches)) : { allBranches: false, branchIds: [] };
+  const [activeUserId, setActiveUserId] = useState<string | null>(() => initialUserId(parseSession(readStoredSession()), accessRestore.snapshot.users));
+  const sessionAccount = activeAccount(users, activeUserId);
+  const sessionScope = useMemo(() => scopeFor(sessionAccount), [sessionAccount, branches, roles, permissions]);
+  const [viewBranchId, setViewBranchId] = useState<string>(() => {
+    const account = activeAccount(accessRestore.snapshot.users, activeUserId);
+    return account ? defaultViewBranch(scopeFor(account), account, branches) : NO_BRANCH;
+  });
+  const currentBranchId = sessionAccount ? validView(sessionScope, viewBranchId, sessionAccount, branches) : NO_BRANCH;
+  const currentUser = useMemo(
+    () => (sessionAccount
+      ? { id: sessionAccount.id, name: sessionAccount.name, role: sessionAccount.role, branchId: sessionScope.allBranches ? 'all' : defaultViewBranch(sessionScope, sessionAccount, branches) }
+      : { id: '', name: 'Sin sesión', role: '', branchId: NO_BRANCH }),
+    [sessionAccount, sessionScope, branches]
+  );
+  const [pinAttempts, setPinAttempts] = useState<PinAttempts>({});
+
+  useEffect(() => { writeStoredSession(activeUserId); }, [activeUserId]);
+  // Si la cuenta de la sesión deja de servir (se desactivó o se eliminó), la sesión queda bloqueada: reactivarla no la abre sola.
+  useEffect(() => { if (activeUserId && !sessionAccount) setActiveUserId(null); }, [activeUserId, sessionAccount]);
 
   const [leadSources, setLeadSources] = useState<LeadSource[]>([
     { id: '1', name: 'Facebook Ads', status: 'active' },
@@ -2247,26 +2360,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setLeadSources(prev => prev.filter(s => s.id !== id));
   };
 
-  const updateEnrollmentVerification = (enrollmentId: string, data: {
-    status: Enrollment['verificationStatus'];
-    items: string[];
-    observation?: string;
-    date: string;
-    verifier: string;
-  }) => {
-    setEnrollments(prev => prev.map(e => {
-      if (e.id === enrollmentId) {
-        return {
-          ...e,
-          verificationStatus: data.status,
-          verifiedItems: data.items,
-          verificationObservation: data.observation,
-          verificationDate: data.date,
-          verifier: data.verifier
-        };
-      }
-      return e;
-    }));
+  const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = (enrollmentId, data, deductions = []) => {
+    if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    // Todo o nada: primero se comprueba el stock de TODAS las líneas, después se descuenta
+    const moves = deductions.map(d => ({ branchId: enrollment.branchId || '', itemId: d.itemId, qty: -d.quantity }));
+    const shortage = stockMovesError(stockRef.current, moves, id => items.find(i => i.id === id)?.name ?? id);
+    if (shortage) return { ok: false, error: shortage };
+    moves.forEach(m => updateStock(m.branchId, m.itemId, m.qty, 'Entrega por Verificación', `Entrega a alumno ${enrollment.student} (Matrícula: ${enrollment.id})`, enrollment.id));
+    setEnrollments(prev => prev.map(e => (e.id === enrollmentId
+      ? { ...e, verificationStatus: data.status, verifiedItems: data.items, verificationObservation: data.observation, verificationDate: data.date, verifier: data.verifier }
+      : e)));
+    return { ok: true };
   };
 
   // Último estado del inventario: permite encadenar movimientos en un mismo evento y evita efectos secundarios
@@ -2351,6 +2457,132 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
+  const addItems = (newItems: Item[], prices: { itemId: string; amount: number }[] = []): StockResult => {
+    if (newItems.length === 0) return { ok: false, error: 'No hay artículos para guardar.' };
+    const accepted: Item[] = [];
+    for (const item of newItems) {
+      const problem = validateItem({ item, allItems: [...items, ...accepted] });
+      if (problem) return { ok: false, error: newItems.length > 1 ? `${item.id || 'Artículo'}: ${problem}` : problem };
+      accepted.push(item);
+    }
+    const badPrice = prices.find(p => !(p.amount > 0) || !accepted.some(i => i.id === p.itemId));
+    if (badPrice) return { ok: false, error: 'Indique el precio general de venta (USD) para un artículo que se vende.' };
+    setItems(prev => [...prev, ...accepted]);
+    prices.forEach(p => addItemPrice({ itemId: p.itemId, branchId: 'all', amount: p.amount, validFrom: todayLocalISO() }));
+    return { ok: true };
+  };
+
+  const updateItem = (id: string, item: Item): StockResult => {
+    if (!items.some(i => i.id === id)) return { ok: false, error: 'No se encontró el artículo.' };
+    const problem = validateItem({ item, allItems: items, editingId: id });
+    if (problem) return { ok: false, error: problem };
+    setItems(prev => prev.map(i => (i.id === id ? item : i)));
+    return { ok: true };
+  };
+
+  const addCourier = (courier: Omit<Courier, 'id'>): StockResult => {
+    if (!courier.code?.trim() || !courier.name?.trim()) return { ok: false, error: 'El código y nombre son obligatorios.' };
+    if (couriers.some(c => c.code.trim().toLowerCase() === courier.code.trim().toLowerCase())) return { ok: false, error: 'Ya existe un courier con ese código.' };
+    setCouriers(prev => [...prev, { ...courier, id: nextSequentialId('COUR', prev.map(x => x.id)) }]);
+    return { ok: true };
+  };
+
+  const updateCourier = (id: string, courier: Partial<Omit<Courier, 'id'>>): StockResult => {
+    const current = couriers.find(c => c.id === id);
+    if (!current) return { ok: false, error: 'No se encontró el courier.' };
+    const next = { ...current, ...courier };
+    if (!next.code?.trim() || !next.name?.trim()) return { ok: false, error: 'El código y nombre son obligatorios.' };
+    if (couriers.some(c => c.id !== id && c.code.trim().toLowerCase() === next.code.trim().toLowerCase())) return { ok: false, error: 'Ya existe un courier con ese código.' };
+    setCouriers(prev => prev.map(c => (c.id === id ? next : c)));
+    return { ok: true };
+  };
+
+  const addShippingMethod = (method: Omit<ShippingMethod, 'id'>): StockResult => {
+    if (!method.name?.trim()) return { ok: false, error: 'El nombre del método es obligatorio.' };
+    setShippingMethods(prev => [...prev, { ...method, id: nextSequentialId('SM', prev.map(x => x.id)) }]);
+    return { ok: true };
+  };
+
+  const updateShippingMethod = (id: string, method: Partial<Omit<ShippingMethod, 'id'>>): StockResult => {
+    const current = shippingMethods.find(m => m.id === id);
+    if (!current) return { ok: false, error: 'No se encontró el método de envío.' };
+    const next = { ...current, ...method };
+    if (!next.name?.trim()) return { ok: false, error: 'El nombre del método es obligatorio.' };
+    setShippingMethods(prev => prev.map(m => (m.id === id ? next : m)));
+    return { ok: true };
+  };
+
+  /** Venta de un artículo en caja: todo o nada (stock + ingreso), con el precio vigente de la sede y el cierre de caja respetado. */
+  const registerItemSale = (input: ItemSaleInput): StockResult => {
+    if (!can(PERM.itemSale)) return { ok: false, error: 'Su rol no puede vender artículos en caja.' };
+    if (!input.branchId || !input.itemId) return { ok: false, error: 'Por favor complete todos los campos obligatorios.' };
+    const item = items.find(i => i.id === input.itemId);
+    if (!item || !item.isSold || item.status !== 'Activo') return { ok: false, error: 'El artículo no está habilitado para la venta.' };
+    const unitPrice = getCurrentPrice(itemPrices, input.itemId, input.branchId)?.amount ?? 0;
+    if (!(unitPrice > 0)) return { ok: false, error: 'El artículo no tiene un precio de venta vigente. Configúrelo en Logística → Catálogo de artículos.' };
+    const invalid = itemSaleError({ qty: input.qty, available: availableStock(stockRef.current, input.branchId, input.itemId), currency: input.currency, exchangeRate: input.exchangeRate });
+    if (invalid) return { ok: false, error: invalid };
+    const closed = closedMessage(cashClosures, 'caja', input.currency, todayLocalISO());
+    if (closed) return { ok: false, error: closed };
+    const totalUsd = Math.round(unitPrice * input.qty * 100) / 100;
+    const out = updateStock(input.branchId, input.itemId, -input.qty, 'Venta', `Venta directa en caja a ${input.customerName || 'Cliente General'}. Comprobante: ${input.receiptType} ${input.receiptNumber}`, input.receiptNumber);
+    if (!out.ok) return out;
+    addCashMovement({
+      kind: 'Ingreso',
+      concept: 'Venta de artículo',
+      reference: `${input.receiptType} ${input.receiptNumber || 'S/N'} / ${input.customerName || 'Cliente General'}`,
+      currency: input.currency,
+      amount: input.currency === 'USD' ? totalUsd : Math.round(totalUsd * (input.exchangeRate ?? 0) * 100) / 100,
+      exchangeRate: input.currency === 'PEN' ? input.exchangeRate : undefined,
+      amountUSD: totalUsd,
+      method: input.method,
+      branchId: input.branchId,
+      sale: { itemId: input.itemId, branchId: input.branchId, qty: input.qty },
+    });
+    return { ok: true };
+  };
+
+  const registerStockEntry = (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }): StockResult => {
+    if (!can(PERM.stockEntry)) return { ok: false, error: 'Su rol no puede registrar ingresos de stock.' };
+    const invalid = stockEntryError(input);
+    if (invalid) return { ok: false, error: invalid };
+    return updateStock(input.branchId, input.itemId, input.qty, 'Ingreso', input.reason?.trim() || 'Ingreso manual de stock', input.doc.trim());
+  };
+
+  const saveRecipe = (recipe: Recipe): StockResult & { id?: string } => {
+    const previous = recipe.id ? recipes.find(r => r.id === recipe.id) : undefined;
+    if (!can(previous ? PERM.recipeEdit : PERM.recipeCreate)) return { ok: false, error: `Su rol no puede ${previous ? 'editar' : 'crear'} recetas.` };
+    if (recipe.id && !previous) return { ok: false, error: 'No se encontró la receta.' };
+    const errors = validateRecipe(recipe, recipes.filter(r => r.id !== recipe.id), items, previous);
+    if (errors.length > 0) return { ok: false, error: errors.join('\n') };
+    if (previous) {
+      setRecipes(prev => prev.map(r => (r.id === recipe.id ? recipe : r)));
+      return { ok: true, id: recipe.id };
+    }
+    const id = nextSequentialId('REC', recipes.map(r => r.id));
+    setRecipes(prev => [{ ...recipe, id }, ...prev]);
+    return { ok: true, id };
+  };
+
+  const duplicateRecipe = (id: string): StockResult & { id?: string } => {
+    if (!can(PERM.recipeCreate)) return { ok: false, error: 'Su rol no puede crear recetas.' };
+    const source = recipes.find(r => r.id === id);
+    if (!source) return { ok: false, error: 'No se encontró la receta.' };
+    const copyId = nextSequentialId('REC', recipes.map(r => r.id));
+    setRecipes(prev => [copyRecipe(source, copyId), ...prev]);
+    return { ok: true, id: copyId };
+  };
+
+  const setRecipeStatus = (id: string, status: Recipe['status']): StockResult => {
+    if (!can(PERM.recipeStatus)) return { ok: false, error: 'Su rol no puede activar ni desactivar recetas.' };
+    const recipe = recipes.find(r => r.id === id);
+    if (!recipe) return { ok: false, error: 'No se encontró la receta.' };
+    const error = recipeStatusError(recipe, status, recipes);
+    if (error) return { ok: false, error };
+    setRecipes(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
+    return { ok: true };
+  };
+
   const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string): StockResult => {
     const stock = stockRef.current.find(s => s.id === stockId);
     if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
@@ -2377,12 +2609,32 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const addTransfer = (transfer: Omit<Transfer, 'id'>) => {
+  const addTransfer = (transfer: Omit<Transfer, 'id'>): StockResult => {
+    // Entre filiales todo pasa por el almacén central (utils/logisticsRoutes.ts)
+    const routeError = transferRouteError(transfer.originId, transfer.destinationId, branches);
+    if (routeError) return { ok: false, error: routeError };
     const newTransfer = {
       ...transfer,
-      id: `TRF-${new Date().getFullYear()}-${String(transfers.length + 1).padStart(3, '0')}`
+      id: `TRF-${new Date().getFullYear()}-${String(transfers.length + 1).padStart(3, '0')}`,
+      requestedBy: currentUser.name,
+      requestedById: currentUser.id,
     } as Transfer;
     setTransfers(prev => [newTransfer, ...prev]);
+    if (newTransfer.status === 'Solicitada') announceTransfer(newTransfer, 'Solicitada');
+    return { ok: true };
+  };
+
+  /** Avisos de una transferencia: pedida (a quien aprueba) y aprobada o rechazada (a quien la pidió). */
+  const announceTransfer = (t: Transfer, status: Transfer['status']) => {
+    const route = `${branches.find(b => b.id === t.originId)?.name ?? t.originId} → ${branches.find(b => b.id === t.destinationId)?.name ?? t.destinationId}`;
+    if (status === 'Solicitada') {
+      notify('transfer_requested', { title: 'Transferencia solicitada', message: `${currentUser.name} solicitó la transferencia ${t.id} (${route}): ${t.reason}.`, type: 'warning', scope: { originBranchId: t.originId, destinationBranchId: t.destinationId } });
+    } else if (status === 'Aprobada' || status === 'Rechazada') {
+      notify('transfer_decided', {
+        title: `Transferencia ${status === 'Aprobada' ? 'aprobada' : 'rechazada'}`, message: `${currentUser.name} ${status === 'Aprobada' ? 'aprobó' : 'rechazó'} la transferencia ${t.id} (${route}).`,
+        type: status === 'Aprobada' ? 'success' : 'warning', scope: { originBranchId: t.originId, destinationBranchId: t.destinationId, requesterId: t.requestedById, requesterName: t.requestedBy },
+      });
+    }
   };
 
   // Referencias al último estado: varias operaciones encadenadas en un mismo evento (p. ej. updateTransfer + updateTransferStatus)
@@ -2406,13 +2658,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
         updateStock(transfer.originId, item.itemId, -item.quantity, 'Transferencia Salida', `Despacho TRF: ${transfer.id}`, transfer.id);
       });
 
-      addNotification({
+      notify('transfer_dispatched', {
         title: 'Transferencia en tránsito',
         message: `La transferencia ${transfer.id} desde ${branches.find(b => b.id === transfer.originId)?.name} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
-        branchId: transfer.destinationId
+        scope: { originBranchId: transfer.originId, destinationBranchId: transfer.destinationId },
       });
     }
+    if (newStatus !== transfer.status && (newStatus === 'Solicitada' || newStatus === 'Aprobada' || newStatus === 'Rechazada')) announceTransfer(transfer, newStatus);
 
     // Cancelación con mercadería ya despachada: vuelve al origen.
     if (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción')) {
@@ -2425,8 +2678,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const updateTransfer = (transferId: string, updatedData: Partial<Transfer>) => {
-    commitTransfers(transfersRef.current.map(t => t.id === transferId ? { ...t, ...updatedData } : t));
+  const updateTransfer = (transferId: string, updatedData: Partial<Transfer>): StockResult => {
+    const current = transfersRef.current.find(t => t.id === transferId);
+    if (!current) return { ok: false, error: 'Transferencia no encontrada.' };
+    const next = { ...current, ...updatedData };
+    if (next.originId !== current.originId || next.destinationId !== current.destinationId) {
+      const routeError = transferRouteError(next.originId, next.destinationId, branches);
+      if (routeError) return { ok: false, error: routeError };
+    }
+    commitTransfers(transfersRef.current.map(t => t.id === transferId ? next : t));
+    return { ok: true };
   };
 
   const unpackPackage = (stockId: string): StockResult => {
@@ -2570,10 +2831,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const installmentName = plan.installments.find(x => x.id === installmentId)?.name ?? '';
     setPlans(prev => prev.map(p => (p.id === planId ? applyRefinance(p, installmentId, input, today, new Date().toISOString()) : p)));
-    addNotification({
+    notify('installment_refinanced', {
       title: 'Cuota refinanciada',
       message: `${currentUser.name} refinanció «${installmentName}» del plan ${planId} (${plan.mat}): ${input.reason.trim()}`,
       type: 'info',
+      scope: { subjectBranchId: enrollments.find(e => e.id === plan.mat)?.branchId },
     });
     return { ok: true };
   };
@@ -2721,7 +2983,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       status: 'Pendiente',
     };
     setDropRequests(prev => [request, ...prev]);
-    addNotification({ title: 'Solicitud de caída pendiente', message: `${currentUser.name} solicitó la caída de la matrícula ${enrollmentId} (${enrollment.student}): ${input.reason}.`, type: 'warning' });
+    notify('drop_request_pending', { title: 'Solicitud de caída pendiente', message: `${currentUser.name} solicitó la caída de la matrícula ${enrollmentId} (${enrollment.student}): ${input.reason}.`, type: 'warning', scope: { subjectBranchId: enrollment.branchId, requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
 
@@ -2847,7 +3109,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } else {
       setCashMovements(prev => prev.map(m => (m.paymentId === paymentId && m.kind === 'Ingreso' ? { ...m, status: 'Reversado' } : m)));
     }
-    addNotification({ title: 'Pago reversado', message: `${currentUser.name} reversó el pago ${paymentId} de ${payment.student} (${input.reason}).`, type: 'warning' });
+    notify('payment_reversed', { title: 'Pago reversado', message: `${currentUser.name} reversó el pago ${paymentId} de ${payment.student} (${input.reason}).`, type: 'warning', scope: { requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
 
@@ -2890,11 +3152,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!date) return { ok: false, error: 'Indique la fecha de cese.' };
     if (date < contract.startDate) return { ok: false, error: 'La fecha de cese no puede ser anterior al inicio del contrato.' };
     if (reason.trim().length < 5) return { ok: false, error: 'Indique el motivo del cese.' };
+    // Quien cesa no puede quedar como responsable de asesorías ni actividades posteriores al cese
+    const leaver = staff.find(s => s.id === contract.staffId);
+    const agendaProblem = leaver ? ceseAgendaError(leaver, date, { schedules, activities: allActivities(monthlySchedules) }) : null;
+    if (agendaProblem) return { ok: false, error: agendaProblem };
     const paid = payrollRuns.find(r => r.status !== 'Borrador' && r.period >= periodOf(date) && r.lines?.some(l => l.contractId === id));
-    if (paid) return { ok: false, error: paid.status === 'Pagada'
-      ? `La planilla de ${periodLabel(paid.period)} ya está pagada con este contrato: la fecha de cese debe ser de un mes posterior.`
-      : `La planilla de ${periodLabel(paid.period)} ya está cerrada con este contrato: reábrala o elija una fecha de cese posterior.` };
+    if (paid) return { ok: false, error: `La planilla de ${periodLabel(paid.period)} ya está cerrada con este contrato: reábrala o elija una fecha de cese posterior.` };
     setContracts(prev => prev.map(x => (x.id === id ? { ...x, status: 'Cesado', endDate: date, terminationReason: reason.trim() } : x)));
+    return { ok: true };
+  };
+
+  const renewContract: DataContextType['renewContract'] = (id, input) => {
+    const old = contracts.find(x => x.id === id);
+    if (!old) return { ok: false, error: 'No se encontró el contrato.' };
+    const member = staff.find(s => s.id === old.staffId);
+    const problems = validateRenewal(old, input, contracts, staff, payrollRuns, todayLocalISO());
+    if (problems.length > 0) return { ok: false, error: problems[0] };
+    const created: Contract = { ...buildRenewal(old, input, member ?? {}), id: nextSequentialId('CON', contracts.map(x => x.id)) };
+    setContracts(prev => [...prev.map(x => (x.id === id ? markRenewed(x) : x)), created]);
     return { ok: true };
   };
 
@@ -2959,16 +3234,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const payPayroll: DataContextType['payPayroll'] = (runId, input) => {
-    if (!can(PERM.payrollPay)) return { ok: false, error: 'Su rol no puede registrar el pago de planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
-    const problems = validatePay(run, input.date, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    patchRun(runId, r => ({ ...r, status: 'Pagada', payDate: input.date, payNote: input.note.trim() || undefined, paidBy: currentUser.name, events: [...r.events, payrollEvent('Pagada', `${input.date}${input.note.trim() ? ` · ${input.note.trim()}` : ''}`)] }));
-    return { ok: true };
-  };
-
   const reopenPayroll: DataContextType['reopenPayroll'] = (runId, reason) => {
     if (!can(PERM.payrollReopen)) return { ok: false, error: 'Su rol no puede reabrir planillas.' };
     const run = payrollRuns.find(r => r.id === runId);
@@ -2983,7 +3248,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const current = contracts.find(c => c.id === id);
     if (!current) return { ok: false, error: 'No se encontró el contrato.' };
     if (form.staffId !== current.staffId) return { ok: false, error: 'No se puede cambiar el trabajador de un contrato.' };
-    const errors = validateContractForm(form, contracts, staff, todayLocalISO(), id);
+    const errors = validateContractForm(form, contracts, staff, todayLocalISO(), id, { schedules, activities: allActivities(monthlySchedules) });
     const first = Object.values(errors)[0];
     if (first) return { ok: false, error: first };
     const patch = buildContractPatch(form, staff.find(s => s.id === current.staffId) ?? {});
@@ -3034,7 +3299,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (!r.ok) return r;
     }
     setCashMovements(prev => applyCashReversal(prev, id, { ...input, at: new Date().toISOString(), by: currentUser.name }));
-    addNotification({ title: 'Movimiento de caja reversado', message: `${currentUser.name} reversó el movimiento ${movement.id} (${movement.concept}): ${input.reason}.`, type: 'warning' });
+    notify('cash_movement_reversed', { title: 'Movimiento de caja reversado', message: `${currentUser.name} reversó el movimiento ${movement.id} (${movement.concept}): ${input.reason}.`, type: 'warning', scope: { subjectBranchId: movement.branchId } });
     return { ok: true };
   };
 
@@ -3096,11 +3361,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const reopenCash = (closureId: string, reason: string): StockResult => {
     const closure = cashClosures.find(c => c.id === closureId);
     if (!closure) return { ok: false, error: 'No se encontró el cierre.' };
-    if (!can(closure.scope === 'caja' ? PERM.reopenCash : PERM.closePetty)) return { ok: false, error: 'Su rol no puede reabrir esta caja.' };
+    if (!can(closure.scope === 'caja' ? PERM.reopenCash : PERM.reopenPetty)) return { ok: false, error: 'Su rol no puede reabrir esta caja.' };
     const problems = validateReopen(closure, cashClosures, reason);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     setCashClosures(prev => prev.map(c => (c.id === closureId ? { ...c, status: 'Reabierta' as const, reopenedAt: new Date().toISOString(), reopenedBy: currentUser.name, reopenReason: reason.trim() } : c)));
-    addNotification({ title: 'Caja reabierta', message: `${currentUser.name} reabrió el cierre ${closure.id} (${closure.scope === 'caja' ? `Caja ${closure.currency}` : 'Caja chica'} al ${closure.date}): ${reason.trim()}`, type: 'warning' });
+    notify('cash_reopened', { title: 'Caja reabierta', message: `${currentUser.name} reabrió el cierre ${closure.id} (${closure.scope === 'caja' ? `Caja ${closure.currency}` : 'Caja chica'} al ${closure.date}): ${reason.trim()}`, type: 'warning' });
     return { ok: true };
   };
 
@@ -3125,7 +3390,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       requestedAt: new Date().toISOString(), requestedBy: currentUser.name, reason, detail: detail.trim(), payload, status: 'Pendiente',
     };
     setChangeRequests(prev => [request, ...prev]);
-    addNotification({ title: `Solicitud de ${kind.toLowerCase()} pendiente`, message: `${currentUser.name} solicitó ${kind.toLowerCase()} para la matrícula ${enrollment.id} (${enrollment.student}): ${reason}.`, type: 'warning' });
+    notify(kind === 'Reactivación' ? 'reactivation_request_pending' : kind === 'Cambio de programa' ? 'program_change_request_pending' : 'enrollment_transfer_pending', { title: `Solicitud de ${kind.toLowerCase()} pendiente`, message: `${currentUser.name} solicitó ${kind.toLowerCase()} para la matrícula ${enrollment.id} (${enrollment.student}): ${reason}.`, type: 'warning', scope: { subjectBranchId: enrollment.branchId, requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
 
@@ -3249,7 +3514,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       effects.push(`Sede: ${fromName} → ${preview.toName}.`, `${preview.scheduleIds.length} asesoría(s) y ${preview.activityRemovals.length} inscripción(es) de la sede anterior canceladas.`);
     }
     setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base, effects } : r)));
-    addNotification({ title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info' });
+    notify('request_resolved', { title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info', scope: { subjectBranchId: enrollment.branchId, requesterName: request.requestedBy } });
     return { ok: true };
   };
 
@@ -3455,12 +3720,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setPromotions(prev => prev.filter(p => p.id !== id));
   };
 
-  const addBranch = (branch: Branch) => {
+  const addBranch = (branch: Branch): StockResult => {
+    const problem = warehouseDefinitionError([...branches, branch]);
+    if (problem) return { ok: false, error: problem };
     setBranches(prev => [...prev, branch]);
+    return { ok: true };
   };
 
-  const updateBranch = (id: string, branchData: Partial<Branch>) => {
+  const updateBranch = (id: string, branchData: Partial<Branch>): StockResult => {
+    const current = branches.find(b => b.id === id);
+    if (!current) return { ok: false, error: 'No se encontró la filial.' };
     const next = branches.map(b => b.id === id ? { ...b, ...branchData } : b);
+    const problem = warehouseDefinitionError(next) ?? (branchData.status ? warehouseInactivationError({ ...current, ...branchData, status: current.status }, branchData.status) : null);
+    if (problem) return { ok: false, error: problem };
     setBranches(next);
     if (branchData.name !== undefined) {
       relabelFrom({ branches: next, programs, levels });
@@ -3471,10 +3743,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
         setUsers(prev => prev.map(u => (u.branch === before ? { ...u, branch: branchData.name as string } : u)));
       }
     }
+    return { ok: true };
   };
 
-  const deleteBranch = (id: string) => {
+  const deleteBranch = (id: string): StockResult => {
+    if (branches.find(b => b.id === id)?.isWarehouse) return { ok: false, error: 'No se puede eliminar el almacén central: primero marque otra filial como almacén.' };
     setBranches(prev => prev.filter(b => b.id !== id));
+    return { ok: true };
   };
 
   const shipmentsRef = useRef<Shipment[]>(shipments);
@@ -3500,11 +3775,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       next.items.forEach(i => {
         updateStock(next.originId, i.itemId, -i.quantity, 'Transferencia Salida', `Despacho de envío ${next.id}`, next.id);
       });
-      addNotification({
+      notify('shipment_dispatched', {
         title: 'Envío en tránsito',
         message: `El envío ${next.id} desde ${branches.find(b => b.id === next.originId)?.name || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
-        branchId: next.destinationId
+        scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
       });
     }
 
@@ -3512,10 +3787,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
       next.items.forEach(i => {
         updateStock(next.originId, i.itemId, i.quantity, 'Ingreso', `Cancelación de envío ${next.id}`, next.id);
       });
+      notify('shipment_cancelled', {
+        title: 'Envío cancelado',
+        message: `El envío ${next.id} hacia ${branches.find(b => b.id === next.destinationId)?.name || 'la filial'} fue cancelado. El stock volvió al almacén de origen.`,
+        type: 'warning',
+        scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
+      });
     }
   };
 
   const addShipment = (shipment: Omit<Shipment, 'id'>): StockResult & { id?: string } => {
+    const routeError = shipmentRouteError(shipment.originId, shipment.destinationId, branches);
+    if (routeError) return { ok: false, error: routeError };
     const newId = `ENV-${new Date().getFullYear()}-${String(shipmentsRef.current.length + 1).padStart(3, '0')}`;
     const created: Shipment = { ...shipment, id: newId };
     const shortage = checkShipmentDispatch(undefined, created);
@@ -3544,6 +3827,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const prev = shipmentsRef.current.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
     const next: Shipment = { ...prev, ...shipment };
+    if (next.originId !== prev.originId || next.destinationId !== prev.destinationId) {
+      const routeError = shipmentRouteError(next.originId, next.destinationId, branches);
+      if (routeError) return { ok: false, error: routeError };
+    }
     const shortage = checkShipmentDispatch(prev, next);
     if (shortage) return { ok: false, error: shortage };
     commitShipments(shipmentsRef.current.map(s => s.id === id ? next : s));
@@ -3563,67 +3850,186 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setCompanies(prev => prev.filter(c => c.id !== id));
   };
 
-  const addRole = (role: Role) => {
-    setRoles(prev => [...prev, role]);
+  const addRole: DataContextType['addRole'] = input => {
+    const invalid = validateRoleInput(input, roles);
+    if (invalid) return { ok: false, error: invalid };
+    const id = nextSequentialId('ROL', roles.map(r => r.id));
+    const draft: Role = {
+      id, name: input.name.trim(), desc: input.desc?.trim() ?? '', status: input.status ?? 'Activo', templateId: input.templateId,
+      observations: input.observations?.trim() || undefined, branchUserLimit: input.branchUserLimit,
+    };
+    // Con funciones, el rol nace armado en una sola operación: si algo falla no queda un rol a medias
+    let granted: string[] = [];
+    if (input.permissions && input.permissions.length > 0) {
+      const plan = planPermissions(draft, input.permissions, input.reasons ?? {}, currentUser.name, todayLocalISO());
+      if (!plan.ok) return { ok: false, error: plan.error };
+      granted = plan.permissions;
+      if (plan.acceptedRisks.length > 0) draft.acceptedRisks = plan.acceptedRisks;
+    }
+    setRoles(prev => [...prev, draft]);
+    if (granted.length > 0) setPermissions(prev => [...prev, { roleId: id, permissions: granted }]);
+    notify('role_permissions_changed', {
+      title: 'Rol creado',
+      message: `${currentUser.name} creó el rol «${draft.name}»${granted.length > 0 ? ` con ${granted.length} funciones` : ' sin funciones'}.`,
+      type: 'info',
+    });
+    return { ok: true, id };
   };
 
-  const updateRole = (id: string, roleData: Partial<Role>) => {
-    setRoles(prev => prev.map(r => r.id === id ? { ...r, ...roleData } : r));
+  const updateRole: DataContextType['updateRole'] = (id, roleData) => {
+    const role = roles.find(r => r.id === id);
+    if (!role) return { ok: false, error: 'No se encontró el rol.' };
+    const locked = roleLockedError(role);
+    if (locked) return { ok: false, error: locked };
+    const next = { ...role, ...roleData };
+    const invalid = validateRoleInput(next, roles, id);
+    if (invalid) return { ok: false, error: invalid };
+    const name = next.name.trim();
+    setRoles(prev => prev.map(r => (r.id === id ? { ...next, name, desc: next.desc.trim() } : r)));
+    // El rol y la cuenta se enlazan por nombre: al renombrar el rol, sus cuentas lo siguen
+    if (name !== role.name) setUsers(prev => prev.map(u => (u.role === role.name ? { ...u, role: name } : u)));
+    return { ok: true };
   };
 
-  const deleteRole = (id: string) => {
+  const deleteRole: DataContextType['deleteRole'] = id => {
+    const role = roles.find(r => r.id === id);
+    if (!role) return { ok: false, error: 'No se encontró el rol.' };
+    const blocked = roleDeleteError(role, users);
+    if (blocked) return { ok: false, error: blocked };
     setRoles(prev => prev.filter(r => r.id !== id));
+    setPermissions(prev => prev.filter(p => p.roleId !== id));
+    return { ok: true };
   };
 
-  const addUser: DataContextType['addUser'] = user => {
+  const addUser: DataContextType['addUser'] = ({ pin, pinHash: _ignored, ...user }) => {
     if (!can(PERM.userCreate)) return { ok: false, error: 'Su rol no puede crear usuarios.' };
+    if (pin) {
+      const pinProblem = pinError(pin) ?? pinSetError(currentUser.role === SUPERUSER, user);
+      if (pinProblem) return { ok: false, error: pinProblem };
+    }
+    const roleProblem = accountRoleError(user.role, roles, currentUser.role === SUPERUSER);
+    if (roleProblem) return { ok: false, error: roleProblem };
+    const seatProblem = seatLimitError(roles.find(r => r.name === user.role), users, user);
+    if (seatProblem) return { ok: false, error: seatProblem };
     const problems = validateLinkedUser(user, staff, assignments, users);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     // Una cuenta de personal toma sus datos de la ficha
     const member = user.staffId ? staff.find(s => s.id === user.staffId) : undefined;
-    const base = member ? { ...user, ...(syncPatch(user, member, assignments) ?? {}) } : user;
+    const base: User = { ...(member ? { ...user, ...(syncPatch(user, member, assignments) ?? {}) } : user), pinHash: pin ? hashPin(user.id, pin) : undefined };
     setUsers(prev => [...prev, base]);
     return { ok: true };
   };
 
-  const updateUser: DataContextType['updateUser'] = (id, userData) => {
+  const updateUser: DataContextType['updateUser'] = (id, { pin, pinHash: _ignored, ...userData }) => {
     const current = users.find(u => u.id === id);
     if (!current) return { ok: false, error: 'No se encontró el usuario.' };
     const merged: User = { ...current, ...userData };
+    const roleChange = merged.role !== current.role ? merged.role : undefined;
+    const statusChange = merged.status !== current.status ? merged.status : undefined;
+    const selfProblem = selfAccountError(activeUserId, id, { role: roleChange, status: statusChange });
+    if (selfProblem) return { ok: false, error: selfProblem };
+    const lastProblem = lastSuperuserError(users, id, { role: roleChange, status: statusChange });
+    if (lastProblem) return { ok: false, error: lastProblem };
+    if (pin) {
+      const pinProblem = pinError(pin) ?? pinSetError(currentUser.role === SUPERUSER, current);
+      if (pinProblem) return { ok: false, error: pinProblem };
+      if (!can('org-usuarios:edit')) return { ok: false, error: denialMessage(['org-usuarios:edit']) };
+    }
     const deactivating = current.status === 'Activo' && merged.status === 'Inactivo';
-    if (!can(deactivating ? PERM.userDeactivate : PERM.userEdit)) return { ok: false, error: deactivating ? 'Su rol no puede desactivar usuarios.' : 'Su rol no puede editar usuarios.' };
+    // Cada campo que de verdad cambia pide su función: desactivar, cambiar el rol, cambiar las sedes o corregir los datos
+    const unmet = unmetClause(userChangeNeeds(current, userData), can);
+    if (unmet) return { ok: false, error: denialMessage(unmet) };
+    const roleProblem = accountRoleError(merged.role, roles, currentUser.role === SUPERUSER, current);
+    if (roleProblem) return { ok: false, error: roleProblem };
+    const seatProblem = seatLimitError(roles.find(r => r.name === merged.role), users, merged, current);
+    if (seatProblem) return { ok: false, error: seatProblem };
     const problems = validateLinkedUser(merged, staff, assignments, users, id);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const member = merged.staffId ? staff.find(s => s.id === merged.staffId) : undefined;
     const synced = member ? { ...merged, ...(syncPatch(merged, member, assignments) ?? {}) } : merged;
     const note = deactivating ? `Desactivado por ${currentUser.name} el ${todayLocalISO()}.` : merged.status === 'Activo' ? undefined : current.statusNote;
-    setUsers(prev => prev.map(u => (u.id === id ? { ...synced, statusNote: note } : u)));
+    setUsers(prev => prev.map(u => (u.id === id ? { ...synced, statusNote: note, pinHash: pin ? hashPin(id, pin) : current.pinHash } : u)));
     return { ok: true };
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser: DataContextType['deleteUser'] = id => {
+    const selfProblem = selfAccountError(activeUserId, id, 'delete');
+    if (selfProblem) return { ok: false, error: selfProblem };
+    const lastProblem = lastSuperuserError(users, id, 'delete');
+    if (lastProblem) return { ok: false, error: lastProblem };
     setUsers(prev => prev.filter(u => u.id !== id));
+    return { ok: true };
   };
 
-  const savePermissions = (roleId: string, newPermissions: string[]) => {
-    setPermissions(prev => {
-      const existing = prev.find(p => p.roleId === roleId);
-      if (existing) {
-        return prev.map(p => p.roleId === roleId ? { ...p, permissions: newPermissions } : p);
-      }
-      return [...prev, { roleId, permissions: newPermissions }];
+  // ------------------------------------------------------------------ Sesión: cambio rápido de usuario con PIN
+  const switchUser: DataContextType['switchUser'] = (userId, pin) => {
+    const res = trySwitch(users, userId, pin, pinAttempts, Date.now());
+    setPinAttempts(res.attempts);
+    if (!res.ok || !res.user) return { ok: false, error: res.error };
+    const account = res.user;
+    setActiveUserId(account.id);
+    setViewBranchId(defaultViewBranch(scopeFor(account), account, branches));
+    setUsers(prev => prev.map(u => (u.id === account.id ? { ...u, lastAccess: lastAccessLabel(new Date()) } : u)));
+    return { ok: true };
+  };
+
+  const lockSession = () => setActiveUserId(null);
+
+  const changeOwnPin: DataContextType['changeOwnPin'] = (currentPin, nextPin) => {
+    if (!sessionAccount) return { ok: false, error: 'No hay una sesión abierta.' };
+    const res = tryChangePin(sessionAccount, currentPin, nextPin, pinAttempts, Date.now());
+    setPinAttempts(res.attempts);
+    if (!res.ok || !res.pinHash) return { ok: false, error: res.error };
+    setUsers(prev => prev.map(u => (u.id === sessionAccount.id ? { ...u, pinHash: res.pinHash } : u)));
+    return { ok: true };
+  };
+
+  const selectBranch: DataContextType['selectBranch'] = id => {
+    const problem = viewBranchError(sessionScope, id);
+    if (problem) return { ok: false, error: problem };
+    setViewBranchId(id);
+    return { ok: true };
+  };
+
+  const savePermissions: DataContextType['savePermissions'] = (roleId, newPermissions, reasons = {}) => {
+    const role = roles.find(r => r.id === roleId);
+    if (!role) return { ok: false, error: 'No se encontró el rol.' };
+    // Un rol nunca queda con una función a medias (se suma lo que cada una necesita) y las combinaciones a separar piden motivo
+    const plan = planPermissions(role, newPermissions, reasons, currentUser.name, todayLocalISO());
+    if (!plan.ok) return { ok: false, error: plan.error };
+    setPermissions(prev => (prev.some(p => p.roleId === roleId)
+      ? prev.map(p => (p.roleId === roleId ? { ...p, permissions: plan.permissions } : p))
+      : [...prev, { roleId, permissions: plan.permissions }]));
+    setRoles(prev => prev.map(r => (r.id === roleId ? { ...r, acceptedRisks: plan.acceptedRisks.length > 0 ? plan.acceptedRisks : undefined } : r)));
+    notify('role_permissions_changed', {
+      title: 'Permisos de un rol modificados',
+      message: `${currentUser.name} cambió los permisos de «${role.name}» (${plan.permissions.length} funciones).`,
+      type: 'warning',
     });
+    return { ok: true };
   };
 
-  return (
-    <DataContext.Provider value={{ 
+  // Avisos y alertas del usuario actual: se calculan con las cuentas y funciones de hoy (nada de esto se guarda)
+  const holders = useMemo(() => buildHolders({ users, roles, permissions, branches }), [users, roles, permissions, branches]);
+  const myNotifications = useMemo(() => noticesFor(currentUser, notifications, holders), [currentUser, notifications, holders]);
+  const myAlerts = useMemo(
+    () => deriveAlerts({ plans, enrollments, contracts, stockItems, items, branches, blockedSessions: blockedFirstSessions(enrollments, gateContext()) }, todayLocalISO())
+      .filter(a => visibility(currentUser, a, holders).visible),
+    [plans, enrollments, contracts, stockItems, items, branches, schedules, recipes, holders, currentUser]
+  );
+
+  const availabilityOf: DataContextType['availabilityOf'] = (capabilityId, target) =>
+    availabilityForViewer(availability(capabilityId, holders, target), currentUser.role === SUPERUSER);
+
+  const data: DataContextType = {
       guardians, 
       students, 
       enrollments, 
       plans, 
       payments, 
       items,
-      setItems,
+      addItems,
+      updateItem,
       stockItems, 
       cashMovements,
       addCashMovement,
@@ -3637,11 +4043,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addItemPrice,
       kardex, 
       transfers, 
-      setTransfers,
       couriers,
-      setCouriers,
+      addCourier,
+      updateCourier,
       shippingMethods,
-      setShippingMethods,
+      addShippingMethod,
+      updateShippingMethod,
       adjustments, 
       schedules, 
       addSchedule,
@@ -3674,7 +4081,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       inactivateStaff,
       reactivateStaff,
       companies,
-      setCompanies,
       addCompany,
       updateCompany,
       deleteCompany,
@@ -3692,9 +4098,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addPayrollAdjustment,
       removePayrollAdjustment,
       closePayroll,
-      payPayroll,
       reopenPayroll,
       closeContract,
+      renewContract,
       deleteUser,
       permissions,
       savePermissions,
@@ -3706,12 +4112,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       tariffs,
       promotions,
       recipes,
-      setRecipes,
+      saveRecipe,
+      duplicateRecipe,
+      setRecipeStatus,
       unpackPackage,
       packPackage,
-      updateStock,
-      setRoles,
-      setUsers,
+      registerItemSale,
+      registerStockEntry,
       addAdjustment,
       updateMinStock,
       updateTransferStatus,
@@ -3791,15 +4198,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
       updateShipment,
       deleteShipment,
       notifications,
-      addNotification,
+      myNotifications,
+      myAlerts,
       markNotificationAsRead,
       incidents,
       currentBranchId,
-      setCurrentBranchId,
+      selectBranch,
+      sessionScope,
+      sessionLocked: !sessionAccount,
+      switchUser,
+      lockSession,
+      changeOwnPin,
+      accessRestore: { restored: accessRestore.restored, notes: accessRestore.notes },
       currentUser,
       confirmReception,
-      updateEnrollmentVerification
-    }}>
+      updateEnrollmentVerification,
+      availabilityOf,
+  };
+
+  // Toda acción pide su función antes de ejecutarse (ver `utils/guards.ts`); las pantallas además ocultan lo que el rol no puede hacer
+  return (
+    <DataContext.Provider value={guardActions(data, can)}>
       {children}
     </DataContext.Provider>
   );

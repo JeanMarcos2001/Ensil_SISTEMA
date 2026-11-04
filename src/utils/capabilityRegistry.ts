@@ -42,7 +42,8 @@ export interface CapabilityDef {
   reads: string[];
   writes: string[];
   emits: string[];
-  counterpart?: Counterpart;
+  /** Lo que deben poder hacer OTRAS personas para que esta función tenga sentido (puede haber varias). */
+  counterparts: Counterpart[];
   /** Acciones de `DataContext` que esta función protege. */
   actions: string[];
   /** Ítem del menú que esta función hace visible (la función «ver» de cada pantalla). */
@@ -79,6 +80,7 @@ export const ENTITIES: Record<string, string> = {
   staff: 'Personal', contract: 'Contrato de trabajo', assignment: 'Asignación', payroll: 'Planilla', role: 'Rol', permission: 'Permisos del rol', user: 'Cuenta de usuario',
   company: 'Empresa', branch: 'Filial', program: 'Programa', level: 'Nivel', paymentType: 'Tipo de pago', tariff: 'Tarifario', promotion: 'Promoción', recipe: 'Receta de materiales',
   leadSource: 'Origen de lead', contractTemplate: 'Plantilla de contrato', notification: 'Aviso', audit: 'Auditoría',
+  courier: 'Courier', shippingMethod: 'Método de envío',
 };
 
 export type Recipient = { capability: string; where: RecipientWhere } | { person: 'requester' | 'emitter' };
@@ -88,7 +90,8 @@ export interface EventDef {
   label: string;
   /** accion: lo dispara una función · sistema: lo dispara una regla por fecha o por estado. */
   trigger: 'accion' | 'sistema';
-  recipients: Recipient;
+  /** Quienes reciben el aviso (se suman). */
+  recipients: Recipient[];
   /** Quien recibe el aviso cuando nadie cumple lo anterior (ver `sis-avisos:fallback`). */
   fallback: string;
 }
@@ -96,24 +99,34 @@ export interface EventDef {
 const FALLBACK = 'sis-avisos:fallback';
 
 /** Avisos con destinatario: llegan a quien tenga la función indicada en la sede que corresponde, no a un nombre de rol. */
+const SUPERVISE: Recipient = { capability: 'sis-avisos:supervise', where: 'any' };
 export const EVENTS: EventDef[] = [
-  { id: 'shipment_dispatched', label: 'Envío despachado', trigger: 'accion', recipients: { capability: 'log-recepciones:confirm', where: 'destination-branch' }, fallback: FALLBACK },
-  { id: 'transfer_dispatched', label: 'Transferencia en tránsito', trigger: 'accion', recipients: { capability: 'log-transfer:receive', where: 'destination-branch' }, fallback: FALLBACK },
-  { id: 'reception_confirmed', label: 'Recepción confirmada', trigger: 'accion', recipients: { capability: 'log-envios:dispatch', where: 'origin-branch' }, fallback: FALLBACK },
-  { id: 'reception_with_differences', label: 'Recepción con faltante o daño', trigger: 'accion', recipients: { capability: 'log-ajustes:create', where: 'origin-branch' }, fallback: FALLBACK },
-  { id: 'drop_request_pending', label: 'Solicitud de caída pendiente', trigger: 'accion', recipients: { capability: 'op-matriculas:approve_drop', where: 'any' }, fallback: FALLBACK },
-  { id: 'reactivation_request_pending', label: 'Solicitud de reactivación pendiente', trigger: 'accion', recipients: { capability: 'op-matriculas:approve_reactivation', where: 'any' }, fallback: FALLBACK },
-  { id: 'program_change_request_pending', label: 'Solicitud de cambio de programa pendiente', trigger: 'accion', recipients: { capability: 'op-matriculas:approve_program_change', where: 'any' }, fallback: FALLBACK },
-  { id: 'transfer_request_pending', label: 'Solicitud de traslado de sede pendiente', trigger: 'accion', recipients: { capability: 'op-matriculas:approve_transfer', where: 'any' }, fallback: FALLBACK },
-  { id: 'request_resolved', label: 'Solicitud resuelta', trigger: 'accion', recipients: { person: 'requester' }, fallback: FALLBACK },
-  { id: 'payment_reversed', label: 'Pago reversado', trigger: 'accion', recipients: { capability: 'sis-auditoria:view', where: 'any' }, fallback: FALLBACK },
-  { id: 'cash_movement_reversed', label: 'Movimiento de caja reversado', trigger: 'accion', recipients: { capability: 'sis-auditoria:view', where: 'any' }, fallback: FALLBACK },
-  { id: 'cash_reopened', label: 'Caja reabierta', trigger: 'accion', recipients: { capability: 'sis-auditoria:view', where: 'any' }, fallback: FALLBACK },
-  { id: 'installment_refinanced', label: 'Cuota refinanciada', trigger: 'accion', recipients: { capability: 'op-cobranza:view', where: 'subject-branch' }, fallback: FALLBACK },
-  { id: 'installment_overdue', label: 'Cuota vencida', trigger: 'sistema', recipients: { capability: 'op-cobranza:remind', where: 'subject-branch' }, fallback: FALLBACK },
-  { id: 'first_session_without_materials', label: 'Primera asesoría sin materiales entregados', trigger: 'sistema', recipients: { capability: 'op-verificacion:deliver', where: 'subject-branch' }, fallback: FALLBACK },
-  { id: 'contract_expiring', label: 'Contrato por vencer', trigger: 'sistema', recipients: { capability: 'per-contratos:view', where: 'any' }, fallback: FALLBACK },
-  { id: 'stock_below_minimum', label: 'Stock por debajo del mínimo', trigger: 'sistema', recipients: { capability: 'log-ajustes:create', where: 'subject-branch' }, fallback: FALLBACK },
+  // Logística
+  { id: 'shipment_dispatched', label: 'Envío despachado', trigger: 'accion', recipients: [{ capability: 'log-recepciones:confirm', where: 'destination-branch' }], fallback: FALLBACK },
+  { id: 'shipment_cancelled', label: 'Envío cancelado', trigger: 'accion', recipients: [{ capability: 'log-recepciones:confirm', where: 'destination-branch' }], fallback: FALLBACK },
+  { id: 'shipment_received', label: 'Envío recibido', trigger: 'accion', recipients: [{ capability: 'log-envios:dispatch', where: 'origin-branch' }], fallback: FALLBACK },
+  { id: 'transfer_requested', label: 'Transferencia solicitada', trigger: 'accion', recipients: [{ capability: 'log-transfer:approve_transfer', where: 'any' }], fallback: FALLBACK },
+  { id: 'transfer_decided', label: 'Transferencia aprobada o rechazada', trigger: 'accion', recipients: [{ person: 'requester' }], fallback: FALLBACK },
+  { id: 'transfer_dispatched', label: 'Transferencia en tránsito', trigger: 'accion', recipients: [{ capability: 'log-transfer:receive', where: 'destination-branch' }], fallback: FALLBACK },
+  { id: 'transfer_received', label: 'Transferencia recibida', trigger: 'accion', recipients: [{ capability: 'log-transfer:dispatch', where: 'origin-branch' }], fallback: FALLBACK },
+  { id: 'reception_with_differences', label: 'Recepción con faltante o daño', trigger: 'accion', recipients: [{ capability: 'log-ajustes:create', where: 'origin-branch' }, SUPERVISE], fallback: FALLBACK },
+  { id: 'stock_below_minimum', label: 'Stock por debajo del mínimo', trigger: 'sistema', recipients: [{ capability: 'log-transfer:req_transfer', where: 'subject-branch' }, { capability: 'log-envios:create', where: 'any' }], fallback: FALLBACK },
+  // Matrícula
+  { id: 'drop_request_pending', label: 'Solicitud de caída pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_drop', where: 'any' }], fallback: FALLBACK },
+  { id: 'reactivation_request_pending', label: 'Solicitud de reactivación pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_reactivation', where: 'any' }], fallback: FALLBACK },
+  { id: 'program_change_request_pending', label: 'Solicitud de cambio de programa pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_program_change', where: 'any' }], fallback: FALLBACK },
+  { id: 'enrollment_transfer_pending', label: 'Solicitud de traslado de sede pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_transfer', where: 'any' }], fallback: FALLBACK },
+  { id: 'request_resolved', label: 'Solicitud resuelta', trigger: 'accion', recipients: [{ person: 'requester' }], fallback: FALLBACK },
+  { id: 'first_session_without_materials', label: 'Primera asesoría sin materiales entregados', trigger: 'sistema', recipients: [{ capability: 'op-verificacion:deliver', where: 'subject-branch' }, { capability: 'psi-prog:mark_attendance', where: 'subject-branch' }], fallback: FALLBACK },
+  // Dinero
+  { id: 'payment_reversed', label: 'Pago reversado', trigger: 'accion', recipients: [SUPERVISE], fallback: FALLBACK },
+  { id: 'cash_movement_reversed', label: 'Movimiento de caja reversado', trigger: 'accion', recipients: [SUPERVISE], fallback: FALLBACK },
+  { id: 'cash_reopened', label: 'Caja reabierta', trigger: 'accion', recipients: [SUPERVISE], fallback: FALLBACK },
+  { id: 'installment_refinanced', label: 'Cuota refinanciada', trigger: 'accion', recipients: [{ capability: 'op-cobranza:view', where: 'subject-branch' }, SUPERVISE], fallback: FALLBACK },
+  { id: 'installment_overdue', label: 'Cuotas vencidas', trigger: 'sistema', recipients: [{ capability: 'op-cobranza:remind', where: 'subject-branch' }], fallback: FALLBACK },
+  // Personal y seguridad
+  { id: 'contract_expiring', label: 'Contratos por vencer', trigger: 'sistema', recipients: [{ capability: 'per-contratos:edit', where: 'any' }], fallback: FALLBACK },
+  { id: 'role_permissions_changed', label: 'Permisos de un rol modificados', trigger: 'accion', recipients: [SUPERVISE], fallback: FALLBACK },
 ];
 
 export interface IncompatibilityDef {
@@ -125,15 +138,25 @@ export interface IncompatibilityDef {
 
 /** Separación de funciones: combinaciones que un rol no debería reunir sin una razón. Se muestran como advertencia y piden motivo para guardar. */
 export const INCOMPATIBILITIES: IncompatibilityDef[] = [
+  // Dinero
   { id: 'cobrar-reversar-cerrar', capabilities: ['op-pagos:register', 'op-pagos:reverse_payment', 'op-caja:close_box'], message: 'Quien cobra, reversa los pagos y cierra la caja puede ocultar una diferencia sin que nadie más lo vea.' },
+  { id: 'cobrar-nota-credito', capabilities: ['op-pagos:register', 'op-pagos:credit_note'], message: 'Quien cobra y también emite notas de crédito puede devolver dinero de lo que él mismo cobró.' },
   { id: 'reversar-reabrir-caja', capabilities: ['op-caja:reverse_movement', 'op-caja:reopen_box'], message: 'Quien reversa movimientos y también reabre los cierres puede modificar un día ya arqueado.' },
+  { id: 'reversar-reabrir-caja-chica', capabilities: ['op-caja-chica:reverse_movement', 'op-caja-chica:reopen_box'], message: 'Quien reversa gastos de la caja chica y también reabre sus cierres puede modificar un conteo ya hecho.' },
+  { id: 'caja-egreso-reversa-cierre', capabilities: ['op-caja:reg_expense', 'op-caja:reverse_movement', 'op-caja:close_box'], message: 'Quien registra egresos, los reversa y cierra la caja puede esconder una salida de dinero.' },
+  { id: 'caja-chica-gasto-reversa-arqueo', capabilities: ['op-caja-chica:reg_movement', 'op-caja-chica:reverse_movement', 'op-caja-chica:count'], message: 'Quien gasta de la caja chica, reversa los gastos y hace el arqueo puede cuadrar la caja a su favor.' },
+  // Solicitudes sobre matrículas
   { id: 'pedir-aprobar-caida', capabilities: ['op-matriculas:req_drop', 'op-matriculas:approve_drop'], message: 'Quien pide una caída y la aprueba no tiene quien lo revise.' },
   { id: 'pedir-aprobar-reactivacion', capabilities: ['op-matriculas:req_reactivation', 'op-matriculas:approve_reactivation'], message: 'Quien pide una reactivación y la aprueba no tiene quien lo revise.' },
   { id: 'pedir-aprobar-cambio', capabilities: ['op-matriculas:req_program_change', 'op-matriculas:approve_program_change'], message: 'Quien pide un cambio de programa y lo aprueba no tiene quien lo revise.' },
   { id: 'pedir-aprobar-traslado', capabilities: ['op-matriculas:req_transfer', 'op-matriculas:approve_transfer'], message: 'Quien pide un traslado y lo aprueba no tiene quien lo revise.' },
-  { id: 'planilla-generar-pagar', capabilities: ['per-planilla:generate', 'per-planilla:pay'], message: 'Quien arma la planilla y también registra su pago concentra todo el ciclo del dinero del personal.' },
+  // Mercadería
+  { id: 'despachar-recibir', capabilities: ['log-envios:dispatch', 'log-recepciones:confirm'], message: 'Quien despacha un envío y también lo recibe puede dar por recibida mercadería que nunca llegó.' },
+  { id: 'transferir-aprobar-recibir', capabilities: ['log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive'], message: 'Quien aprueba, despacha y recepciona una transferencia controla todo el movimiento sin contrapeso.' },
+  // Personal y planilla
+  { id: 'ficha-cuenta-rol', capabilities: ['per-personal:create', 'org-usuarios:create', 'org-usuarios:assign_role'], message: 'Quien crea la ficha, la cuenta y le asigna el rol puede inventar a un trabajador con acceso.' },
+  // Accesos
   { id: 'roles-asignar', capabilities: ['org-roles:config_perms', 'org-usuarios:assign_role'], message: 'Quien define los permisos y también asigna los roles puede darse a sí mismo cualquier acceso.' },
-  { id: 'ajustar-stock-y-recibir', capabilities: ['log-ajustes:create', 'log-recepciones:confirm', 'log-envios:dispatch'], message: 'Quien despacha, recibe y ajusta el stock puede mover mercadería sin contrapeso.' },
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -148,7 +171,7 @@ interface Raw {
   reads?: string[];
   writes?: string[];
   emits?: string[];
-  counterpart?: Counterpart;
+  counterparts?: Counterpart[];
   actions?: string[];
   menu?: MenuRef;
   sensitive?: Sensitivity;
@@ -173,7 +196,7 @@ function f(id: string, name: string, module: string, caps: Raw[]): Functionality
       reads: c.reads ?? [],
       writes: c.writes ?? [],
       emits: c.emits ?? [],
-      counterpart: c.counterpart,
+      counterparts: c.counterparts ?? [],
       actions: c.actions ?? [],
       menu: c.menu,
       sensitive: c.sensitive,
@@ -214,40 +237,43 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
       action: 'create', label: 'Crear matrícula', kind: 'crear', requires: ['view'], sensitive: 'dinero',
       reads: ['program', 'level', 'tariff', 'promotion', 'paymentType'], writes: ['enrollment', 'student', 'guardian', 'plan', 'payment', 'cashMovement', 'verification', 'schedule'],
       actions: ['registerEnrollments', 'addStudent', 'addGuardian'],
-      counterpart: cp('op-verificacion:deliver', 'same-branch', 'advisory', 'Sin quien entregue los materiales en la sede, la matrícula quedará esperando su verificación y la primera asesoría no podrá darse.'),
+      counterparts: [
+        cp('op-verificacion:deliver', 'same-branch', 'advisory', 'Sin quien entregue los materiales en la sede, la matrícula quedará esperando su verificación y la primera asesoría no podrá darse.'),
+        cp('psi-prog:create', 'same-branch', 'advisory', 'Sin quien agende asesorías en la sede, el alumno matriculado no tendrá su primera asesoría.'),
+      ],
     },
     { action: 'edit_draft', label: 'Editar borrador', kind: 'editar', requires: ['view'], reserved: true, note: 'Reservada: hoy no existen matrículas en borrador.' },
     { action: 'confirm', label: 'Confirmar matrícula', kind: 'operar', requires: ['view'], reserved: true, note: 'Reservada: la matrícula se confirma al registrarla.' },
     {
       action: 'req_drop', label: 'Solicitar caída', kind: 'operar', requires: ['view'], writes: ['enrollmentRequest'], emits: ['drop_request_pending'], actions: ['requestEnrollmentDrop'],
-      counterpart: cp('op-matriculas:approve_drop', 'any', 'advisory', NOBODY_APPROVES),
+      counterparts: [cp('op-matriculas:approve_drop', 'any', 'advisory', NOBODY_APPROVES)],
     },
     {
-      action: 'approve_drop', label: 'Aprobar caída', kind: 'aprobar', requires: ['view'], sensitive: 'control', reads: ['enrollmentRequest'],
+      action: 'approve_drop', label: 'Aprobar caída', kind: 'aprobar', requires: ['view', 'sis-solicitudes:view'], sensitive: 'control', reads: ['enrollmentRequest'],
       writes: ['enrollment', 'plan', 'installment', 'enrollmentRequest'], emits: ['request_resolved'], actions: ['resolveEnrollmentDrop'],
     },
     {
       action: 'req_reactivation', label: 'Solicitar reactivación', kind: 'operar', requires: ['view'], writes: ['enrollmentRequest'], emits: ['reactivation_request_pending'], actions: ['requestReactivation'],
-      counterpart: cp('op-matriculas:approve_reactivation', 'any', 'advisory', NOBODY_APPROVES),
+      counterparts: [cp('op-matriculas:approve_reactivation', 'any', 'advisory', NOBODY_APPROVES)],
     },
     {
-      action: 'approve_reactivation', label: 'Aprobar reactivación', kind: 'aprobar', requires: ['view'], sensitive: 'control', reads: ['enrollmentRequest'],
+      action: 'approve_reactivation', label: 'Aprobar reactivación', kind: 'aprobar', requires: ['view', 'sis-solicitudes:view'], sensitive: 'control', reads: ['enrollmentRequest'],
       writes: ['enrollment', 'plan', 'installment', 'enrollmentRequest'], emits: ['request_resolved'], actions: ['resolveChangeRequest'],
     },
     {
       action: 'req_program_change', label: 'Solicitar cambio de programa o nivel', kind: 'operar', requires: ['view'], writes: ['enrollmentRequest'], emits: ['program_change_request_pending'], actions: ['requestProgramChange'],
-      counterpart: cp('op-matriculas:approve_program_change', 'any', 'advisory', NOBODY_APPROVES),
+      counterparts: [cp('op-matriculas:approve_program_change', 'any', 'advisory', NOBODY_APPROVES)],
     },
     {
-      action: 'approve_program_change', label: 'Aprobar cambio de programa o nivel', kind: 'aprobar', requires: ['view'], sensitive: 'control', reads: ['enrollmentRequest', 'tariff'],
+      action: 'approve_program_change', label: 'Aprobar cambio de programa o nivel', kind: 'aprobar', requires: ['view', 'sis-solicitudes:view'], sensitive: 'control', reads: ['enrollmentRequest', 'tariff'],
       writes: ['enrollment', 'plan', 'installment', 'enrollmentRequest'], emits: ['request_resolved'], actions: ['resolveChangeRequest'],
     },
     {
-      action: 'req_transfer', label: 'Solicitar traslado de sede', kind: 'operar', requires: ['view'], writes: ['enrollmentRequest'], emits: ['transfer_request_pending'], actions: ['requestTransfer'],
-      counterpart: cp('op-matriculas:approve_transfer', 'any', 'advisory', NOBODY_APPROVES),
+      action: 'req_transfer', label: 'Solicitar traslado de sede', kind: 'operar', requires: ['view'], writes: ['enrollmentRequest'], emits: ['enrollment_transfer_pending'], actions: ['requestTransfer'],
+      counterparts: [cp('op-matriculas:approve_transfer', 'any', 'advisory', NOBODY_APPROVES)],
     },
     {
-      action: 'approve_transfer', label: 'Aprobar traslado de sede', kind: 'aprobar', requires: ['view'], sensitive: 'control', reads: ['enrollmentRequest', 'branch'],
+      action: 'approve_transfer', label: 'Aprobar traslado de sede', kind: 'aprobar', requires: ['view', 'sis-solicitudes:view'], sensitive: 'control', reads: ['enrollmentRequest', 'branch'],
       writes: ['enrollment', 'schedule', 'enrollmentRequest'], emits: ['request_resolved'], actions: ['resolveChangeRequest'],
     },
     { action: 'renew', label: 'Renovar matrícula', kind: 'crear', requires: ['view'], sensitive: 'dinero', writes: ['enrollment', 'plan', 'payment', 'cashMovement'], actions: ['registerEnrollments'] },
@@ -260,6 +286,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     {
       action: 'register', label: 'Registrar pago o cobro de cuota', kind: 'crear', requires: ['view'], sensitive: 'dinero', reads: ['plan', 'installment'],
       writes: ['payment', 'installment', 'plan', 'cashMovement'], actions: ['registerPayment'],
+      counterparts: [cp('op-caja:close_box', 'same-branch', 'advisory', 'Sin quien cierre la caja en la sede, los cobros del día nunca se arquean.')],
     },
     {
       action: 'reverse_payment', label: 'Reversar pago', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['payment', 'installment', 'plan', 'cashMovement', 'creditNote'],
@@ -272,6 +299,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     {
       action: 'deliver', label: 'Registrar la entrega de materiales', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['recipe', 'stock'],
       writes: ['verification', 'stock', 'kardex'], actions: ['updateEnrollmentVerification'],
+      counterparts: [cp('log-recepciones:confirm', 'same-branch', 'advisory', 'Sin quien reciba los envíos en la sede, el stock de materiales no se repone y la verificación se detendrá.')],
     },
   ]),
   f('op-caja', 'Caja', 'mod-operacion', [
@@ -282,12 +310,17 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'deposit', label: 'Crear lote de depósito', kind: 'operar', requires: ['view'], sensitive: 'dinero', writes: ['deposit', 'cashMovement'], actions: ['createDepositBatch'] },
     { action: 'close_box', label: 'Cerrar caja', kind: 'operar', requires: ['view'], sensitive: 'control', reads: ['cashMovement'], writes: ['cashClosure'], actions: ['closeCash'] },
     { action: 'reopen_box', label: 'Reabrir caja', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['cashClosure'], emits: ['cash_reopened'], actions: ['reopenCash'] },
+    {
+      action: 'sell_item', label: 'Vender un artículo en caja', kind: 'crear', requires: ['view'], sensitive: 'dinero', reads: ['item', 'itemPrice', 'stock'],
+      writes: ['cashMovement', 'stock', 'kardex'], actions: ['registerItemSale'], note: 'Descuenta el stock de la sede y registra el ingreso en una sola operación.',
+    },
   ]),
   f('op-caja-chica', 'Caja chica', 'mod-operacion', [
     { action: 'view', label: 'Ver caja chica', kind: 'ver', menu: menu(OP, 'Caja chica'), reads: ['pettyCash', 'cashClosure'], sensitive: 'dinero' },
     { action: 'reg_movement', label: 'Registrar ingreso o gasto de caja chica', kind: 'crear', requires: ['view'], sensitive: 'dinero', writes: ['pettyCash'], actions: ['addPettyCashMovement'] },
     { action: 'reverse_movement', label: 'Reversar movimiento', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['pettyCash'], actions: ['reversePettyCashMovement'] },
-    { action: 'count', label: 'Hacer arqueo y cierre', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['cashClosure'], actions: ['closeCash', 'reopenCash'] },
+    { action: 'count', label: 'Hacer arqueo y cierre', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['cashClosure'], actions: ['closeCash'] },
+    { action: 'reopen_box', label: 'Reabrir cierre de caja chica', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['cashClosure'], emits: ['cash_reopened'], actions: ['reopenCash'] },
     { action: 'config', label: 'Configurar fondo y tope por gasto', kind: 'configurar', requires: ['view'], writes: ['pettyCash'], actions: ['updatePettyFund'] },
   ]),
   f('op-cobranza', 'Cobranza y cartera', 'mod-operacion', [
@@ -301,43 +334,54 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   // ----------------------------------------------------------------------------------------------------------- Logística
   f('log-catalogo', 'Catálogo de artículos', 'mod-logistica', [
     { action: 'view', label: 'Ver el catálogo de artículos', kind: 'ver', menu: menu('logistica', 'Catálogo de artículos'), reads: ['item', 'itemPrice'] },
+    {
+      action: 'create', label: 'Crear artículos (uno a uno o por carga masiva)', kind: 'crear', requires: ['view'], writes: ['item', 'itemPrice'], actions: ['addItems'],
+      note: 'Un artículo que se vende nace con su precio general; el artículo y su precio se guardan juntos.',
+    },
+    { action: 'edit', label: 'Editar, activar y desactivar artículos', kind: 'editar', requires: ['view'], writes: ['item'], actions: ['updateItem'] },
     { action: 'edit_price', label: 'Registrar el precio de un artículo', kind: 'editar', requires: ['view'], sensitive: 'dinero', writes: ['itemPrice'], actions: ['addItemPrice'] },
   ]),
   f('log-stock', 'Stock', 'mod-logistica', [
     { action: 'view', label: 'Ver el stock', kind: 'ver', menu: menu('logistica', 'Stock'), reads: ['stock', 'item', 'branch'] },
     { action: 'edit_min', label: 'Definir el stock mínimo', kind: 'editar', requires: ['view'], writes: ['stock'], actions: ['updateMinStock'] },
     { action: 'pack', label: 'Armar y abrir paquetes', kind: 'operar', requires: ['view'], reads: ['item'], writes: ['stock', 'kardex'], actions: ['packPackage', 'unpackPackage'] },
+    {
+      action: 'entry', label: 'Registrar un ingreso de stock (compra o reposición)', kind: 'crear', requires: ['view'], sensitive: 'control', reads: ['item'],
+      writes: ['stock', 'kardex'], actions: ['registerStockEntry'], note: 'Pide el documento que lo respalda y queda en el kardex.',
+    },
   ]),
   f('log-envios', 'Envíos', 'mod-logistica', [
     { action: 'view', label: 'Ver envíos', kind: 'ver', menu: menu('logistica', 'Envíos'), reads: ['shipment', 'branch'] },
-    { action: 'create', label: 'Preparar un envío', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['shipment'], actions: ['addShipment'] },
+    { action: 'create', label: 'Preparar un envío', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['shipment'], actions: ['addShipment'],
+      counterparts: [cp('log-envios:dispatch', 'any', 'advisory', 'Nadie podrá despachar el envío preparado: hay que crear un usuario con «Realizar el envío (despachar)».')] },
     { action: 'edit', label: 'Editar un envío', kind: 'editar', requires: ['view'], writes: ['shipment'], actions: ['updateShipment'] },
     { action: 'delete', label: 'Eliminar un envío', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['shipment'], actions: ['deleteShipment'] },
     {
       action: 'dispatch', label: 'Realizar el envío (despachar)', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['stock', 'shipment', 'branch'],
-      writes: ['shipment', 'stock', 'kardex'], emits: ['shipment_dispatched'], actions: ['updateShipmentStatus'],
-      counterpart: cp('log-recepciones:confirm', 'destination-branch', 'required', 'Nadie podrá recibir el envío en la sede destino: hay que crear un usuario con «Confirmar recepción» en esa sede.'),
+      writes: ['shipment', 'stock', 'kardex'], emits: ['shipment_dispatched', 'shipment_cancelled'], actions: ['updateShipmentStatus'],
+      counterparts: [cp('log-recepciones:confirm', 'destination-branch', 'required', 'Nadie podrá recibir el envío en la sede destino: hay que crear un usuario con «Confirmar recepción» en esa sede.')],
     },
   ]),
   f('log-transfer', 'Transferencias', 'mod-logistica', [
     { action: 'view', label: 'Ver transferencias', kind: 'ver', menu: menu('logistica', 'Transferencias'), reads: ['transfer', 'branch'] },
-    { action: 'req_transfer', label: 'Solicitar transferencia', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['transfer'], actions: ['addTransfer', 'updateTransfer'] },
-    { action: 'approve_transfer', label: 'Aprobar transferencia', kind: 'aprobar', requires: ['view'], sensitive: 'control', writes: ['transfer'], actions: ['updateTransferStatus'] },
+    { action: 'req_transfer', label: 'Solicitar transferencia', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['transfer'], emits: ['transfer_requested'], actions: ['addTransfer', 'updateTransfer'],
+      counterparts: [cp('log-transfer:approve_transfer', 'any', 'advisory', 'Nadie podrá aprobar la solicitud de transferencia: quedará pendiente.')] },
+    { action: 'approve_transfer', label: 'Aprobar transferencia', kind: 'aprobar', requires: ['view'], sensitive: 'control', writes: ['transfer'], emits: ['transfer_decided'], actions: ['updateTransferStatus'] },
     {
       action: 'dispatch', label: 'Despachar transferencia', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['stock', 'transfer'], writes: ['transfer', 'stock', 'kardex'],
       emits: ['transfer_dispatched'], actions: ['updateTransferStatus'],
-      counterpart: cp('log-transfer:receive', 'destination-branch', 'required', 'Nadie podrá recepcionar la transferencia en la sede destino.'),
+      counterparts: [cp('log-transfer:receive', 'destination-branch', 'required', 'Nadie podrá recepcionar la transferencia en la sede destino.')],
     },
     {
       action: 'receive', label: 'Recepcionar transferencia', kind: 'operar', requires: ['view'], reads: ['transfer'], writes: ['transfer', 'stock', 'kardex', 'reception'],
-      emits: ['reception_confirmed', 'reception_with_differences'], actions: ['confirmReception'],
+      emits: ['transfer_received', 'reception_with_differences'], actions: ['confirmReception'],
     },
   ]),
   f('log-recepciones', 'Recepciones', 'mod-logistica', [
     { action: 'view', label: 'Ver recepciones', kind: 'ver', menu: menu('logistica', 'Recepciones'), reads: ['shipment', 'transfer', 'reception'] },
     {
       action: 'confirm', label: 'Confirmar la recepción de un envío', kind: 'operar', requires: ['view'], reads: ['shipment'], writes: ['reception', 'shipment', 'stock', 'kardex'],
-      emits: ['reception_confirmed', 'reception_with_differences'], actions: ['confirmReception'],
+      emits: ['shipment_received', 'reception_with_differences'], actions: ['confirmReception'],
     },
   ]),
   f('log-kardex', 'Kardex', 'mod-logistica', [
@@ -353,7 +397,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'view', label: 'Ver programación', kind: 'ver', menu: menu('psicopedagogia', 'Programación'), reads: ['schedule', 'student', 'enrollment', 'verification'] },
     {
       action: 'create', label: 'Crear programación (agendar asesorías)', kind: 'crear', requires: ['view'], reads: ['student', 'enrollment', 'verification', 'capacity'], writes: ['schedule'], actions: ['addSchedule'],
-      counterpart: cp('psi-prog:mark_attendance', 'same-branch', 'advisory', 'Sin Psicopedagogía en la sede nadie marcará la asistencia de las asesorías.'),
+      counterparts: [cp('psi-prog:mark_attendance', 'same-branch', 'advisory', 'Sin Psicopedagogía en la sede nadie marcará la asistencia de las asesorías.')],
     },
     { action: 'reschedule', label: 'Reprogramar o cancelar con 24 horas o más', kind: 'editar', requires: ['view'], writes: ['schedule'], actions: ['updateSchedule'] },
     {
@@ -403,9 +447,11 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('per-contratos', 'Contratos', 'mod-personas', [
     { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll'] },
-    { action: 'create', label: 'Crear contrato', kind: 'crear', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['addContract'] },
+    { action: 'create', label: 'Crear contrato', kind: 'crear', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['addContract'],
+      counterparts: [cp('per-planilla:generate', 'any', 'advisory', 'Sin quien arme la planilla, el contrato no se pagará.')] },
     { action: 'edit', label: 'Editar contrato (cambio de condiciones con motivo)', kind: 'editar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['updateContract', 'editContract'] },
     { action: 'close', label: 'Cerrar contrato', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['contract', 'assignment'], actions: ['closeContract'] },
+    { action: 'renew', label: 'Renovar contrato', kind: 'operar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['renewContract'] },
   ]),
   f('per-asignaciones', 'Asignaciones', 'mod-personas', [
     { action: 'view', label: 'Ver asignaciones', kind: 'ver', menu: menu('personas', 'Asignaciones'), reads: ['assignment', 'staff', 'branch'] },
@@ -414,10 +460,10 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('per-planilla', 'Planilla', 'mod-personas', [
     { action: 'view', label: 'Ver planillas y boletas', kind: 'ver', requires: ['per-remuneracion:view'], menu: menu('personas', 'Planilla'), reads: ['payroll', 'contract', 'staff'], sensitive: 'remuneracion' },
-    { action: 'generate', label: 'Generar y eliminar borradores de planilla', kind: 'crear', requires: ['view'], sensitive: 'remuneracion', reads: ['contract'], writes: ['payroll'], actions: ['generatePayroll', 'deletePayrollDraft'] },
+    { action: 'generate', label: 'Generar y eliminar borradores de planilla', kind: 'crear', requires: ['view'], sensitive: 'remuneracion', reads: ['contract'], writes: ['payroll'], actions: ['generatePayroll', 'deletePayrollDraft'],
+      counterparts: [cp('per-planilla:close', 'any', 'advisory', 'Sin quien cierre la planilla, quedará en borrador.')] },
     { action: 'adjust', label: 'Agregar ajustes (bonos, descuentos)', kind: 'editar', requires: ['view'], sensitive: 'remuneracion', writes: ['payroll'], actions: ['addPayrollAdjustment', 'removePayrollAdjustment'] },
     { action: 'close', label: 'Cerrar planilla', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['payroll'], actions: ['closePayroll'] },
-    { action: 'pay', label: 'Registrar el pago de la planilla', kind: 'operar', requires: ['view'], sensitive: 'dinero', writes: ['payroll'], actions: ['payPayroll'] },
     { action: 'reopen', label: 'Reabrir planilla cerrada', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['payroll'], actions: ['reopenPayroll'] },
   ]),
   f('per-remuneracion', 'Remuneraciones', 'mod-personas', [
@@ -450,7 +496,9 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   })),
   f('com-recetas', 'Recetas de materiales', 'mod-comercial', [
     { action: 'view', label: 'Ver recetas de materiales', kind: 'ver', menu: menu('configuracion', 'Recetas de materiales'), reads: ['recipe', 'item', 'program', 'level', 'branch'] },
-    { action: 'edit', label: 'Crear, editar y activar recetas', kind: 'editar', requires: ['view'], writes: ['recipe'], actions: ['setRecipes'], note: 'Hoy la pantalla escribe el estado directo (setRecipes); en el paso de guardas pasa a acciones con validación.' },
+    { action: 'create', label: 'Crear y duplicar recetas', kind: 'crear', requires: ['view'], reads: ['item', 'program', 'level'], writes: ['recipe'], actions: ['saveRecipe', 'duplicateRecipe'] },
+    { action: 'edit', label: 'Editar recetas', kind: 'editar', requires: ['view'], reads: ['item', 'program', 'level'], writes: ['recipe'], actions: ['saveRecipe'], note: 'Una receta nueva no puede solaparse con otra activa del mismo programa, nivel, sede y período.' },
+    { action: 'deactivate', label: 'Activar y desactivar recetas', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['recipe'], actions: ['setRecipeStatus'] },
   ]),
 
   // ----------------------------------------------------------------------------------------------------------- Organización
@@ -467,11 +515,11 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'create', label: 'Crear rol', kind: 'crear', requires: ['view'], writes: ['role'], actions: ['addRole'] },
     { action: 'edit', label: 'Editar rol', kind: 'editar', requires: ['view'], writes: ['role'], actions: ['updateRole'] },
     { action: 'delete', label: 'Eliminar rol', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['role'], actions: ['deleteRole'] },
-    { action: 'config_perms', label: 'Configurar permisos', kind: 'configurar', requires: ['view'], sensitive: 'control', menu: menu('organizacion', 'Permisos'), reads: ['role', 'permission'], writes: ['permission'], actions: ['savePermissions'] },
+    { action: 'config_perms', label: 'Configurar permisos', kind: 'configurar', requires: ['view'], sensitive: 'control', menu: menu('organizacion', 'Permisos'), reads: ['role', 'permission'], writes: ['permission'], emits: ['role_permissions_changed'], actions: ['savePermissions'] },
   ]),
   f('org-usuarios', 'Usuarios', 'mod-org', [
     { action: 'view', label: 'Ver usuarios', kind: 'ver', menu: menu('organizacion', 'Usuarios'), reads: ['user', 'role', 'staff', 'branch'] },
-    { action: 'create', label: 'Crear usuario', kind: 'crear', requires: ['view'], writes: ['user'], actions: ['addUser'] },
+    { action: 'create', label: 'Crear usuario', kind: 'crear', requires: ['view', 'per-personal:view'], writes: ['user'], actions: ['addUser'] },
     { action: 'edit', label: 'Editar usuario', kind: 'editar', requires: ['view'], writes: ['user'], actions: ['updateUser'] },
     { action: 'deactivate', label: 'Desactivar usuario', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['updateUser'] },
     { action: 'reset_access', label: 'Resetear acceso', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['updateUser'] },
@@ -524,6 +572,10 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('sis-avisos', 'Avisos', 'mod-sistema', [
     { action: 'view', label: 'Ver la bandeja de avisos', kind: 'ver', reads: ['notification'], actions: ['markNotificationAsRead'] },
+    {
+      action: 'supervise', label: 'Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos)', kind: 'ver', requires: ['view'],
+      sensitive: 'control', reads: ['notification'], note: 'Es la supervisión: quien tenga esta función ve lo que otros reversan, reabren o cambian.',
+    },
     { action: 'fallback', label: 'Recibir los avisos que nadie más puede recibir', kind: 'ver', requires: ['view'], reads: ['notification'], note: 'Cuando un aviso no tiene destinatario en la sede, llega a quien tenga esta función.' },
   ]),
 
@@ -531,6 +583,11 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   f('cfg-leads', 'Orígenes de leads', 'mod-config', crud({
     entity: 'leadSource', one: 'origen de lead', many: 'orígenes de leads', create: ['addLeadSource'], edit: ['updateLeadSource'], remove: ['deleteLeadSource'],
   })),
+  f('cfg-couriers', 'Couriers y métodos de envío', 'mod-config', [
+    { action: 'view', label: 'Ver los couriers y métodos de envío', kind: 'ver', reads: ['courier', 'shippingMethod'] },
+    { action: 'create', label: 'Crear couriers y métodos de envío', kind: 'crear', requires: ['view'], writes: ['courier', 'shippingMethod'], actions: ['addCourier', 'addShippingMethod'] },
+    { action: 'edit', label: 'Editar, activar y desactivar couriers y métodos de envío', kind: 'editar', requires: ['view'], writes: ['courier', 'shippingMethod'], actions: ['updateCourier', 'updateShippingMethod'] },
+  ]),
   f('cfg-plantillas', 'Plantillas de contrato y ficha', 'mod-config', [
     { action: 'view', label: 'Ver las plantillas de contrato y ficha', kind: 'ver', reads: ['contractTemplate'] },
     { action: 'edit', label: 'Editar las plantillas de contrato y ficha', kind: 'editar', requires: ['view'], writes: ['contractTemplate'], actions: ['updateContractTemplate'] },
@@ -543,15 +600,17 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
  */
 export const NON_CAPABILITY_ACTIONS: Record<string, string> = {
   can: 'Consulta de permisos.',
+  availabilityOf: 'Consulta (si la función se ofrece según sus contrapartes).',
   gateOfSchedule: 'Consulta (puerta de verificación antes de la primera asesoría).',
   attendanceBlockOf: 'Consulta (bloqueo de asistencia).',
   pendingFirstSessions: 'Consulta (primeras asesorías pendientes).',
   payrollLinesOf: 'Consulta (líneas de una planilla).',
   documentContextOf: 'Consulta (datos para armar un documento).',
-  addNotification: 'Interna: la dispara cada función con su aviso (paso de avisos dirigidos).',
-  updateStock: 'Interna: la mueven el despacho, la recepción, la entrega de materiales y los ajustes; las pantallas no deberían llamarla directo (paso de guardas).',
   setIsEnrollmentWizardOpen: 'Estado de la interfaz (abrir el asistente de matrícula).',
-  setCurrentBranchId: 'Selector de sede TEMPORAL de pruebas: desaparece con las sesiones.',
+  selectBranch: 'Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).',
+  switchUser: 'Sesión: cambio rápido de usuario con PIN (quien sabe el PIN de una cuenta entra a ella).',
+  lockSession: 'Sesión: bloquear (nadie trabaja hasta que una cuenta entre con su PIN).',
+  changeOwnPin: 'Sesión: cada persona cambia su propio PIN.',
 };
 
 /** Ítems de menú que aún no tienen función porque la pantalla no existe o no es una pantalla propia. */

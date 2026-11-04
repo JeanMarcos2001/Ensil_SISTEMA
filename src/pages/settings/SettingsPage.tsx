@@ -5,6 +5,8 @@ import { LeadsConfig } from './LeadsConfig';
 import { DocumentTemplatesConfig } from './DocumentTemplatesConfig';
 import { CollectionsConfig } from './CollectionsConfig';
 import { PsyRemindersConfig } from './PsyRemindersConfig';
+import { useData } from '../../context/DataContext';
+import { SETTINGS_SECTION_CAPABILITY } from '../../config/settingsSections';
 
 /**
  * Configuración (botón inferior del menú): parámetros del sistema que se fijan una vez y casi no se tocan, agrupados por área.
@@ -53,7 +55,14 @@ function lastSection(): string {
 }
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState(lastSection);
+  const { can } = useData();
+  // Solo se ofrecen las secciones cuya función tiene el rol
+  const groups = SETTINGS_GROUPS
+    .map(g => ({ ...g, sections: g.sections.filter(s => can(SETTINGS_SECTION_CAPABILITY[s.id])) }))
+    .filter(g => g.sections.length > 0);
+  const firstVisible = groups[0]?.sections[0]?.id ?? FIRST;
+  const [saved, setActiveTab] = useState(lastSection);
+  const activeTab = groups.some(g => g.sections.some(s => s.id === saved)) ? saved : firstVisible;
   // Se abre el grupo de la última sección usada; los demás se despliegan a mano
   const [open, setOpen] = useState<string[]>(() => [groupOf(lastSection())?.id ?? SETTINGS_GROUPS[0].id]);
 
@@ -62,7 +71,7 @@ export function SettingsPage() {
     try { localStorage.setItem(STORAGE_KEY, sectionId); } catch { /* sin almacenamiento */ }
   };
   const toggle = (groupId: string) => setOpen(prev => (prev.includes(groupId) ? prev.filter(g => g !== groupId) : [...prev, groupId]));
-  const active = SETTINGS_GROUPS.flatMap(g => g.sections).find(s => s.id === activeTab);
+  const active = groups.flatMap(g => g.sections).find(s => s.id === activeTab);
 
   return (
     <div className="flex h-full w-full bg-surface overflow-hidden">
@@ -72,7 +81,7 @@ export function SettingsPage() {
             Parámetros del sistema. Los programas, tarifas, promociones y recetas están en el menú <span className="font-medium text-text-secondary">Oferta comercial</span>.
           </p>
           <div className="flex flex-col gap-1">
-            {SETTINGS_GROUPS.map(group => {
+            {groups.map(group => {
               const isOpen = open.includes(group.id);
               const hasActive = group.sections.some(s => s.id === activeTab);
               return (
@@ -108,7 +117,7 @@ export function SettingsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 bg-surface">
-        {active?.render()}
+        {active ? active.render() : <p className="text-sm text-text-muted">Su rol no tiene secciones de configuración.</p>}
       </div>
     </div>
   );

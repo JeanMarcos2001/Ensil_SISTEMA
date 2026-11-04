@@ -17,7 +17,7 @@ const SCHEDULE_MODE_LABELS: Record<ScheduleMode, string> = {
 };
 
 export function PaymentTypes() {
-  const { paymentTypes, addPaymentType, updatePaymentType, deletePaymentType } = useData();
+  const { paymentTypes, addPaymentType, updatePaymentType, deletePaymentType, can } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | null>(null);
@@ -155,10 +155,12 @@ export function PaymentTypes() {
           <p className="text-sm text-text-secondary">Modalidades comerciales base para tarifarios</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Tipo de Pago
-          </Button>
+          {can('com-tipos-pago:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Tipo de Pago
+            </Button>
+          )}
         </div>
       </div>
 
@@ -234,9 +236,9 @@ export function PaymentTypes() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenForm(row, true) },
-                        { label: 'Editar tipo de pago', onClick: () => handleOpenForm(row) },
+                        { label: 'Editar tipo de pago', hidden: !can('com-tipos-pago:edit'), onClick: () => handleOpenForm(row) },
                         { 
-                          label: 'Duplicar', 
+                          label: 'Duplicar', hidden: !can('com-tipos-pago:create'), 
                           onClick: () => openConfirm({
                             title: 'Duplicar Tipo de Pago',
                             description: `¿Está seguro de que desea duplicar el tipo de pago "${row.name}"?`,
@@ -246,7 +248,7 @@ export function PaymentTypes() {
                           }) 
                         },
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-tipos-pago:edit'), 
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Tipo de Pago' : 'Activar Tipo de Pago',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el tipo de pago "${row.name}"?`,
@@ -257,7 +259,7 @@ export function PaymentTypes() {
                           danger: row.status === 'Activo' 
                         },
                         { 
-                          label: 'Eliminar', 
+                          label: 'Eliminar', hidden: !can('com-tipos-pago:delete'), 
                           onClick: () => openConfirm({
                             title: 'Eliminar Tipo de Pago',
                             description: `¿Está seguro de que desea eliminar el tipo de pago "${row.name}"? Esta acción no se puede deshacer.`,

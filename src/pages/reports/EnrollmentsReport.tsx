@@ -25,7 +25,7 @@ export function EnrollmentsReport() {
     () => enrollmentsReport({ enrollments, programs, branches, schedules, dropRequests, changeRequests, today }, { range, branchId, program }),
     [enrollments, programs, branches, schedules, dropRequests, changeRequests, today, range, branchId, program]
   );
-  if (!can(PERM.reportView)) return <NoAccess />;
+  if (!can(PERM.reportEnrollments)) return <NoAccess />;
 
   const { kpis } = report;
   const rows = report.rows.map(e => [e.id, dmy(e.dateISO), e.student, e.level && e.level !== 'Sin nivel' ? `${e.program} · ${e.level}` : e.program, e.sede ?? '', e.paymentTypeName ?? '', e.assignedPrice ?? 0, e.status, e.verificationStatus ?? 'Pendiente', e.origen ?? '', e.asesor ?? '']);

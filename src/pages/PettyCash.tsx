@@ -157,19 +157,23 @@ export function PettyCash() {
             <Download size={16} />
             Exportar
           </Button>
-          {toRefill > 0 && (
+          {toRefill > 0 && can('op-caja-chica:reg_movement') && (
             <Button variant="secondary" className="hidden lg:flex items-center gap-2" onClick={handleRefill}>
               Solicitar reposición ({money(toRefill)})
             </Button>
           )}
-          <Button variant="secondary" className="flex items-center gap-2" onClick={() => handleOpenMovement('Ingreso')}>
-            <ArrowUpRight size={16} className="text-success-text" />
-            Registrar ingreso
-          </Button>
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenMovement('Egreso')}>
-            <ArrowDownRight size={16} />
-            Registrar egreso
-          </Button>
+          {can('op-caja-chica:reg_movement') && (
+            <>
+              <Button variant="secondary" className="flex items-center gap-2" onClick={() => handleOpenMovement('Ingreso')}>
+                <ArrowUpRight size={16} className="text-success-text" />
+                Registrar ingreso
+              </Button>
+              <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenMovement('Egreso')}>
+                <ArrowDownRight size={16} />
+                Registrar egreso
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

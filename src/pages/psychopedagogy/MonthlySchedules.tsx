@@ -58,7 +58,7 @@ const seats = (a: ScheduleActivity) => (a.cupo === null ? `${a.inscritos.length}
  * Programación, bloquean los horarios de asesoría de su sede y admiten inscripción de alumnos.
  */
 export function MonthlySchedules() {
-  const { monthlySchedules, branches, schedules, addMonthlySchedule, updateMonthlySchedule, deleteMonthlySchedule } = useData();
+  const { monthlySchedules, branches, schedules, addMonthlySchedule, updateMonthlySchedule, deleteMonthlySchedule, can } = useData();
   const today = todayLocalISO();
   const activeBranches = branches.filter(b => b.status === 'Activo');
   const [searchTerm, setSearchTerm] = useState('');
@@ -174,10 +174,12 @@ export function MonthlySchedules() {
             <Download size={20} className="mr-2" />
             Exportar Todos
           </Button>
-          <Button onClick={() => handleOpenDrawer()} className="flex-1 sm:flex-none">
-            <Plus size={20} className="mr-2" />
-            Nuevo Cronograma
-          </Button>
+          {can('psi-cronogramas:create') && (
+            <Button onClick={() => handleOpenDrawer()} className="flex-1 sm:flex-none">
+              <Plus size={20} className="mr-2" />
+              Nuevo Cronograma
+            </Button>
+          )}
         </div>
       </div>
 
@@ -224,10 +226,10 @@ export function MonthlySchedules() {
                 </div>
                 <ActionMenu
                   items={[
-                    { label: 'Editar cronograma', onClick: () => handleOpenDrawer(schedule) },
+                    { label: 'Editar cronograma', hidden: !can('psi-cronogramas:edit'), onClick: () => handleOpenDrawer(schedule) },
                     { label: 'Exportar a PDF', onClick: () => exportPdf(schedule), disabled: schedule.actividades.length === 0 },
                     { label: 'Exportar a Imagen', onClick: () => exportImage(schedule), disabled: schedule.actividades.length === 0 },
-                    { label: 'Eliminar', onClick: () => setToDelete(schedule), danger: true },
+                    { label: 'Eliminar', hidden: !can('psi-cronogramas:delete'), onClick: () => setToDelete(schedule), danger: true },
                   ]}
                 />
               </div>
@@ -301,7 +303,7 @@ export function MonthlySchedules() {
             </Button>
             <div className="flex gap-3">
               <Button variant="ghost" onClick={() => setIsDrawerOpen(false)}>Cancelar</Button>
-              <Button variant="primary" onClick={handleSave}>Guardar Cronograma</Button>
+              {can(selectedSchedule ? 'psi-cronogramas:edit' : 'psi-cronogramas:create') && <Button variant="primary" onClick={handleSave}>Guardar Cronograma</Button>}
             </div>
           </div>
         }

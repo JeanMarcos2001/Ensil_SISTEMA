@@ -8,7 +8,9 @@ import { HelpPopover } from '../../components/ui/HelpPopover';
 import { Search, Plus, Shield, Users, Settings, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
-import { nextSequentialId } from '../../utils/ids';
+import { ROLE_TEMPLATES, templateById, templatePermissions } from '../../utils/roleTemplates';
+import { roleUsage, validateRoleInput } from '../../utils/roleBuilder';
+import { AccessStorageBar } from '../../components/people/AccessStorageBar';
 
 interface RolesProps {
   onNavigate?: (item: string, state?: any) => void;
@@ -20,14 +22,17 @@ export function Roles({ onNavigate }: RolesProps) {
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const { roles, addRole, updateRole, deleteRole } = useData();
+  const { roles, users, addRole, updateRole, deleteRole, can } = useData();
+  const usageOf = (id: string | null) => { const r = roles.find(x => x.id === id); return r ? roleUsage(r, users) : { total: 0, active: 0 }; };
+  const [deleteError, setDeleteError] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
     desc: '',
-    baseRole: '',
+    templateId: '',
     status: 'Activo',
-    observations: ''
+    observations: '',
+    limit: ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -64,17 +69,19 @@ export function Roles({ onNavigate }: RolesProps) {
       setFormData({
         name: role?.name || '',
         desc: role?.desc || '',
-        baseRole: role?.baseRole || '',
+        templateId: role?.templateId || '',
         status: role?.status || 'Activo',
-        observations: role?.observations || ''
+        observations: role?.observations || '',
+        limit: role?.branchUserLimit ? String(role.branchUserLimit) : ''
       });
     } else {
       setFormData({
         name: '',
         desc: '',
-        baseRole: '',
+        templateId: '',
         status: 'Activo',
-        observations: ''
+        observations: '',
+        limit: ''
       });
     }
     setErrors({});
@@ -82,77 +89,55 @@ export function Roles({ onNavigate }: RolesProps) {
     setIsFormOpen(true);
   };
 
+  const parsedLimit = (): number | undefined => (formData.limit.trim() === '' ? undefined : Number(formData.limit));
+
   const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.name.trim()) {
-      newErrors.name = 'El nombre del rol es obligatorio';
-    } else {
-      const isDuplicate = roles.some(r => r.name.toLowerCase() === formData.name.trim().toLowerCase() && r.id !== selectedRole);
-      if (isDuplicate) {
-        newErrors.name = 'Ya existe un rol con este nombre';
-      }
+    const problem = validateRoleInput({ name: formData.name, branchUserLimit: parsedLimit() }, roles, selectedRole ?? undefined);
+    setErrors(problem ? { [problem.startsWith('El límite') ? 'limit' : 'name']: problem } : {});
+    return !problem;
+  };
+
+  /** Guarda el rol (las reglas viven en el contexto). Devuelve el id del rol guardado, o `null` si algo lo impide. */
+  const submit = (): string | null => {
+    if (!validateForm()) return null;
+    const data = {
+      name: formData.name, desc: formData.desc, status: formData.status as 'Activo' | 'Inactivo',
+      observations: formData.observations, branchUserLimit: parsedLimit(), templateId: formData.templateId || undefined,
+    };
+    if (selectedRole) {
+      const r = updateRole(selectedRole, data);
+      if (!r.ok) { setErrors({ form: r.error ?? 'No se pudo guardar el rol.' }); return null; }
+      return selectedRole;
     }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    // Con plantilla, el rol nace con sus funciones (todo en una sola operación)
+    const template = templateById(formData.templateId);
+    const r = addRole({ ...data, permissions: template && can('org-roles:config_perms') ? templatePermissions(template) : undefined, reasons: template?.risks });
+    if (!r.ok) { setErrors({ form: r.error ?? 'No se pudo crear el rol.' }); return null; }
+    return r.id ?? null;
   };
 
   const handleSave = () => {
-    if (validateForm()) {
-      const newRoleData = {
-        name: formData.name,
-        desc: formData.desc,
-        status: formData.status as 'Activo' | 'Inactivo',
-        baseRole: formData.baseRole,
-        observations: formData.observations,
-        users: selectedRole ? (roles.find(r => r.id === selectedRole)?.users || 0) : 0
-      };
-
-      if (selectedRole) {
-        updateRole(selectedRole, newRoleData);
-      } else {
-        addRole({
-          ...newRoleData,
-          id: nextSequentialId('ROL', roles.map(x => x.id))
-        });
-      }
-      setIsFormOpen(false);
-    }
+    if (submit()) setIsFormOpen(false);
   };
 
   const handleSaveAndConfigure = () => {
-    if (validateForm()) {
-      const newRoleData = {
-        name: formData.name,
-        desc: formData.desc,
-        status: formData.status as 'Activo' | 'Inactivo',
-        baseRole: formData.baseRole,
-        observations: formData.observations,
-        users: selectedRole ? (roles.find(r => r.id === selectedRole)?.users || 0) : 0
-      };
-
-      let newRoleId = selectedRole;
-      if (selectedRole) {
-        updateRole(selectedRole, newRoleData);
-      } else {
-        newRoleId = nextSequentialId('ROL', roles.map(x => x.id));
-        addRole({
-          ...newRoleData,
-          id: newRoleId
-        });
-      }
+    const id = submit();
+    if (id) {
       setIsFormOpen(false);
-      onNavigate?.('Permisos', { selectedRoleId: newRoleId });
+      onNavigate?.('Permisos', { selectedRoleId: id });
     }
   };
 
   const handleDelete = (id: string) => {
     setSelectedRole(id);
+    setDeleteError('');
     setIsDeleteModalOpen(true);
   };
 
   const confirmDelete = () => {
     if (selectedRole) {
-      deleteRole(selectedRole);
+      const r = deleteRole(selectedRole);
+      if (!r.ok) { setDeleteError(r.error ?? 'No se pudo eliminar el rol.'); return; }
       setIsDeleteModalOpen(false);
       setSelectedRole(null);
     }
@@ -167,35 +152,33 @@ export function Roles({ onNavigate }: RolesProps) {
           <p className="text-sm text-text-secondary">Gestión de roles y perfiles de acceso</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Rol
-          </Button>
+          {can('org-roles:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Rol
+            </Button>
+          )}
           
-          <HelpPopover title="¿Qué es un rol base?">
+          <HelpPopover title="¿Qué es una plantilla de rol?">
             <div className="space-y-4">
               <p>
-                <strong className="text-text-primary font-medium">Un rol base es una plantilla inicial de permisos.</strong><br />
-                Sirve para crear nuevos roles más rápido sin empezar desde cero.
+                <strong className="text-text-primary font-medium">Una plantilla es un punto de partida con las funciones ya marcadas.</strong><br />
+                Sirve para crear un rol más rápido sin empezar desde cero.
               </p>
-              
+
               <div>
                 <h5 className="text-text-primary font-medium mb-1">Cómo funciona</h5>
                 <ul className="list-disc pl-4 space-y-1">
-                  <li>Si eliges un rol base, el nuevo rol copiará sus permisos iniciales.</li>
-                  <li>Luego podrás ajustar esos permisos en la matriz de permisos.</li>
-                  <li>Si no eliges un rol base, el nuevo rol se crea vacío y configuras todo manualmente.</li>
+                  <li>Si eliges una plantilla, el nuevo rol nace con sus funciones.</li>
+                  <li>Luego puedes ajustarlas en Permisos: el rol es tuyo, no queda atado a la plantilla.</li>
+                  <li>Sin plantilla, el rol nace vacío y marcas todo a mano.</li>
                 </ul>
               </div>
 
               <div>
-                <h5 className="text-text-primary font-medium mb-1">Roles base del sistema</h5>
+                <h5 className="text-text-primary font-medium mb-1">Plantillas de partida</h5>
                 <ul className="list-disc pl-4 space-y-1">
-                  <li>Superadmin</li>
-                  <li>Administración</li>
-                  <li>Filial</li>
-                  <li>Logística</li>
-                  <li>Psicopedagogía</li>
+                  {ROLE_TEMPLATES.filter(t => !t.locked).map(t => <li key={t.id}>{t.name}</li>)}
                 </ul>
               </div>
 
@@ -205,15 +188,17 @@ export function Roles({ onNavigate }: RolesProps) {
                   Importante
                 </h5>
                 <ul className="list-disc pl-4 space-y-1 text-xs">
-                  <li>Elegir un rol base es opcional.</li>
-                  <li>No reemplaza la configuración final de permisos.</li>
-                  <li>Solo sirve como punto de partida.</li>
+                  <li>Elegir una plantilla es opcional.</li>
+                  <li>Las combinaciones que conviene separar piden un motivo al guardar.</li>
+                  <li>El Superusuario es un rol del sistema: no se edita ni se elimina.</li>
                 </ul>
               </div>
             </div>
           </HelpPopover>
         </div>
       </div>
+
+      <AccessStorageBar />
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -251,7 +236,7 @@ export function Roles({ onNavigate }: RolesProps) {
               <tr>
                 <th className="px-6 py-3 font-medium">Nombre del Rol</th>
                 <th className="px-6 py-3 font-medium">Descripción</th>
-                <th className="px-6 py-3 font-medium">Usuarios Asignados</th>
+                <th className="px-6 py-3 font-medium">Cuentas</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -263,13 +248,14 @@ export function Roles({ onNavigate }: RolesProps) {
                     <div className="flex items-center gap-2">
                       <Shield size={16} className="text-primary-accent" />
                       <span className="font-medium text-text-primary">{row.name}</span>
+                      {row.locked && <Badge variant="neutral">Del sistema</Badge>}
                     </div>
                   </td>
                   <td className="px-6 py-3 text-text-secondary">{row.desc}</td>
                   <td className="px-6 py-3 text-text-secondary">
                     <div className="flex items-center gap-1.5">
                       <Users size={14} className="text-text-muted" />
-                      {row.users} usuarios
+                      {usageOf(row.id).active} activa{usageOf(row.id).active === 1 ? '' : 's'}{usageOf(row.id).total > usageOf(row.id).active ? ` · ${usageOf(row.id).total} en total` : ''}
                     </div>
                   </td>
                   <td className="px-6 py-3">
@@ -279,10 +265,10 @@ export function Roles({ onNavigate }: RolesProps) {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Editar rol', onClick: () => handleOpenForm(row.id) },
-                        { label: 'Configurar permisos', onClick: () => onNavigate?.('Permisos', { selectedRoleId: row.id }) },
-                        { label: 'Ver usuarios', onClick: () => onNavigate?.('Usuarios') },
-                        { label: 'Eliminar rol', onClick: () => handleDelete(row.id), danger: true },
+                        { label: 'Editar rol', hidden: !can('org-roles:edit') || !!row.locked, onClick: () => handleOpenForm(row.id) },
+                        { label: 'Configurar permisos', hidden: !can('org-roles:config_perms') || !!row.locked, onClick: () => onNavigate?.('Permisos', { selectedRoleId: row.id }) },
+                        { label: 'Ver usuarios', hidden: !can('org-usuarios:view'), onClick: () => onNavigate?.('Usuarios') },
+                        { label: 'Eliminar rol', hidden: !can('org-roles:delete') || !!row.locked, onClick: () => handleDelete(row.id), danger: true },
                       ]} 
                     />
                   </td>
@@ -340,7 +326,7 @@ export function Roles({ onNavigate }: RolesProps) {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => { setIsDetailOpen(false); onNavigate?.('Permisos', { selectedRoleId: selectedRole }); }}>Configurar Permisos</Button>
+            {can('org-roles:config_perms') && <Button variant="primary" onClick={() => { setIsDetailOpen(false); onNavigate?.('Permisos', { selectedRoleId: selectedRole }); }}>Configurar Permisos</Button>}
           </div>
         }
       >
@@ -357,15 +343,15 @@ export function Roles({ onNavigate }: RolesProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <span className="text-xs text-text-muted uppercase tracking-wider">Usuarios Asignados</span>
+              <span className="text-xs text-text-muted uppercase tracking-wider">Cuentas</span>
               <p className="text-sm font-medium text-text-primary flex items-center gap-1">
                 <Users size={14} className="text-text-muted" />
-                {roles.find(r => r.id === selectedRole)?.users} usuarios
+                {usageOf(selectedRole).active} activas de {usageOf(selectedRole).total}
               </p>
             </div>
             <div className="space-y-1">
-              <span className="text-xs text-text-muted uppercase tracking-wider">Creado el</span>
-              <p className="text-sm font-medium text-text-primary">10/01/2024</p>
+              <span className="text-xs text-text-muted uppercase tracking-wider">Límite de cuentas por sede</span>
+              <p className="text-sm font-medium text-text-primary">{roles.find(r => r.id === selectedRole)?.branchUserLimit ?? 'Sin límite'}</p>
             </div>
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Estado</span>
@@ -382,12 +368,26 @@ export function Roles({ onNavigate }: RolesProps) {
             </p>
           </div>
 
-          {roles.find(r => r.id === selectedRole)?.baseRole && (
+          {templateById(roles.find(r => r.id === selectedRole)?.templateId) && (
             <div className="border-t border-border-soft pt-4">
-              <h4 className="text-sm font-bold text-text-primary mb-3">Rol Base de Referencia</h4>
-              <p className="text-sm text-text-secondary capitalize">
-                {roles.find(r => r.id === selectedRole)?.baseRole}
+              <h4 className="text-sm font-bold text-text-primary mb-3">Plantilla de partida</h4>
+              <p className="text-sm text-text-secondary">
+                {templateById(roles.find(r => r.id === selectedRole)?.templateId)?.name}
               </p>
+            </div>
+          )}
+
+          {(roles.find(r => r.id === selectedRole)?.acceptedRisks ?? []).length > 0 && (
+            <div className="border-t border-border-soft pt-4">
+              <h4 className="text-sm font-bold text-text-primary mb-3">Combinaciones aceptadas</h4>
+              <ul className="space-y-2">
+                {roles.find(r => r.id === selectedRole)?.acceptedRisks?.map(risk => (
+                  <li key={risk.ruleId} className="text-xs text-text-secondary bg-warning-tint border border-border-soft rounded-xl p-3">
+                    <span className="block text-text-primary font-medium mb-0.5">{risk.reason}</span>
+                    Aceptada por {risk.by} el {risk.at}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -427,13 +427,16 @@ export function Roles({ onNavigate }: RolesProps) {
             <Button variant="secondary" onClick={handleSave}>
               Guardar Rol
             </Button>
-            <Button variant="primary" onClick={handleSaveAndConfigure}>
-              Guardar y configurar permisos
-            </Button>
+            {can('org-roles:config_perms') && (
+              <Button variant="primary" onClick={handleSaveAndConfigure}>
+                Guardar y configurar permisos
+              </Button>
+            )}
           </div>
         }
       >
         <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+          {errors.form && <div className="bg-danger-tint border border-error rounded-xl p-3 text-sm text-error">{errors.form}</div>}
           {/* Bloque 1: Identidad */}
           <section className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-border-soft">
@@ -476,21 +479,17 @@ export function Roles({ onNavigate }: RolesProps) {
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-text-secondary">Rol base de referencia (Opcional)</label>
-                <select 
-                  value={formData.baseRole}
-                  onChange={(e) => setFormData({ ...formData, baseRole: e.target.value })}
+                <label className="text-xs font-medium text-text-secondary">Plantilla de partida (opcional)</label>
+                <select
+                  value={formData.templateId}
+                  onChange={(e) => setFormData({ ...formData, templateId: e.target.value })}
                   className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent"
-                  disabled={!!selectedRole}
+                  disabled={!!selectedRole || !can('org-roles:config_perms')}
                 >
-                  <option value="">Ninguno (Crear desde cero)</option>
-                  <option value="superadmin">Superadmin</option>
-                  <option value="administracion">Administración</option>
-                  <option value="filial">Filial</option>
-                  <option value="logistica">Logística</option>
-                  <option value="psicopedagogia">Psicopedagogía</option>
+                  <option value="">Ninguna (crear desde cero)</option>
+                  {ROLE_TEMPLATES.filter(t => !t.locked).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
-                {!selectedRole && <p className="text-[10px] text-text-muted">Copia los permisos iniciales de un rol existente.</p>}
+                {!selectedRole && <p className="text-[10px] text-text-muted">{templateById(formData.templateId)?.summary ?? 'El rol nace con las funciones de la plantilla; luego se ajustan en Permisos.'}</p>}
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-text-secondary">Estado <span className="text-error">*</span></label>
@@ -524,6 +523,19 @@ export function Roles({ onNavigate }: RolesProps) {
             </div>
           </section>
 
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-text-secondary">Límite de cuentas activas por sede (vacío = sin límite)</label>
+            <input
+              type="number" min={1} max={50}
+              value={formData.limit}
+              onChange={(e) => { setFormData({ ...formData, limit: e.target.value }); if (errors.limit) setErrors({ ...errors, limit: '' }); }}
+              className={`w-full h-10 bg-surface border ${errors.limit ? 'border-error' : 'border-border-soft'} rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent`}
+              placeholder="Ej. 3"
+            />
+            {errors.limit && <p className="text-xs text-error">{errors.limit}</p>}
+            <p className="text-[10px] text-text-muted">Cada persona tiene su cuenta (no se comparte una por sede); el límite evita cuentas de más.</p>
+          </div>
+
           <div className="bg-primary-accent/5 border border-primary-accent/20 rounded-xl p-4 mt-4">
             <div className="flex items-start gap-3">
               <Shield className="text-primary-accent mt-0.5" size={16} />
@@ -556,8 +568,9 @@ export function Roles({ onNavigate }: RolesProps) {
             <p className="text-sm font-medium">¿Estás seguro de que deseas eliminar este rol?</p>
           </div>
           <p className="text-sm text-text-secondary">
-            Esta acción no se puede deshacer. Los usuarios que tengan asignado este rol perderán los permisos asociados. Asegúrate de reasignar los usuarios antes de eliminar el rol.
+            Esta acción no se puede deshacer. Un rol con cuentas no se elimina: primero reasigne sus cuentas a otro rol.
           </p>
+          {deleteError && <p className="text-sm text-error">{deleteError}</p>}
         </div>
       </Modal>
     </div>

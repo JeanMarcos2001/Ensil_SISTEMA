@@ -8,7 +8,7 @@ const areaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text
 
 /** Configuración → Documentos → Plantillas de contrato y ficha: texto del contrato de servicios educativos (con campos entre llaves dobles). */
 export function DocumentTemplatesConfig() {
-  const { contractTemplate, updateContractTemplate } = useData();
+  const { contractTemplate, updateContractTemplate, can } = useData();
   const [intro, setIntro] = useState(contractTemplate.intro);
   const [closing, setClosing] = useState(contractTemplate.closing);
   const [clauses, setClauses] = useState<ContractClause[]>(contractTemplate.clauses);
@@ -29,7 +29,7 @@ export function DocumentTemplatesConfig() {
   };
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <fieldset disabled={!can('cfg-plantillas:edit')} className="max-w-4xl space-y-6 min-w-0">
       <div>
         <h2 className="text-xl font-semibold text-text-primary">Plantillas de documentos</h2>
         <p className="text-sm text-text-secondary">Texto del contrato de servicios educativos. La ficha de matrícula usa un formato fijo con los datos de la matrícula.</p>
@@ -83,10 +83,10 @@ export function DocumentTemplatesConfig() {
       {message && <p className={`text-sm ${message.ok ? 'text-success-text' : 'text-danger-text'}`}>{message.text}</p>}
 
       <div className="flex items-center gap-3">
-        <Button variant="primary" onClick={save} disabled={(!dirty && reviewed === contractTemplate.reviewed) || problems.length > 0}>Guardar plantilla</Button>
-        <Button variant="ghost" onClick={() => { setIntro(DEFAULT_CONTRACT_TEMPLATE.intro); setClosing(DEFAULT_CONTRACT_TEMPLATE.closing); setClauses(DEFAULT_CONTRACT_TEMPLATE.clauses); setReviewed(false); setMessage(null); }}>Restablecer el texto modelo</Button>
+        {can('cfg-plantillas:edit') && <Button variant="primary" onClick={save} disabled={(!dirty && reviewed === contractTemplate.reviewed) || problems.length > 0}>Guardar plantilla</Button>}
+        {can('cfg-plantillas:edit') && <Button variant="ghost" onClick={() => { setIntro(DEFAULT_CONTRACT_TEMPLATE.intro); setClosing(DEFAULT_CONTRACT_TEMPLATE.closing); setClauses(DEFAULT_CONTRACT_TEMPLATE.clauses); setReviewed(false); setMessage(null); }}>Restablecer el texto modelo</Button>}
         <span className="text-xs text-text-muted">Versión {contractTemplate.version}{contractTemplate.updatedBy ? ` · actualizada por ${contractTemplate.updatedBy}` : ''}</span>
       </div>
-    </div>
+    </fieldset>
   );
 }

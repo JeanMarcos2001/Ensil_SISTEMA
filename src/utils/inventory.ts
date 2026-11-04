@@ -88,3 +88,37 @@ export function validateItem({ item, allItems, editingId }: ItemValidationInput)
   }
   return null;
 }
+
+export interface StockMove { branchId: string; itemId: string; qty: number }
+
+/**
+ * Comprueba de una vez varios movimientos de stock: ninguno deja un saldo negativo (se suman los movimientos de un mismo artículo
+ * y sede). Sirve para que una operación con varias líneas (entregar los materiales de una receta) se aplique entera o no se aplique.
+ */
+export function stockMovesError(stockItems: StockItem[], moves: StockMove[], nameOf: (itemId: string) => string = id => id): string | null {
+  const net = new Map<string, number>();
+  for (const m of moves) net.set(`${m.branchId}|${m.itemId}`, (net.get(`${m.branchId}|${m.itemId}`) ?? 0) + m.qty);
+  for (const [key, delta] of net) {
+    if (delta >= 0) continue;
+    const [branchId, itemId] = key.split('|');
+    const have = availableStock(stockItems, branchId, itemId);
+    if (have + delta < 0) return `Stock insuficiente de "${nameOf(itemId)}": disponible ${have}, se intentó descontar ${-delta}.`;
+  }
+  return null;
+}
+
+/** Un ingreso de stock (compra o reposición) pide sede, artículo, una cantidad entera y el documento que lo respalda. */
+export function stockEntryError(input: { branchId: string; itemId: string; qty: number; doc: string }): string | null {
+  if (!input.branchId || !input.itemId) return 'Elija la sede y el artículo.';
+  if (!Number.isInteger(input.qty) || input.qty < 1) return 'La cantidad debe ser un número entero mayor a 0.';
+  if (!input.doc.trim()) return 'Indique el documento que respalda el ingreso (factura, guía o acta).';
+  return null;
+}
+
+/** Una venta de artículo en caja: cantidad entera, stock suficiente y, si se cobra en soles, el tipo de cambio. */
+export function itemSaleError(input: { qty: number; available: number; currency: 'PEN' | 'USD'; exchangeRate?: number }): string | null {
+  if (!Number.isInteger(input.qty) || input.qty < 1) return 'La cantidad debe ser un número entero mayor a 0.';
+  if (input.available < input.qty) return 'No hay stock suficiente para realizar la venta.';
+  if (input.currency === 'PEN' && !((input.exchangeRate ?? 0) > 0)) return 'Indique el tipo de cambio (TC) para cobrar en soles.';
+  return null;
+}

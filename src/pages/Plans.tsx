@@ -388,12 +388,16 @@ export function Plans() {
             <div className="flex gap-2">
               {selectedInstallment?.status !== 'Pagada' && selectedInstallment?.status !== 'Refinanciada' && selectedInstallment?.status !== 'Anulada' && (
                 <>
-                  <Button variant="secondary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenRefinance(selectedInstallment); }} disabled={!!selectedInstallment?.isMora}>
-                    Refinanciar
-                  </Button>
-                  <Button variant="primary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenPayment(selectedInstallment); }}>
-                    Registrar Pago
-                  </Button>
+                  {can('op-cobranza:refinance') && (
+                    <Button variant="secondary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenRefinance(selectedInstallment); }} disabled={!!selectedInstallment?.isMora}>
+                      Refinanciar
+                    </Button>
+                  )}
+                  {can('op-pagos:register') && (
+                    <Button variant="primary" onClick={() => { setIsInstallmentDetailOpen(false); handleOpenPayment(selectedInstallment); }}>
+                      Registrar Pago
+                    </Button>
+                  )}
                 </>
               )}
             </div>

@@ -145,6 +145,15 @@ export const statusTone = (status: string): StatusTone => {
 
 export type ScheduleAction = 'reprogramar' | 'asistio' | 'sesion' | 'falta' | 'cancelar';
 
+/** La función que pide cada acción sobre una asesoría (ver `capabilityRegistry.ts`). */
+export const ACTION_CAPABILITY: Record<ScheduleAction, string> = {
+  reprogramar: 'psi-prog:reschedule',
+  cancelar: 'psi-prog:reschedule',
+  asistio: 'psi-prog:mark_attendance',
+  falta: 'psi-prog:mark_attendance',
+  sesion: 'psi-prog:reg_tracking',
+};
+
 /** Anticipación mínima (en horas) para cancelar o reprogramar una sesión: rige para primeras asesorías, asesorías y actividades. */
 export const MIN_NOTICE_HOURS = 24;
 

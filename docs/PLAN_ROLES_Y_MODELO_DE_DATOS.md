@@ -28,7 +28,7 @@ Se cargan como datos de ejemplo usando el mismo constructor y se pueden editar o
 |---|---|---|
 | **Administrador de sede** | 1 a 3 cuentas por sede | Matrículas, alumnos y titulares, asesorías y cronogramas, recordatorios, pagos, caja, cobranza, verificación y materiales, recepción de envíos, reportes de su sede |
 | **Psicopedagogía** | por sede | Historial y seguimiento, asistencia, reporte de Psicopedagogía; agenda en lectura; sin dinero |
-| **Almacén central** | 1 (Los Olivos) | Catálogo, stock de todas las sedes, envíos, transferencias, kardex, ajustes, reporte de stock |
+| **Almacén central** | 1 a 3 cuentas (Los Olivos) | Catálogo, stock de todas las sedes, envíos, transferencias, kardex, ajustes, reporte de stock |
 | **Administración general** | central | Aprueba caídas, reactivaciones, cambios y traslados; reaperturas y devoluciones; oferta comercial; personal, contratos y planilla; todos los reportes y la auditoría |
 | **Contabilidad** | opcional | Lectura y exportación de caja, cartera y planilla |
 | **Superusuario** | sistemas | Roles, usuarios y configuración técnica |
@@ -66,22 +66,28 @@ Reglas puras (con su `check-capabilities.ts`): cierre de dependencias de un rol,
 - **Panel B · Editor de rol:** se marcan funciones; semáforo por contraparte («Envío: sin receptor en Piura»), advertencias de incompatibilidad (piden motivo para guardar) y vista previa del menú que verá ese rol.
 - **Panel C · Usuarios:** se crean personas con rol y sede, con el límite por sede definido en el rol.
 - Las conexiones **no se dibujan a mano**: se eligen funciones y el grafo traza las conexiones existentes. Así nadie puede crear un flujo que rompa las reglas (cobrar sin caja, entregar sin verificar).
-- Mientras no haya persistencia, roles y usuarios se guardan de forma provisional en el navegador.
+- Mientras no haya persistencia, roles y usuarios se guardan de forma provisional en el navegador (**paso 6** ✅: `utils/accessStore.ts`; el resto de los datos sigue en memoria hasta el paso 10).
+- **Hecho en el paso 5:** el panel A y el B viven en Organización → Permisos (dos pestañas); el panel C es Organización → Usuarios (con el rol y el límite validados). Las plantillas son datos en `utils/roleTemplates.ts`.
 - Los permisos en pantalla ocultan y bloquean la interfaz; la seguridad real llega con el servidor (sesiones reales).
 
-## 5. Avisos con destinatario (decidido)
+## 5. Avisos con destinatario ✅ (paso 3, 2026-11-02)
 
-Hoy las notificaciones no tienen destinatario. Se dirigen por **función y sede**, no por nombre de rol; así un rol nuevo con «Recibir envío» recibe los avisos sin tocar nada.
+Los avisos se dirigen por **función y sede**, no por nombre de rol; un usuario nuevo con «Confirmar la recepción de un envío» en Piura empieza a ver los envíos que iban hacia Piura. El aviso guarda qué pasó y dónde; **quién lo recibe se calcula al mostrar** (`utils/notifications.ts`). Hay 22 avisos (cuadro completo en `CATALOGO_DE_FUNCIONES.md`, con sus varios destinatarios) y una función de **supervisión** que recibe copia de lo que se controla (reversas, cajas reabiertas, diferencias de recepción, cambios de permisos). Si nadie puede recibir un aviso, llega a quien tenga la función de **respaldo**. Cuatro **alertas por regla** (cuotas vencidas, primeras asesorías sin materiales, contratos por vencer, stock bajo el mínimo) se calculan sin guardarse. Todo se ve en la **campana** del encabezado. Detalle y reglas: `REGLAS_DE_NEGOCIO.md` §13.
 
-| Evento | Llega a quien tenga… | Si no hay nadie |
+### Decisiones del 2026-11-02 (hallazgos del paso 2)
+
+| Hallazgo | Decisión | Por qué |
 |---|---|---|
-| Envío despachado | `shipment:receive` en la sede destino | Emisor y Administración general |
-| Recepción con faltante o daño | Ajustes y aprobar | Administración general |
-| Cuota vencida | Cobranza en la sede del alumno | Administración general |
-| Primera asesoría sin materiales | Entregar materiales en esa sede | Administrador de la sede |
-| Solicitud pendiente | Resolver solicitudes | Superusuario |
+| `setRecipes` (la pantalla escribía el estado directo; duplicar creaba una copia activa que chocaba con la original) | Tres acciones con validación y permiso (`saveRecipe`, `duplicateRecipe`, `setRecipeStatus`); las reglas pasan a `utils/recipes.ts`; la copia nace **inactiva** y activarla comprueba el solape | La verificación no puede dudar qué receta entregar |
+| `updateStock` (varias pantallas la llamaban directo) | Deja de existir para las pantallas: **venta en caja** (stock + ingreso en una operación), **entrega de materiales** (todo o nada) e **ingreso de stock** (con documento) son acciones con función propia | Cada movimiento de stock responde a una función que se puede dar o quitar a un rol; ninguno queda sin kardex |
+| Envíos y Transferencias entre sedes | Se **conservan las dos**, con reglas de ruta: hay un **único almacén central** (Los Olivos, por dato); el envío sale siempre de él; la transferencia tiene siempre al almacén en un extremo; **entre dos filiales no hay transferencia directa** | Es la lógica del negocio (todo pasa por el almacén) sin perder la solicitud con aprobación. Se corrigió que los datos de ejemplo trataran a Piura como almacén |
+| Reportes | Un permiso base y **uno por reporte** (más uno para Auditoría) | Contabilidad ve Caja sin ver Personal |
+| Sueldos | Función propia «Ver remuneraciones»; **sin ella se ocultan los importes** en Contratos, Personal, reporte de personal y Auditoría | Solo quien administra personal ve lo que gana cada quien |
 
-Cada usuario tiene su bandeja y una campana en el encabezado. El resolutor de destinatarios es una función pura con su `check-*`.
+### Revisión de contrapartes y combinaciones (2026-11-02)
+- **Contrapartes:** ahora una función puede tener varias. Nuevas (recomendadas): matricular → quien verifique y quien agende; cobrar → quien cierre la caja; verificar → quien reciba la reposición; preparar un envío → quien lo despache; pedir una transferencia → quien la apruebe; crear un contrato → quien arme la planilla; generar la planilla → quien la cierre; cerrarla → quien la pague. Obligatorias (siguen siendo solo las de despacho): quien recibe en la sede destino.
+- **Requisitos nuevos:** aprobar una solicitud exige ver «Solicitudes pendientes»; crear un usuario exige ver «Personal».
+- **Combinaciones:** de 9 a 15 (más por área). Se reemplazó «despachar + recibir + ajustar stock» (que describía al almacén normal) por «despachar + recibir». Se probó que un administrador de sede y un almacenero típicos no reciben ninguna advertencia.
 
 ## 6. Estado del menú (medido)
 
@@ -103,15 +109,15 @@ Cada usuario tiene su bandeja y una campana en el encabezado. El resolutor de de
 | # | Paso | Resultado | Estado |
 |---|---|---|---|
 | 1 | **Limpiar el menú** (Dashboard directo, Auditoría única) | Menú sin copias | ✅ 2026-10-31 |
-| 2 | **Registro único de funciones** + catálogo de permisos derivado + `check-capabilities.ts` | 51 funcionalidades y 175 funciones con sus conexiones; cuadro en `CATALOGO_DE_FUNCIONES.md` (**a validar contigo**) | ✅ 2026-10-31 |
-| 3 | **Avisos dirigidos**: catálogo de eventos, resolutor de destinatarios, bandeja y campana | Cada aviso llega a quien corresponde | |
-| 4 | **Guardas en las 35 pantallas**: `can()` por acción, disponibilidad con motivo, permiso `ver remuneración` | Cada botón responde al rol y a su contraparte | |
-| 5 | **Constructor de roles** (paneles A, B y C) con las 6 plantillas | Administración arma roles y usuarios | |
-| 6 | **Persistencia provisional** de roles y usuarios en el navegador | Lo armado no se pierde al recargar | |
-| 7 | **Usuario activo con cambio rápido por PIN**; menú y Dashboard por rol; reemplaza al selector de sede | Cada persona ve solo lo suyo | |
-| 8 | **Pruebas por rol**: script que recorre cada plantilla + prueba en el navegador | Evidencia de qué ve y qué puede cada rol | |
-| 9 | **Reglas pendientes** (Planilla → Caja, contratos, vacaciones → agenda), en paralelo desde el paso 4 | Reglas de negocio completas | |
-| 10 | **Esquema de base de datos**, partir `DataContext`, sesiones reales y seguridad en servidor | Datos persistentes y permisos exigidos por el servidor | |
+| 2 | **Registro único de funciones** + catálogo de permisos derivado + `check-capabilities.ts` | 52 funcionalidades y 185 funciones con sus conexiones; cuadro en `CATALOGO_DE_FUNCIONES.md` (**a validar contigo**) | ✅ 2026-10-31 |
+| 3 | **Avisos dirigidos**: catálogo de eventos, resolutor de destinatarios, bandeja y campana | 22 avisos con destinatario por función y sede, 4 alertas por regla y campana; más las decisiones de los hallazgos del paso 2 | ✅ 2026-11-02 |
+| 4 | **Guardas en las pantallas y en las acciones**: toda acción pide su función (`guardActions`), cada botón responde al rol y a su contraparte, menú y rutas por función | Cada botón responde al rol y a su contraparte; ninguna pantalla salta la validación (2026-11-02, ver `REGLAS_DE_NEGOCIO.md` §17) | ✅ 2026-11-02 |
+| 5 | **Constructor de roles** (paneles A, B y C) con las 6 plantillas | Administración arma roles y usuarios: funciones con dependencias, motivos para lo que se debe separar, semáforo de contrapartes, menú que verá, límite de cuentas por sede (2026-11-02, ver `REGLAS_DE_NEGOCIO.md` §18) | ✅ 2026-11-02 |
+| 6 | **Persistencia provisional** de roles y usuarios en el navegador | Lo armado no se pierde al recargar; lo guardado se valida y depura al arrancar; «Volver a los de ejemplo» (2026-11-03, ver `REGLAS_DE_NEGOCIO.md` §19) | ✅ 2026-11-03 |
+| 7 | **Usuario activo con cambio rápido por PIN**; menú y Dashboard por rol; reemplaza al selector de sede | Cada persona trabaja con su cuenta (PIN de 4 a 6 números, bloqueo a los 5 fallos), ve el menú y el Dashboard de su rol y la sede que alcanza (2026-11-03, ver `REGLAS_DE_NEGOCIO.md` §20). **Falta el filtro por sede en las pantallas que hoy muestran todas** | ✅ 2026-11-03 |
+| 8 | **Pruebas por rol**: script que recorre cada plantilla + prueba en el navegador | Evidencia de qué ve y qué puede cada rol: `check-role-matrix.ts` + `docs/PRUEBAS_POR_ROL.md` (generado). Encontró y corrigió una fuga de dinero en Titulares; los tres puntos por confirmar se resolvieron el 2026-11-03 (ver `REGLAS_DE_NEGOCIO.md` §21 y §23) | ✅ 2026-11-03 |
+| 9 | **Reglas pendientes** (Planilla → Caja, contratos, vacaciones → agenda), en paralelo desde el paso 4 | **Planilla → Caja descartada** (el sistema no registra pagos al personal); **renovación de contratos** y **vacaciones y ceses frente a la agenda** hechas (2026-11-03, ver `REGLAS_DE_NEGOCIO.md` §22) | ✅ 2026-11-03 |
+| 10 | **Esquema de base de datos** (Supabase), partir `DataContext`, sesiones reales y seguridad en servidor | Datos persistentes y permisos exigidos por el servidor. **Aquí va el filtro por sede** de cada pantalla: lo aplica la base con `sede_id` y reglas por sede, no cada pantalla (decidido el 2026-11-03: no se construye sobre datos de ejemplo) | |
 
 Los pasos 2 y 3 son la base: sin ellos el constructor trabajaría con datos inventados. Los pasos 1 a 8 no cambian ninguna regla de negocio.
 

@@ -58,7 +58,7 @@ export function PortfolioReport() {
   const debtors = useMemo(() => topDebtors(scoped, 10), [scoped]);
   const maxAging = Math.max(1, ...aging.map(a => a.amount));
 
-  if (!can(PERM.collections)) {
+  if (!can(PERM.reportPortfolio)) {
     return <div className="flex items-center justify-center h-full text-text-muted"><p>Su rol no tiene permiso para ver los reportes de cartera.</p></div>;
   }
 

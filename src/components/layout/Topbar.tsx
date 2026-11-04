@@ -1,7 +1,9 @@
 import React from 'react';
-import { Bell, ChevronRight, Menu, Hexagon, MapPin, ChevronDown } from 'lucide-react';
+import { ChevronRight, Menu, Hexagon, MapPin } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { NotificationDropdown } from './NotificationDropdown';
+import { UserMenu } from './UserMenu';
+import { viewOptions } from '../../utils/session';
 
 interface TopbarProps {
   title: string;
@@ -11,7 +13,9 @@ interface TopbarProps {
 }
 
 export function Topbar({ title, breadcrumb, isSidebarOpen, onToggleSidebar }: TopbarProps) {
-  const { branches, currentBranchId, setCurrentBranchId, currentUser } = useData();
+  const { branches, currentBranchId, selectBranch, sessionScope, can } = useData();
+  // La sede que se ve sale de la cuenta: quien alcanza una sola no elige; quien alcanza varias elige solo entre las suyas
+  const options = viewOptions(sessionScope, branches);
   const currentBranch = branches.find(b => b.id === currentBranchId);
 
   return (
@@ -44,32 +48,26 @@ export function Topbar({ title, breadcrumb, isSidebarOpen, onToggleSidebar }: To
       </div>
 
       <div className="flex items-center gap-4">
-        {/* Branch Selector */}
+        {/* Sede que se ve (sale de la cuenta) */}
         <div className="hidden lg:flex items-center gap-2 bg-surface-muted px-3 py-1.5 rounded-xl border border-border-soft">
           <MapPin size={14} className="text-primary-accent" />
-          <select 
-            value={currentBranchId}
-            onChange={(e) => setCurrentBranchId(e.target.value)}
-            className="bg-transparent text-xs font-semibold text-text-primary focus:outline-none cursor-pointer pr-2"
-          >
-            <option value="all">Vista Global</option>
-            {branches.map(branch => (
-              <option key={branch.id} value={branch.id}>{branch.name}</option>
-            ))}
-          </select>
+          {options.length > 0 ? (
+            <select
+              value={currentBranchId}
+              onChange={(e) => selectBranch(e.target.value)}
+              className="bg-transparent text-xs font-semibold text-text-primary focus:outline-none cursor-pointer pr-2"
+              aria-label="Sede que se ve"
+            >
+              {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          ) : (
+            <span className="text-xs font-semibold text-text-primary pr-2">{currentBranch?.name ?? 'Sin sede'}</span>
+          )}
         </div>
 
-        <NotificationDropdown />
+        {can('sis-avisos:view') && <NotificationDropdown />}
         <div className="h-8 w-px bg-border-soft"></div>
-        <div className="flex items-center gap-3 cursor-pointer hover:bg-surface-muted p-1.5 pr-3 rounded-full transition-colors">
-          <div className="w-8 h-8 rounded-full bg-primary-accent/10 flex items-center justify-center text-primary-accent font-semibold text-sm">
-            {currentUser.name.substring(0, 2).toUpperCase()}
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-text-primary leading-none">{currentUser.name}</span>
-            <span className="text-xs text-text-muted mt-1 leading-none">{currentBranch?.name || 'Vista Global'}</span>
-          </div>
-        </div>
+        <UserMenu />
       </div>
     </header>
   );

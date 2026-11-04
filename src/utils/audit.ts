@@ -51,7 +51,13 @@ export interface AuditContext {
   adjustments: Adjustment[];
   staffName: (id: string) => string;
   studentName: (id: string) => string;
+  /** ¿Puede ver sueldos? (función «Ver remuneraciones»). Sin ella, los importes de contratos y planilla se ocultan. */
+  showPay: boolean;
 }
+
+/** Campos de un contrato que son remuneración. */
+const PAY_LABEL = /sueldo|remuneraci|bruto|neto|aporte|gratific|asignaci[oó]n familiar/i;
+const maskMoney = (t: string) => t.replace(/S\/\s?[\d.,\s]*\d/g, 'S/ ••••');
 
 const money = (n: number, cur: string) => `${cur === 'USD' ? 'USD' : 'S/'} ${n.toFixed(2)}`;
 const trim = (t: string | undefined, n = 140) => (t && t.length > n ? `${t.slice(0, n - 1)}…` : t ?? '');
@@ -114,11 +120,11 @@ export function buildAudit(c: AuditContext): AuditEntry[] {
   }
 
   for (const r of c.payrollRuns) {
-    for (const [i, ev] of r.events.entries()) push({ id: `${r.id}-${i}`, at: ev.at, module: 'Planilla', action: `Planilla ${ev.action.toLowerCase()}`, detail: trim(`${r.period}${ev.detail ? ` · ${ev.detail}` : ''}`), by: ev.by, ref: r.id, link: '/personas/planilla' });
+    for (const [i, ev] of r.events.entries()) push({ id: `${r.id}-${i}`, at: ev.at, module: 'Planilla', action: `Planilla ${ev.action.toLowerCase()}`, detail: trim(`${r.period}${ev.detail ? ` · ${c.showPay ? ev.detail : maskMoney(ev.detail)}` : ''}`), by: ev.by, ref: r.id, link: '/personas/planilla' });
   }
   for (const k of c.contracts) {
     for (const [i, rev] of (k.revisions ?? []).entries()) {
-      push({ id: `${k.id}-rev-${i}`, at: rev.at, module: 'Contratos', action: 'Contrato modificado', detail: trim(`${c.staffName(k.staffId)} · ${rev.changes.map(x => `${x.label}: ${x.from} → ${x.to}`).join('; ')} · ${rev.reason}`), by: rev.by, ref: k.id, link: '/personas/contratos' });
+      push({ id: `${k.id}-rev-${i}`, at: rev.at, module: 'Contratos', action: 'Contrato modificado', detail: trim(`${c.staffName(k.staffId)} · ${rev.changes.map(x => (c.showPay || !PAY_LABEL.test(x.label) ? `${x.label}: ${x.from} → ${x.to}` : `${x.label}: ••••`)).join('; ')} · ${rev.reason}`), by: rev.by, ref: k.id, link: '/personas/contratos' });
     }
   }
   for (const a of c.adjustments) {

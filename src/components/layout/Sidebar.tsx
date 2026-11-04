@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Search, ChevronRight, ChevronDown, Home, Briefcase, Package, Brain, Users, Settings2, Building2, FileBarChart, ShieldCheck, HelpCircle, LogOut, Plus, X, Mail } from 'lucide-react';
 import { MODULE_DATA, getAllItemsForModule } from '../../config/modules';
 import { useData } from '../../context/DataContext';
+import { menuVisible } from '../../utils/guards';
+import { hasSettingsAccess } from '../../config/settingsSections';
 
 const NAV_ITEMS = [
   { id: 'dashboard', icon: Home, label: 'Dashboard', isDirect: true },
@@ -16,6 +18,9 @@ const NAV_ITEMS = [
   { id: 'reportes', icon: FileBarChart, label: 'Reportes' },
   { id: 'sistema', icon: ShieldCheck, label: 'Sistema' },
 ];
+
+/** Los módulos de un solo ítem (sin submenú) y el ítem cuya función los hace visibles. */
+const DIRECT_ITEM: Record<string, string> = { dashboard: 'Resumen general', mensajeria: 'Mensajería' };
 
 /** Minúsculas y sin tildes, conservando la longitud (para poder resaltar la coincidencia en el texto original). */
 const fold = (t: string) => [...t].map(c => c.normalize('NFD')[0]).join('').toLowerCase();
@@ -45,33 +50,15 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onItemSelect, onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
-  const { setIsEnrollmentWizardOpen, currentUser, currentBranchId } = useData();
+  const { setIsEnrollmentWizardOpen, lockSession, can } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSections, setExpandedSections] = useState<string[]>([activeModule]);
 
   const canShowItem = (moduleId: string, itemName: string) => {
     // «Ayuda» se abre desde el botón inferior (no se repite en el menú)
     if (moduleId === 'sistema' && itemName === 'Ayuda') return false;
-    const isGlobal = currentBranchId === 'all';
-    const role = currentUser.role;
-    
-    if (moduleId === 'logistica') {
-      // Envíos: Only for global view or superuser/logistics
-      if (itemName === 'Envíos') {
-        return isGlobal || role === 'Superusuario' || role === 'Logística nacional';
-      }
-      // Recepciones: Only for specific branch, but superuser can see it (blocked in global)
-      if (itemName === 'Recepciones') {
-        if (role === 'Logística nacional') return false;
-        return true;
-      }
-      // Transferencias: Only when a branch is selected or superuser
-      if (itemName === 'Transferencias') {
-        return !isGlobal || role === 'Superusuario';
-      }
-    }
-    
-    return true;
+    // Cada ítem se ve solo si el rol tiene la función de verlo
+    return menuVisible(moduleId, itemName, can);
   };
 
   // Sync expanded sections with active module when it changes from outside
@@ -114,13 +101,15 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
   const labelMatches = (label: string) => searching && fold(label).includes(query);
   const itemMatches = (moduleId: string, item: string) => searching && canShowItem(moduleId, item) && fold(item).includes(query);
 
-  // Filter items based on search
-  const filteredNavItems = useMemo(() => {
-    if (!searching) return NAV_ITEMS;
-    return NAV_ITEMS.filter(navItem =>
-      labelMatches(navItem.label) || getAllItemsForModule(navItem.id).some(item => itemMatches(navItem.id, item))
-    );
-  }, [searchTerm, currentBranchId, currentUser.role]);
+  // Módulos que le quedan al rol (uno directo se ve con su función; uno con submenú, si le queda algún ítem) y, al buscar, los que coinciden
+  const visibleNavItems = NAV_ITEMS.filter(navItem =>
+    navItem.isDirect
+      ? menuVisible(navItem.id, DIRECT_ITEM[navItem.id], can)
+      : getAllItemsForModule(navItem.id).some(item => canShowItem(navItem.id, item))
+  );
+  const filteredNavItems = !searching
+    ? visibleNavItems
+    : visibleNavItems.filter(navItem => labelMatches(navItem.label) || getAllItemsForModule(navItem.id).some(item => itemMatches(navItem.id, item)));
 
   return (
     <div 
@@ -237,7 +226,7 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
                   ))}
                   
                   {/* Nueva Matrícula Shortcut */}
-                  {navItem.id === 'operacion' && (
+                  {navItem.id === 'operacion' && can('op-matriculas:create') && (
                     <div className="mt-2 pr-2">
                       <div className="bg-active-tint rounded-xl p-3 border border-primary-accent/10">
                         <h4 className="text-xs font-semibold text-primary-accent mb-1">Nueva matrícula</h4>
@@ -261,18 +250,20 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
 
       {/* Bottom Actions */}
       <div className="mt-auto p-3 border-t border-border-soft flex flex-col gap-1">
-        <button 
-          onClick={onOpenSettings}
-          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
-          title={!isOpen ? "Configuración" : undefined}
-        >
-          <div className="flex items-center justify-center w-8 h-8 shrink-0">
-            <Settings2 size={20} className="text-text-muted" />
-          </div>
-          <div className={`flex items-center flex-1 transition-all duration-300 whitespace-nowrap ${isOpen ? 'opacity-100 ml-2' : 'opacity-0 w-0 ml-0'}`}>
-            <span className="text-sm font-medium">Configuración</span>
-          </div>
-        </button>
+        {hasSettingsAccess(can) && (
+          <button 
+            onClick={onOpenSettings}
+            className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
+            title={!isOpen ? "Configuración" : undefined}
+          >
+            <div className="flex items-center justify-center w-8 h-8 shrink-0">
+              <Settings2 size={20} className="text-text-muted" />
+            </div>
+            <div className={`flex items-center flex-1 transition-all duration-300 whitespace-nowrap ${isOpen ? 'opacity-100 ml-2' : 'opacity-0 w-0 ml-0'}`}>
+              <span className="text-sm font-medium">Configuración</span>
+            </div>
+          </button>
+        )}
         <button
           onClick={() => navigate('/sistema/ayuda')}
           className={`flex items-center w-full py-[3px] px-2 rounded-xl text-text-secondary hover:bg-surface-muted hover:text-text-primary transition-colors relative overflow-hidden`}
@@ -286,15 +277,15 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
           </div>
         </button>
         <button
-          disabled
-          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text opacity-50 cursor-not-allowed transition-colors relative overflow-hidden`}
-          title="Disponible cuando se active el inicio de sesión (hoy el sistema no tiene usuarios que ingresen)"
+          onClick={lockSession}
+          className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text hover:bg-danger-tint transition-colors relative overflow-hidden`}
+          title="Bloquea la sesión: para seguir hay que entrar con el PIN de una cuenta"
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">
             <LogOut size={20} />
           </div>
           <div className={`flex items-center flex-1 transition-all duration-300 whitespace-nowrap ${isOpen ? 'opacity-100 ml-2' : 'opacity-0 w-0 ml-0'}`}>
-            <span className="text-sm font-medium">Cerrar sesión</span>
+            <span className="text-sm font-medium">Bloquear sesión</span>
           </div>
         </button>
       </div>

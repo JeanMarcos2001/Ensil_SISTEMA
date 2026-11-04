@@ -17,7 +17,7 @@ import { todayLocalISO } from '../../utils/schedule';
 import { Field, inputCls } from '../enrollment/fields';
 
 const money = (n: number) => `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const STATUS_TONE: Record<PayrollRun['status'], 'warning' | 'info' | 'success'> = { Borrador: 'warning', Cerrada: 'info', Pagada: 'success' };
+const STATUS_TONE: Record<PayrollRun['status'], 'warning' | 'info'> = { Borrador: 'warning', Cerrada: 'info' };
 const when = (iso: string) => new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
@@ -36,7 +36,7 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?
  */
 export function Payroll() {
   const {
-    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, payPayroll, reopenPayroll, companies, staff, can,
+    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, reopenPayroll, companies, staff, can,
   } = useData();
   const today = todayLocalISO();
   const [params, setParams] = useSearchParams();
@@ -48,7 +48,6 @@ export function Payroll() {
   const [adjusting, setAdjusting] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [paying, setPaying] = useState(false);
   const [reopening, setReopening] = useState(false);
   const [adjForm, setAdjForm] = useState({ staffId: '', kind: 'Ingreso' as 'Ingreso' | 'Descuento', concept: '', amount: '', taxable: true, reason: '' });
   const [adjError, setAdjError] = useState<string | null>(null);
@@ -92,7 +91,6 @@ export function Payroll() {
             <h2 className="text-2xl font-semibold text-text-primary flex items-center gap-3">Planilla de {periodLabel(run.period)} <Badge variant={STATUS_TONE[run.status]}>{run.status}</Badge></h2>
             <p className="text-sm text-text-secondary mt-1">
               {run.status === 'Borrador' ? 'Se recalcula con los contratos. Ajuste lo eventual y ciérrela.' : `Cerrada el ${run.closedAt ? when(run.closedAt) : ''} por ${run.closedBy}. Las líneas son una foto: cambiar un contrato ya no las altera.`}
-              {run.status === 'Pagada' && ` Pagada el ${run.payDate}${run.payNote ? ` (${run.payNote})` : ''}.`}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -101,7 +99,6 @@ export function Payroll() {
             {run.status === 'Borrador' && <Button variant="secondary" className="gap-2" onClick={() => openAdjust()} disabled={!editable || built.lines.length === 0}><Plus size={16} /> Ajuste</Button>}
             {run.status === 'Borrador' && <Button variant="primary" onClick={() => setConfirmClose(true)} disabled={!can(PERM.payrollClose) || built.lines.length === 0 || errors.length > 0}>Cerrar planilla</Button>}
             {run.status === 'Borrador' && <Button variant="ghost" onClick={() => setConfirmDelete(true)} disabled={!can(PERM.payrollGenerate)}>Eliminar borrador</Button>}
-            {run.status === 'Cerrada' && <Button variant="primary" onClick={() => setPaying(true)} disabled={!can(PERM.payrollPay)}>Registrar pago</Button>}
             {run.status === 'Cerrada' && <Button variant="secondary" onClick={() => setReopening(true)} disabled={!can(PERM.payrollReopen)}>Reabrir</Button>}
           </div>
         </div>
@@ -270,22 +267,6 @@ export function Payroll() {
           confirmLabel="SÍ, ELIMINAR"
         />
         <ReasonDialog
-          isOpen={paying}
-          onClose={() => setPaying(false)}
-          title="Registrar el pago de la planilla"
-          size="md"
-          confirmLabel="Registrar pago"
-          detailOptional
-          detailLabel="Referencia del pago"
-          detailPlaceholder="Ej. Transferencia masiva BCP, lote 0123"
-          dateLabel="Fecha de pago"
-          dateMax={today}
-          dateDefault={today}
-          onSubmit={({ detail, date }) => { const r = payPayroll(run.id, { date, note: detail }); if (r.ok) setMessage({ ok: true, text: 'Pago registrado.' }); return r.ok ? null : r.error ?? 'No se pudo registrar el pago.'; }}
-        >
-          <p className="text-sm text-text-secondary">Neto a pagar de {periodLabel(run.period)}: <strong>{money(totals.net)}</strong>. Registrar el pago bloquea la reapertura de la planilla. (Todavía no genera un egreso en Caja.)</p>
-        </ReasonDialog>
-        <ReasonDialog
           isOpen={reopening}
           onClose={() => setReopening(false)}
           title="Reabrir la planilla"
@@ -363,7 +344,7 @@ export function Payroll() {
               return (
                 <tr key={r.id} className="hover:bg-surface-muted/50 cursor-pointer" onClick={() => { setOpenId(r.id); setMessage(null); }}>
                   <td className="px-4 py-3 font-medium text-text-primary">{periodLabel(r.period)}<div className="text-xs font-normal text-text-muted font-mono">{r.id}</div></td>
-                  <td className="px-4 py-3"><Badge variant={STATUS_TONE[r.status]}>{r.status}</Badge>{r.status === 'Pagada' && r.payDate && <div className="text-xs text-text-muted mt-1">{r.payDate}</div>}</td>
+                  <td className="px-4 py-3"><Badge variant={STATUS_TONE[r.status]}>{r.status}</Badge></td>
                   <td className="px-4 py-3 text-right">{t.headcount}</td>
                   <td className="px-4 py-3 text-right font-semibold">{money(t.net)}</td>
                   <td className="px-4 py-3 text-right">{money(t.employerCost)}</td>

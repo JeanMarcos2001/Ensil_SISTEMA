@@ -12,13 +12,17 @@ import { Modal } from '../components/ui/Modal';
 import { ContractFormModal } from './people/ContractFormModal';
 import { DateInput } from '../components/ui/DateInput';
 import { CONTRACT_TYPES, contractStatus } from '../utils/payroll';
+import { renewalBlock, renewedBy, type RenewalInput } from '../utils/contractRenewal';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { todayLocalISO } from '../utils/schedule';
 import { periodLabel } from '../utils/payrollEngine';
+import { PERM } from '../utils/authority';
 
 export function ContractsPage() {
-  const { contracts, staff, closeContract, payrollRuns } = useData();
+  const { contracts, staff, closeContract, renewContract, payrollRuns, can } = useData();
+  // Los importes solo los ve quien tiene «Ver remuneraciones y costo de planilla»
+  const showPay = can(PERM.payView);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';
@@ -34,6 +38,10 @@ export function ContractsPage() {
   const [closeDate, setCloseDate] = useState('');
   const [closeReason, setCloseReason] = useState('');
   const [closeError, setCloseError] = useState<string | null>(null);
+  // Renovación: nueva fecha de fin, sueldo (si cambia) y motivo
+  const [toRenew, setToRenew] = useState<Contract | null>(null);
+  const [renewal, setRenewal] = useState<RenewalInput>({ endDate: '', grossSalary: '', reason: '' });
+  const [renewError, setRenewError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = useTablePagination();
@@ -62,11 +70,15 @@ export function ContractsPage() {
   const openNew = () => { setEditing(null); setIsFormOpen(true); };
   const openEdit = (contract: Contract) => { setEditing(contract); setIsFormOpen(true); };
 
+  /** Columnas de remuneración del CSV: sin permiso no se exportan. */
+  const PAY_COLUMNS = [7, 8, 9];
+  const visibleColumns = <T,>(row: T[]): T[] => (showPay ? row : row.filter((_, i) => !PAY_COLUMNS.includes(i)));
+
   const handleExport = () => {
     downloadCsv(
       csvFileName('Contratos', today),
-      ['Código', 'Trabajador', 'Tipo', 'Jornada', 'Inicio', 'Fin', 'Estado', 'Sueldo bruto (S/)', 'Aportes (S/)', 'Sueldo neto estimado (S/)', 'Pensiones', 'Motivo de cese'],
-      filteredContracts.map(c => [c.id, getStaffName(c.staffId), c.type, c.shift ?? '', c.startDate, c.endDate ?? '', contractStatus(c, today), c.grossSalary ?? '', c.contribution ?? '', c.netSalary ?? '', `${c.pensionSystem ?? ''} ${c.pensionFund ?? ''}`.trim(), c.terminationReason ?? ''])
+      visibleColumns(['Código', 'Trabajador', 'Tipo', 'Jornada', 'Inicio', 'Fin', 'Estado', 'Sueldo bruto (S/)', 'Aportes (S/)', 'Sueldo neto estimado (S/)', 'Pensiones', 'Motivo de cese']),
+      filteredContracts.map(c => visibleColumns([c.id, getStaffName(c.staffId), c.type, c.shift ?? '', c.startDate, c.endDate ?? '', contractStatus(c, today), c.grossSalary ?? '', c.contribution ?? '', c.netSalary ?? '', `${c.pensionSystem ?? ''} ${c.pensionFund ?? ''}`.trim(), c.terminationReason ?? '']))
     );
   };
 
@@ -93,10 +105,12 @@ export function ContractsPage() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
-            <FilePlus size={16} />
-            Nuevo contrato
-          </Button>
+          {can('per-contratos:create') && (
+            <Button variant="primary" onClick={openNew} className="flex items-center gap-2">
+              <FilePlus size={16} />
+              Nuevo contrato
+            </Button>
+          )}
         </div>
       </div>
 
@@ -131,6 +145,7 @@ export function ContractsPage() {
               <option value="Vigente">Vigente</option>
               <option value="Vencido">Vencido</option>
               <option value="Cesado">Cesado</option>
+              <option value="Renovado">Renovado</option>
             </select>
             <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
@@ -153,7 +168,7 @@ export function ContractsPage() {
                 <th className="px-6 py-4 font-medium">Tipo</th>
                 <th className="px-6 py-4 font-medium">Inicio</th>
                 <th className="px-6 py-4 font-medium">Fin</th>
-                <th className="px-6 py-4 font-medium">Remuneración</th>
+                {showPay && <th className="px-6 py-4 font-medium">Remuneración</th>}
                 <th className="px-6 py-4 font-medium">Estado</th>
                 <th className="px-6 py-4 font-medium text-right">Acciones</th>
               </tr>
@@ -165,7 +180,7 @@ export function ContractsPage() {
                   <td className="px-6 py-4 text-text-primary">{contract.type}</td>
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.startDate}</td>
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.endDate || '-'}</td>
-                  <td className="px-6 py-4 text-text-primary">S/ {contract.netSalary?.toLocaleString()}</td>
+                  {showPay && <td className="px-6 py-4 text-text-primary">S/ {contract.netSalary?.toLocaleString()}</td>}
                   <td className="px-6 py-4">
                     <Badge variant={contractStatus(contract, today) === 'Vigente' ? 'success' : contractStatus(contract, today) === 'Cesado' ? 'danger' : 'warning'}>{contractStatus(contract, today)}</Badge>
                   </td>
@@ -174,9 +189,12 @@ export function ContractsPage() {
                       items={[
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(contract) },
                         { label: 'Ver trabajador', onClick: () => navigate(`/personas/personal?ficha=${contract.staffId}`) },
-                        ...(contract.status === 'Vigente' ? [{ label: 'Editar contrato', onClick: () => openEdit(contract) }] : []),
+                        ...(contract.status === 'Vigente' && can('per-contratos:edit') ? [{ label: 'Editar contrato', onClick: () => openEdit(contract) }] : []),
+                        ...(can('per-contratos:renew') && renewalBlock(contract, today) === null
+                          ? [{ label: 'Renovar contrato', onClick: () => { setToRenew(contract); setRenewal({ endDate: '', grossSalary: '', reason: '' }); setRenewError(null); } }]
+                          : []),
                         ...(contractStatus(contract, today) === 'Vigente'
-                          ? [{ label: 'Cerrar contrato', onClick: () => { setToClose(contract); setCloseDate(today); setCloseReason(''); setCloseError(null); }, danger: true }]
+                          ? [{ label: 'Cerrar contrato', hidden: !can('per-contratos:close'), onClick: () => { setToClose(contract); setCloseDate(today); setCloseReason(''); setCloseError(null); }, danger: true }]
                           : []),
                       ]} 
                     />
@@ -268,7 +286,8 @@ export function ContractsPage() {
               </div>
             </section>
 
-            {/* Remuneration & Pension */}
+            {/* Remuneration & Pension: solo con «Ver remuneraciones» */}
+            {showPay && (
             <section>
               <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Remuneración y Pensión</h3>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
@@ -295,6 +314,7 @@ export function ContractsPage() {
                 </div>
               </div>
             </section>
+            )}
 
             {/* Planilla: lo que este contrato ya pagó */}
             <section>
@@ -349,6 +369,16 @@ export function ContractsPage() {
               </section>
             )}
 
+            {(selectedContract.renewsId || renewedBy(selectedContract, contracts)) && (
+              <section className="bg-surface-muted p-4 rounded-xl border border-border-soft">
+                <label className="text-xs text-text-muted font-semibold uppercase tracking-wider">Renovación</label>
+                <p className="text-sm text-text-primary mt-1">
+                  {selectedContract.renewsId ? `Renueva el contrato ${selectedContract.renewsId}.` : ''}
+                  {renewedBy(selectedContract, contracts) ? ` Dio paso al contrato ${renewedBy(selectedContract, contracts)}.` : ''}
+                </p>
+              </section>
+            )}
+
             {selectedContract.status === 'Cesado' && (
               <section className="bg-destructive/5 p-4 rounded-xl border border-destructive/10">
                 <label className="text-xs text-destructive font-semibold uppercase tracking-wider">Motivo de Cese</label>
@@ -360,6 +390,64 @@ export function ContractsPage() {
       </Modal>
 
       <ContractFormModal isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} editing={editing} />
+
+      <Modal
+        isOpen={!!toRenew}
+        onClose={() => setToRenew(null)}
+        title="Renovar Contrato"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3 w-full">
+            <Button variant="ghost" onClick={() => setToRenew(null)}>Cancelar</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                if (!toRenew) return;
+                const res = renewContract(toRenew.id, renewal);
+                if (!res.ok) { setRenewError(res.error ?? 'No se pudo renovar el contrato.'); return; }
+                setToRenew(null);
+              }}
+            >
+              Renovar contrato
+            </Button>
+          </div>
+        }
+      >
+        {toRenew && (
+          <div className="space-y-4 pb-2">
+            <p className="text-sm text-text-secondary">
+              El contrato {toRenew.type.toLowerCase()} de <span className="font-medium text-text-primary">{getStaffName(toRenew.staffId)}</span> (fin: {toRenew.endDate}) queda como «Renovado» y nace uno nuevo desde el día siguiente, con las mismas condiciones. Las vacaciones no se copian.
+            </p>
+            {renewError && <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">{renewError}</div>}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Nueva fecha de fin <span className="text-error">*</span></label>
+              <DateInput min={toRenew.endDate} value={renewal.endDate} onChange={e => { setRenewal({ ...renewal, endDate: e.target.value }); setRenewError(null); }} />
+            </div>
+            {showPay && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-secondary">Sueldo bruto nuevo (opcional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:outline-none focus:border-primary-accent"
+                  value={renewal.grossSalary}
+                  placeholder={`Se mantiene S/ ${toRenew.grossSalary?.toLocaleString() ?? ''}`}
+                  onChange={e => { setRenewal({ ...renewal, grossSalary: e.target.value }); setRenewError(null); }}
+                />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-text-secondary">Motivo de la renovación <span className="text-error">*</span></label>
+              <textarea
+                className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none"
+                value={renewal.reason}
+                onChange={e => { setRenewal({ ...renewal, reason: e.target.value }); setRenewError(null); }}
+                placeholder="Ej: Buen desempeño, se continúa el servicio…"
+              />
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={!!toClose}

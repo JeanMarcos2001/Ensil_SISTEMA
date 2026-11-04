@@ -10,7 +10,7 @@ import { useData, Courier, ShippingMethod } from '../../context/DataContext';
 import { nextSequentialId } from '../../utils/ids';
 
 export function Shipping() {
-  const { couriers, setCouriers, shippingMethods, setShippingMethods } = useData();
+  const { couriers, addCourier, updateCourier, shippingMethods, addShippingMethod, updateShippingMethod, can } = useData();
   const [activeTab, setActiveTab] = useState<'couriers' | 'methods'>('couriers');
 
   // Courier Form State
@@ -62,22 +62,17 @@ export function Shipping() {
   };
 
   const handleSaveCourier = () => {
-    if (!courierFormData.code || !courierFormData.name) {
+    const { id: _id, ...data } = courierFormData as Courier;
+    const result = selectedCourier ? updateCourier(selectedCourier.id, data) : addCourier(data as Omit<Courier, 'id'>);
+    if (!result.ok) {
       openConfirm({
         title: 'Error de validación',
-        description: 'El código y nombre son obligatorios.',
+        description: result.error ?? 'No se pudo guardar el courier.',
         variant: 'danger',
         confirmLabel: 'Entendido',
         onConfirm: () => {}
       });
       return;
-    }
-
-    if (selectedCourier) {
-      setCouriers(couriers.map(c => c.id === selectedCourier.id ? { ...courierFormData as Courier } : c));
-    } else {
-      const newId = nextSequentialId('COUR', couriers.map(x => x.id));
-      setCouriers([...couriers, { ...courierFormData as Courier, id: newId }]);
     }
     setIsCourierFormOpen(false);
   };
@@ -94,22 +89,17 @@ export function Shipping() {
   };
 
   const handleSaveMethod = () => {
-    if (!methodFormData.name) {
+    const { id: _id, ...data } = methodFormData as ShippingMethod;
+    const result = selectedMethod ? updateShippingMethod(selectedMethod.id, data) : addShippingMethod(data as Omit<ShippingMethod, 'id'>);
+    if (!result.ok) {
       openConfirm({
         title: 'Error de validación',
-        description: 'El nombre del método es obligatorio.',
+        description: result.error ?? 'No se pudo guardar el método.',
         variant: 'danger',
         confirmLabel: 'Entendido',
         onConfirm: () => {}
       });
       return;
-    }
-
-    if (selectedMethod) {
-      setShippingMethods(shippingMethods.map(m => m.id === selectedMethod.id ? { ...methodFormData as ShippingMethod } : m));
-    } else {
-      const newId = nextSequentialId('SM', shippingMethods.map(x => x.id));
-      setShippingMethods([...shippingMethods, { ...methodFormData as ShippingMethod, id: newId }]);
     }
     setIsMethodFormOpen(false);
   };
@@ -132,7 +122,7 @@ export function Shipping() {
           <p className="text-sm text-text-secondary">Gestión de agencias de transporte y métodos de envío para transferencias</p>
         </div>
         <div className="flex items-center gap-3">
-          {activeTab === 'couriers' ? (
+          {can('cfg-couriers:create') && (activeTab === 'couriers' ? (
             <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenCourierForm()}>
               <Plus size={16} />
               Nuevo Courier
@@ -142,7 +132,7 @@ export function Shipping() {
               <Plus size={16} />
               Nuevo Método
             </Button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -222,12 +212,11 @@ export function Shipping() {
                     <td className="px-6 py-3 text-right">
                       <ActionMenu 
                         items={[
-                          { label: 'Editar courier', onClick: () => handleOpenCourierForm(row) },
+                          { label: 'Editar courier', hidden: !can('cfg-couriers:edit'), onClick: () => handleOpenCourierForm(row) },
                           { 
-                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('cfg-couriers:edit'),
                             onClick: () => {
-                              const newStatus = row.status === 'Activo' ? 'Inactivo' : 'Activo';
-                              setCouriers(couriers.map(c => c.id === row.id ? { ...c, status: newStatus } : c));
+                              updateCourier(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
                             },
                             danger: row.status === 'Activo' 
                           },
@@ -273,12 +262,11 @@ export function Shipping() {
                     <td className="px-6 py-3 text-right">
                       <ActionMenu 
                         items={[
-                          { label: 'Editar método', onClick: () => handleOpenMethodForm(row) },
+                          { label: 'Editar método', hidden: !can('cfg-couriers:edit'), onClick: () => handleOpenMethodForm(row) },
                           { 
-                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                            label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('cfg-couriers:edit'),
                             onClick: () => {
-                              const newStatus = row.status === 'Activo' ? 'Inactivo' : 'Activo';
-                              setShippingMethods(shippingMethods.map(m => m.id === row.id ? { ...m, status: newStatus } : m));
+                              updateShippingMethod(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
                             },
                             danger: row.status === 'Activo' 
                           },

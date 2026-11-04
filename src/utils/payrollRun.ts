@@ -175,20 +175,9 @@ export function validateClose(run: Pick<PayrollRun, 'status' | 'period'>, built:
   return e;
 }
 
-export function validatePay(run: Pick<PayrollRun, 'status' | 'period'>, date: string, today: string): string[] {
-  const e: string[] = [];
-  if (run.status === 'Pagada') e.push('La planilla ya figura como pagada.');
-  else if (run.status !== 'Cerrada') e.push('Cierre la planilla antes de registrar su pago.');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) e.push('Indique la fecha del pago.');
-  else if (date > today) e.push('La fecha de pago no puede ser futura.');
-  else if (date < periodStart(run.period)) e.push('El pago no puede ser anterior al mes de la planilla.');
-  return e;
-}
-
 export function validateReopen(run: Pick<PayrollRun, 'status' | 'period' | 'id'>, runs: PayrollRun[], reason: string): string[] {
   const e: string[] = [];
-  if (run.status === 'Pagada') e.push('La planilla ya se pagó: no se reabre.');
-  else if (run.status !== 'Cerrada') e.push('La planilla ya está en borrador.');
+  if (run.status !== 'Cerrada') e.push('La planilla ya está en borrador.');
   if (reason.trim().length < MIN_TEXT) e.push('Indique el motivo de la reapertura: queda en el historial.');
   const later = runs.find(r => r.id !== run.id && r.status !== 'Borrador' && periodYear(r.period) === periodYear(run.period) && r.period > run.period);
   if (later) e.push(`Ya está cerrada la planilla de ${periodLabel(later.period)}: reabra primero esa (la renta de 5.ª depende del orden).`);

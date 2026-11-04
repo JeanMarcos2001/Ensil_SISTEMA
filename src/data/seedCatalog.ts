@@ -2,7 +2,10 @@
  * Datos de ejemplo del catálogo de la organización y del personal: sedes, programas, niveles, personal, contratos, asignaciones y
  * cuentas. Viven aparte del contexto para poder verificarlos con `scripts/check-integrity.ts` junto con las personas y las matrículas.
  */
-import type { Assignment, Branch, Contract, Level, Program, Staff, User } from '../context/DataContext';
+import type { Assignment, Branch, Contract, Level, Permission, Program, Role, Staff, User } from '../context/DataContext';
+import { ROLE_TEMPLATES, templatePermissions } from '../utils/roleTemplates';
+import { todayLocalISO } from '../utils/schedule';
+import { hashPin } from '../utils/session';
 
 export const seedBranches = (): Branch[] => [
     { 
@@ -11,7 +14,7 @@ export const seedBranches = (): Branch[] => [
       company: 'Educación y Cultura S.A.C.', 
       status: 'Activo', 
       address: 'Av. Sullana #280', 
-      reference: 'Frente al Museo Vicus (Almacén Central)',
+      reference: 'Frente al Museo Vicus',
       department: 'Piura',
       province: 'Piura',
       district: 'Piura',
@@ -47,7 +50,9 @@ export const seedBranches = (): Branch[] => [
     { 
       id: 'FIL-LOL', 
       name: 'Los Olivos', 
-      company: 'Educación y Cultura S.A.C.', 
+      company: 'Educación y Cultura S.A.C.',
+      // Único almacén de la empresa: abastece a todas las filiales (y también es una sede con alumnos)
+      isWarehouse: true, 
       status: 'Activo', 
       address: 'Jr. Carlos Monge #233', 
       reference: 'Espalda cdra. 4 Av. Izaguirre',
@@ -153,9 +158,28 @@ export const seedAssignments = (): Assignment[] => [
     { id: 'ASG-003', staffId: 'STF-002', branch: 'Chiclayo', area: 'Psicopedagogía', role: 'Psicopedagoga', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
   ];
 
-export const seedUsers = (): User[] => [
-    { id: 'USR-001', name: 'Admin Sistema', email: 'admin@ensil.edu.pe', role: 'Administrador Global', branch: 'Todas', lastAccess: 'Hace 5 min', status: 'Activo' },
-    { id: 'USR-002', name: 'Laura Martínez', email: 'lmartinez@ensil.edu.pe', role: 'Director Académico', branch: 'Piura', lastAccess: 'Ayer 14:30', status: 'Activo' },
-    { id: 'USR-003', name: 'Jorge Torres', email: 'jtorres@ensil.edu.pe', role: 'Coordinador de Ventas', branch: 'Chiclayo', lastAccess: 'Hace 2 días', status: 'Inactivo' },
-    { id: 'USR-004', name: 'Juan Pérez', email: 'jperez@ensil.edu.pe', role: 'Docente', branch: 'Piura', lastAccess: 'Nunca', status: 'Activo', staffId: 'STF-001', document: '12345678', phone: '987654321' },
-  ];
+/** Los 6 roles de partida salen de las plantillas (`utils/roleTemplates.ts`): son datos y se pueden editar o duplicar. */
+export const seedRoles = (): Role[] =>
+  ROLE_TEMPLATES.map((t, i) => ({
+    id: `ROL-${String(i + 1).padStart(3, '0')}`, name: t.name, desc: t.desc, status: 'Activo' as const, templateId: t.id,
+    branchUserLimit: t.branchUserLimit, locked: t.locked,
+    acceptedRisks: t.risks ? Object.entries(t.risks).map(([ruleId, reason]) => ({ ruleId, reason, by: 'Plantilla de partida', at: todayLocalISO() })) : undefined,
+  }));
+
+export const seedPermissions = (): Permission[] =>
+  seedRoles().map((r, i) => ({ roleId: r.id, permissions: templatePermissions(ROLE_TEMPLATES[i]) }));
+
+/** PIN de las cuentas de ejemplo: 1234 (se cambia desde el menú de la cuenta; el Superusuario lo fija en Usuarios). */
+export const SEED_PIN = '1234';
+const withPin = (u: User): User => ({ ...u, pinHash: hashPin(u.id, SEED_PIN) });
+
+export const seedUsers = (): User[] => ([
+    { id: 'USR-001', name: 'Admin Sistema', email: 'admin@ensil.edu.pe', role: 'Administración general', branch: 'Todas', lastAccess: 'Hace 5 min', status: 'Activo' },
+    { id: 'USR-002', name: 'Laura Martínez', email: 'lmartinez@ensil.edu.pe', role: 'Administrador de sede', branch: 'Piura', lastAccess: 'Ayer 14:30', status: 'Activo' },
+    { id: 'USR-003', name: 'Jorge Torres', email: 'jtorres@ensil.edu.pe', role: 'Administrador de sede', branch: 'Chiclayo', lastAccess: 'Hace 2 días', status: 'Inactivo' },
+    { id: 'USR-004', name: 'Juan Pérez', email: 'jperez@ensil.edu.pe', role: 'Psicopedagogía', branch: 'Piura', lastAccess: 'Nunca', status: 'Activo', staffId: 'STF-001', document: '12345678', phone: '987654321' },
+    { id: 'USR-005', name: 'Rosa Quispe', email: 'rquispe@ensil.edu.pe', role: 'Almacén central', branch: 'Los Olivos', lastAccess: 'Hace 1 hora', status: 'Activo' },
+    { id: 'USR-006', name: 'Marco Salas', email: 'msalas@ensil.edu.pe', role: 'Administrador de sede', branch: 'Los Olivos', lastAccess: 'Hoy 08:10', status: 'Activo' },
+    { id: 'USR-007', name: 'Elena Ramos', email: 'eramos@ensil.edu.pe', role: 'Contabilidad', branch: 'Los Olivos', lastAccess: 'Hace 3 días', status: 'Activo' },
+    { id: 'USR-008', name: 'Superadmin', email: 'superadmin@ensil.edu.pe', role: 'Superusuario', branch: 'Todas', lastAccess: 'Ahora', status: 'Activo' },
+  ] as User[]).map(withPin);

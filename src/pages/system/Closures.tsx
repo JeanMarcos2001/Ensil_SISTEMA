@@ -27,7 +27,7 @@ export function Closures() {
   const [toReopen, setToReopen] = useState<CashClosure | null>(null);
   const rows = cashClosures.filter(c => !box || BOXES.find(b => b.key === box && b.scope === c.scope && b.currency === c.currency));
   const canClose = (b: (typeof BOXES)[number]) => can(b.scope === 'caja' ? PERM.closeCash : PERM.closePetty);
-  const canReopen = (c: CashClosure) => can(c.scope === 'caja' ? PERM.reopenCash : PERM.closePetty);
+  const canReopen = (c: CashClosure) => can(c.scope === 'caja' ? PERM.reopenCash : PERM.reopenPetty);
 
   const handleExport = () => downloadCsv(
     csvFileName('Cierres de caja', todayLocalISO()),

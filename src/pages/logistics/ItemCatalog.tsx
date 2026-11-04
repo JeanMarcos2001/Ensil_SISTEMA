@@ -9,12 +9,12 @@ import { Search, Plus, Package, Book, Wrench, Layers, Eye, Trash2, Upload, Downl
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData, Item, ItemType } from '../../context/DataContext';
 import { ItemPricesModal } from './ItemPricesModal';
-import { getCurrentPrice, todayISO, validateItem } from '../../utils/inventory';
+import { getCurrentPrice, validateItem } from '../../utils/inventory';
 import { BULK_HEADERS, BULK_TEMPLATE_ROWS, MAX_BYTES, buildBookBatch, parseCsv, type BulkResult } from '../../utils/itemImport';
 import { downloadCsv } from '../../utils/exportCsv';
 
 export function ItemCatalog() {
-  const { items, setItems, itemPrices, addItemPrice } = useData();
+  const { items, addItems, updateItem, itemPrices, can } = useData();
   const [priceItem, setPriceItem] = useState<Item | null>(null);
   const [initialPrice, setInitialPrice] = useState('');
   const [compItemId, setCompItemId] = useState('');
@@ -138,8 +138,8 @@ export function ItemCatalog() {
       if (!bulk) { setFormError('Elija el archivo CSV con los libros.'); return; }
       if (bulk.result.errors.length > 0) { setFormError('El archivo tiene errores: corríjalos y vuelva a cargarlo. No se guardó ningún libro.'); return; }
       if (bulk.result.items.length === 0) { setFormError('El archivo no tiene libros para guardar.'); return; }
-      setItems([...items, ...bulk.result.items]);
-      bulk.result.prices.forEach(pr => addItemPrice({ itemId: pr.itemId, branchId: 'all', amount: pr.amount, validFrom: todayISO() }));
+      const saved = addItems(bulk.result.items, bulk.result.prices.map(pr => ({ itemId: pr.itemId, amount: pr.amount })));
+      if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el lote.'); return; }
       setIsFormOpen(false);
       setFormError(null);
       setBulk(null);
@@ -160,14 +160,10 @@ export function ItemCatalog() {
 
     // El precio vive en `itemPrices` (con vigencia e historial), no dentro del artículo.
     const { salePrice: _legacyPrice, ...itemData } = formData as Item;
-    if (selectedItem) {
-      setItems(items.map(i => i.id === selectedItem.id ? { ...itemData } as Item : i));
-    } else {
-      setItems([...items, { ...itemData } as Item]);
-      if (formData.isSold) {
-        addItemPrice({ itemId: formData.id!, branchId: 'all', amount: priceValue, validFrom: todayISO() });
-      }
-    }
+    const saved = selectedItem
+      ? updateItem(selectedItem.id, { ...itemData } as Item)
+      : addItems([{ ...itemData } as Item], formData.isSold ? [{ itemId: formData.id!, amount: priceValue }] : []);
+    if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el artículo.'); return; }
     setIsFormOpen(false);
     setFormError(null);
   };
@@ -206,10 +202,12 @@ export function ItemCatalog() {
           <p className="text-sm text-text-secondary">Gestión maestra de artículos físicos, materiales, libros y paquetes</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Artículo
-          </Button>
+          {can('log-catalogo:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Artículo
+            </Button>
+          )}
         </div>
       </div>
 
@@ -326,15 +324,15 @@ export function ItemCatalog() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(row) },
-                        { label: 'Editar artículo', onClick: () => handleOpenForm(row) },
-                        ...(row.isSold ? [{ label: 'Configurar precios de venta', onClick: () => setPriceItem(row) }] : []),
+                        { label: 'Editar artículo', hidden: !can('log-catalogo:edit'), onClick: () => handleOpenForm(row) },
+                        ...(row.isSold && can('log-catalogo:edit_price') ? [{ label: 'Configurar precios de venta', onClick: () => setPriceItem(row) }] : []),
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('log-catalogo:edit'),
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Artículo' : 'Activar Artículo',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el artículo "${row.name}"?`,
                             onConfirm: () => {
-                              setItems(items.map(i => i.id === row.id ? { ...i, status: row.status === 'Activo' ? 'Inactivo' : 'Activo' } : i));
+                              updateItem(row.id, { ...row, status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
                             },
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
@@ -682,9 +680,11 @@ export function ItemCatalog() {
                                     return cur ? `$ ${cur.amount.toFixed(2)}` : 'sin precio';
                                   })()}</span>
                                 </p>
-                                <Button type="button" variant="secondary" className="text-xs h-8" onClick={() => setPriceItem(selectedItem)}>
-                                  Configurar precios de venta
-                                </Button>
+                                {can('log-catalogo:edit_price') && (
+                                  <Button type="button" variant="secondary" className="text-xs h-8" onClick={() => setPriceItem(selectedItem)}>
+                                    Configurar precios de venta
+                                  </Button>
+                                )}
                               </>
                             ) : (
                               <>
@@ -919,7 +919,7 @@ export function ItemCatalog() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenForm(selectedItem!); }}>Editar Artículo</Button>
+            {can('log-catalogo:edit') && <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenForm(selectedItem!); }}>Editar Artículo</Button>}
           </div>
         }
       >

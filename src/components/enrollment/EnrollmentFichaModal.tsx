@@ -101,7 +101,7 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
   if (!enrollmentId || !ficha) return null;
   const { enrollment: e, student, guardians, plan, validity: v } = ficha;
   const active = e.status === 'Activa';
-  const canPay = active && !!plan && plan.balance > 0 && plan.installments.some(i => i.balance > 0 && i.status !== 'Refinanciada');
+  const canPay = data.can('op-pagos:register') && active && !!plan && plan.balance > 0 && plan.installments.some(i => i.balance > 0 && i.status !== 'Refinanciada');
   const students = ficha.group?.members.map(m => m.student) ?? [];
 
   const enableExtension = () => {

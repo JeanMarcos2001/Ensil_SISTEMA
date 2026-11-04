@@ -29,6 +29,7 @@ import {
   todayLocalISO,
   weekOf,
   type ScheduleAction,
+  ACTION_CAPABILITY,
 } from '../../utils/schedule';
 import { ScheduleCalendar, type CalendarMode } from './ScheduleCalendar';
 import { ScheduleFormModal } from './ScheduleFormModal';
@@ -122,7 +123,12 @@ export function Schedule() {
   const endIndex = startIndex + itemsPerPage;
   const paginatedSchedules = filteredSchedules.slice(startIndex, endIndex);
 
+  /** Una acción sobre una asesoría exige su función; ver la sesión ya registrada solo exige poder ver. */
+  const canDo = (a: ScheduleAction, s: ScheduleItem) => (a === 'sesion' && trackings.some(t => t.scheduleId === s.id)) || can(ACTION_CAPABILITY[a]);
+  const canCreate = can('psi-prog:create');
+
   const openForm = (schedule?: ScheduleItem | null, date?: string, studentId?: string) => {
+    if (!schedule && !canCreate) return;
     setSelectedSchedule(schedule || null);
     setDefaultDate(date);
     setDefaultStudentId(studentId);
@@ -145,7 +151,7 @@ export function Schedule() {
     const now = new Date();
     const gate = gateOfSchedule(s);
     const late = changeBlockedByNotice(s, now) && !gate.blocked;
-    const items = availableActions(s, today, now, gate.blocked, mayChangeLate).map(a => ({
+    const items = availableActions(s, today, now, gate.blocked, mayChangeLate).filter(a => canDo(a, s)).map(a => ({
       label: a === 'sesion' && trackings.some(t => t.scheduleId === s.id) ? 'Ver sesión'
         : a === 'reprogramar' && gate.blocked ? 'Reprogramar (matrícula sin verificar)'
         : (a === 'reprogramar' || a === 'cancelar') && late ? `${ACTION_LABEL[a]} (cambio de la institución)`
@@ -155,10 +161,10 @@ export function Schedule() {
       disabled: false,
     }));
     // Regla de 24 horas: se muestran, pero no se pueden usar
-    if (gate.blocked) {
+    if (gate.blocked && can('psi-prog:mark_attendance')) {
       items.push({ label: 'Marcar asistencia (requiere matrícula verificada)', onClick: () => {}, danger: false, disabled: true });
     }
-    if (late && !mayChangeLate) {
+    if (late && !mayChangeLate && can('psi-prog:reschedule')) {
       items.push(
         { label: 'Reprogramar (requiere 24 h de anticipación)', onClick: () => {}, danger: false, disabled: true },
         { label: 'Cancelar (requiere 24 h de anticipación)', onClick: () => {}, danger: true, disabled: true },
@@ -205,14 +211,18 @@ export function Schedule() {
             <CalendarDays size={18} className="mr-2" />
             Actividades especiales
           </Button>
-          <Button variant="secondary" onClick={() => setCapacityOpen(true)} className="flex-1 sm:flex-none">
-            <Gauge size={18} className="mr-2" />
-            Cupos
-          </Button>
-          <Button onClick={() => openForm()} className="flex-1 sm:flex-none">
-            <Plus size={20} className="mr-2" />
-            Reservar Asesoría
-          </Button>
+          {can('psi-prog:capacity') && (
+            <Button variant="secondary" onClick={() => setCapacityOpen(true)} className="flex-1 sm:flex-none">
+              <Gauge size={18} className="mr-2" />
+              Cupos
+            </Button>
+          )}
+          {canCreate && (
+            <Button onClick={() => openForm()} className="flex-1 sm:flex-none">
+              <Plus size={20} className="mr-2" />
+              Reservar Asesoría
+            </Button>
+          )}
         </div>
       </div>
 
@@ -250,7 +260,7 @@ export function Schedule() {
               </p>
             </div>
           </div>
-          <Button variant="secondary" onClick={() => setActivities({ open: true, activityId: withoutLead[0].id })} className="shrink-0">Asignar responsable</Button>
+          {can(PERM.psiActivityLead) && <Button variant="secondary" onClick={() => setActivities({ open: true, activityId: withoutLead[0].id })} className="shrink-0">Asignar responsable</Button>}
         </div>
       )}
 
@@ -530,6 +540,8 @@ export function Schedule() {
         onHistory={s => { setDayDetail(null); setHistoryOf(s); }}
         onClose={() => setDayDetail(null)}
         onReserve={(d) => { setDayDetail(null); openForm(null, d); }}
+        canDo={canDo}
+        canReserve={canCreate}
         onAction={runAction}
         onShowActivity={(id) => { setDayDetail(null); setActivities({ open: true, activityId: id }); }}
       />

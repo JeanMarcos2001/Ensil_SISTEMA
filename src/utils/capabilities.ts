@@ -151,26 +151,29 @@ export interface Availability {
   available: boolean;
   /** Por qué no se ofrece (solo si `available` es falso). */
   reason?: string;
-  /** Aviso que no impide hacerlo (contraparte recomendada). */
-  advisory?: string;
+  /** Avisos que no impiden hacerlo (contrapartes recomendadas que nadie cubre). */
+  advisories: string[];
 }
 
 /**
- * ¿Se ofrece esta función? Depende de su contraparte: si es obligatoria y nadie puede hacer la otra parte en la sede que corresponde,
- * no se ofrece y se explica por qué. `target` es la sede destino o la misma sede, según la función.
+ * ¿Se ofrece esta función? Depende de sus contrapartes: si una obligatoria no la cubre nadie en la sede que corresponde, no se ofrece y se
+ * explica por qué; las recomendadas solo avisan. `target` es la sede destino o la misma sede, según la función.
  */
 export function availability(capabilityId: string, holders: Holder[], target?: { branchId: string; branchName: string }): Availability {
   const cap = capabilityById(capabilityId);
-  const cps = cap?.counterpart;
-  if (!cap || !cps) return { available: true };
-  const needsBranch = cps.where !== 'any';
-  if (needsBranch && !target) return { available: true };
-  const who = holdersWith(cps.capability, holders, needsBranch ? target!.branchId : undefined);
-  if (who.length > 0) return { available: true };
-  const need = capabilityById(cps.capability)?.label ?? cps.capability;
-  const place = needsBranch ? ` en ${target!.branchName}` : '';
-  const message = `Nadie tiene «${need}»${place}. ${cps.why}`;
-  return cps.strength === 'required' ? { available: false, reason: message } : { available: true, advisory: message };
+  const advisories: string[] = [];
+  let blocked: string | undefined;
+  for (const cps of cap?.counterparts ?? []) {
+    const needsBranch = cps.where !== 'any';
+    if (needsBranch && !target) continue;
+    if (holdersWith(cps.capability, holders, needsBranch ? target!.branchId : undefined).length > 0) continue;
+    const need = capabilityById(cps.capability)?.label ?? cps.capability;
+    const place = needsBranch ? ` en ${target!.branchName}` : '';
+    const message = `Nadie tiene «${need}»${place}. ${cps.why}`;
+    if (cps.strength === 'required') blocked ??= message;
+    else advisories.push(message);
+  }
+  return blocked ? { available: false, reason: blocked, advisories } : { available: true, advisories };
 }
 
 // ------------------------------------------------------------------------------------------------------------------ Mapa de conexiones
@@ -181,8 +184,8 @@ export interface Connections {
   requires: CapabilityDef[];
   /** Lo que otras funciones necesitan de esta. */
   neededBy: CapabilityDef[];
-  /** La función que debe tener otra persona. */
-  counterpart?: { capability: CapabilityDef; where: string; strength: 'required' | 'advisory'; why: string };
+  /** Las funciones que debe tener otra persona. */
+  counterparts: { capability: CapabilityDef; where: string; strength: 'required' | 'advisory'; why: string }[];
   /** Las funciones para las que esta es la contraparte. */
   counterpartOf: CapabilityDef[];
   reads: string[];
@@ -197,17 +200,19 @@ const entityLabel = (id: string) => ENTITIES[id] ?? id;
 export function connectionsOf(id: string): Connections | undefined {
   const capability = capabilityById(id);
   if (!capability) return undefined;
-  const cp = capability.counterpart ? capabilityById(capability.counterpart.capability) : undefined;
   return {
     capability,
     requires: requiredBy(id).map(capabilityById).filter((c): c is CapabilityDef => !!c),
     neededBy: ALL_CAPABILITIES.filter(c => c.id !== id && requiredBy(c.id).includes(id)),
-    counterpart: capability.counterpart && cp ? { capability: cp, where: capability.counterpart.where, strength: capability.counterpart.strength, why: capability.counterpart.why } : undefined,
-    counterpartOf: ALL_CAPABILITIES.filter(c => c.counterpart?.capability === id),
+    counterparts: capability.counterparts.flatMap(x => {
+      const target = capabilityById(x.capability);
+      return target ? [{ capability: target, where: x.where, strength: x.strength, why: x.why }] : [];
+    }),
+    counterpartOf: ALL_CAPABILITIES.filter(c => c.counterparts.some(x => x.capability === id)),
     reads: capability.reads.map(entityLabel),
     writes: capability.writes.map(entityLabel),
     events: capability.emits.map(eventById).filter((e): e is EventDef => !!e),
-    receives: EVENTS.filter(e => 'capability' in e.recipients && e.recipients.capability === id),
+    receives: EVENTS.filter(e => e.recipients.some(r => 'capability' in r && r.capability === id)),
   };
 }
 

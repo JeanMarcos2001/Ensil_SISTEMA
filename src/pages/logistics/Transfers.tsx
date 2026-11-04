@@ -8,6 +8,7 @@ import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCir
 import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, TransferBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
+import { centralWarehouse } from '../../utils/logisticsRoutes';
 
 export function Transfers() {
   const { 
@@ -20,7 +21,9 @@ export function Transfers() {
     addTransfer,
     updateTransferStatus,
     updateTransfer,
-    currentBranchId
+    currentBranchId,
+    can,
+    availabilityOf
   } = useData();
   const [isNewTransferOpen, setIsNewTransferOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -39,6 +42,8 @@ export function Transfers() {
   // Form State
   const [originId, setOriginId] = useState('');
   const [destinationId, setDestinationId] = useState('');
+  // Entre filiales todo pasa por el almacén central: si se elige una filial en un extremo, el otro extremo es el almacén
+  const warehouse = centralWarehouse(branches);
   const [reason, setReason] = useState('');
   const [observation, setObservation] = useState('');
   const [date, setDate] = useState(todayLocalISO());
@@ -186,6 +191,12 @@ export function Transfers() {
     return true;
   };
 
+  /** ¿Habrá quien recepcione en la sede destino? (contraparte obligatoria de despachar) */
+  const dispatchAvailability = (t: Transfer) => {
+    const destination = branches.find(b => b.id === t.destinationId);
+    return availabilityOf('log-transfer:dispatch', { branchId: t.destinationId, branchName: destination?.name ?? t.destinationId });
+  };
+
   const handleSaveRequest = (status: 'Borrador' | 'Solicitada') => {
     if (!validateRequestForm()) return;
 
@@ -199,7 +210,11 @@ export function Transfers() {
       observation
     };
 
-    addTransfer(newTransfer);
+    const created = addTransfer(newTransfer);
+    if (!created.ok) {
+      setFormError(created.error ?? 'No se pudo guardar la transferencia.');
+      return;
+    }
     setIsNewTransferOpen(false);
     resetForm();
   };
@@ -416,10 +431,12 @@ export function Transfers() {
           <p className="text-sm text-text-secondary">Movimiento de stock entre filiales</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewTransferOpen(true)}>
-            <Plus size={16} />
-            Nueva Solicitud
-          </Button>
+          {can('log-transfer:req_transfer') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewTransferOpen(true)}>
+              <Plus size={16} />
+              Nueva Solicitud
+            </Button>
+          )}
         </div>
       </div>
 
@@ -524,21 +541,21 @@ export function Transfers() {
                         items={[
                           { label: 'Ver detalles', onClick: () => handleOpenDetail(transfer) },
                           ...(transfer.status === 'Borrador' ? [
-                            { label: 'Enviar solicitud', onClick: () => updateTransferStatus(transfer.id, 'Solicitada') },
-                            { label: 'Cancelar', onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
+                            { label: 'Enviar solicitud', hidden: !can('log-transfer:req_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Solicitada') },
+                            { label: 'Cancelar', hidden: !can('log-transfer:req_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'Solicitada' ? [
-                            { label: 'Aprobar', onClick: () => updateTransferStatus(transfer.id, 'Aprobada') },
-                            { label: 'Rechazar', onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
+                            { label: 'Aprobar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Aprobada') },
+                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'Aprobada' ? [
-                            { label: 'Preparar despacho', onClick: () => handleOpenPreparation(transfer) },
-                            { label: 'Rechazar', onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
+                            { label: 'Preparar despacho', hidden: !can('log-transfer:dispatch'), disabled: !dispatchAvailability(transfer).available, reason: dispatchAvailability(transfer).reason, onClick: () => handleOpenPreparation(transfer) },
+                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'En tránsito' ? [
-                            { label: 'Marcar listo para recepción', onClick: () => updateTransferStatus(transfer.id, 'Listo para recepción') },
-                            { label: 'Habilitar recepción manual', onClick: () => updateTransfer(transfer.id, { manualEnable: true }) },
-                            { label: 'Cancelar', onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
+                            { label: 'Marcar listo para recepción', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransferStatus(transfer.id, 'Listo para recepción') },
+                            { label: 'Habilitar recepción manual', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransfer(transfer.id, { manualEnable: true }) },
+                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
                           ] : []),
                         ]}
                       />
@@ -574,8 +591,12 @@ export function Transfers() {
             )}
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => setIsNewTransferOpen(false)}>Cancelar</Button>
-              <Button variant="secondary" onClick={() => handleSaveRequest('Borrador')}>Guardar Borrador</Button>
-              <Button variant="primary" onClick={() => handleSaveRequest('Solicitada')}>Enviar Solicitud</Button>
+              {can('log-transfer:req_transfer') && (
+                <>
+                  <Button variant="secondary" onClick={() => handleSaveRequest('Borrador')}>Guardar Borrador</Button>
+                  <Button variant="primary" onClick={() => handleSaveRequest('Solicitada')}>Enviar Solicitud</Button>
+                </>
+              )}
             </div>
           </div>
         }
@@ -596,10 +617,10 @@ export function Transfers() {
                   <select 
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={originId}
-                    onChange={(e) => setOriginId(e.target.value)}
+                    onChange={(e) => { setOriginId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setDestinationId(warehouse.id); }}
                   >
                     <option value="">Seleccionar sede origen</option>
-                    {branches.map(b => (
+                    {branches.filter(b => b.status === 'Activo').map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -609,10 +630,10 @@ export function Transfers() {
                   <select 
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={destinationId}
-                    onChange={(e) => setDestinationId(e.target.value)}
+                    onChange={(e) => { setDestinationId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setOriginId(warehouse.id); }}
                   >
                     <option value="">Seleccionar sede destino</option>
-                    {branches.map(b => (
+                    {branches.filter(b => b.status === 'Activo').map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -966,8 +987,14 @@ export function Transfers() {
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-border-soft">
+            {selectedTransfer && !dispatchAvailability(selectedTransfer).available && (
+              <p className="mr-auto text-sm text-danger-text">{dispatchAvailability(selectedTransfer).reason}</p>
+            )}
+            {selectedTransfer && dispatchAvailability(selectedTransfer).advisories.map(a => (
+              <p key={a} className="mr-auto text-xs text-warning-text">{a}</p>
+            ))}
             <Button variant="secondary" onClick={() => setIsSummaryOpen(false)}>Volver a editar</Button>
-            <Button variant="primary" onClick={handleFinalizeDispatch}>Confirmar Despacho</Button>
+            <Button variant="primary" onClick={handleFinalizeDispatch} disabled={!can('log-transfer:dispatch') || (!!selectedTransfer && !dispatchAvailability(selectedTransfer).available)}>Confirmar Despacho</Button>
           </div>
         </div>
       </Modal>

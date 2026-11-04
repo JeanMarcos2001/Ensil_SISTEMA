@@ -8,11 +8,11 @@
  * ninguna pantalla.
  *
  * Separación de funciones: `APPROVAL_POLICY.allowSelfApproval` indica si quien pidió una solicitud puede aprobarla él mismo.
- * Mientras haya un solo usuario debe ser `true` (si no, nada se podría resolver); al definir los roles se pasa a `false`.
+ * Con varias cuentas y roles es `false`: quien pide no resuelve (el Superusuario, rol técnico, queda exento).
  */
 import type { Permission, Role } from '../context/DataContext';
 
-export const APPROVAL_POLICY = { allowSelfApproval: true };
+export const APPROVAL_POLICY = { allowSelfApproval: false };
 
 export const SUPERUSER = 'Superusuario';
 
@@ -35,6 +35,7 @@ export const PERM = {
   deposit: 'op-caja:deposit',
   closeCash: 'op-caja:close_box',
   reopenCash: 'op-caja:reopen_box',
+  reopenPetty: 'op-caja-chica:reopen_box',
   reversePetty: 'op-caja-chica:reverse_movement',
   closePetty: 'op-caja-chica:count',
   configPetty: 'op-caja-chica:config',
@@ -48,7 +49,7 @@ export const PERM = {
   psiInstitutionalChange: 'psi-prog:institutional_change',
   psiRemind: 'psi-recordatorios:remind',
   psiConfig: 'psi-recordatorios:config',
-  psiReport: 'rep-general:view',
+  psiReport: 'rep-psicopedagogia:view',
   reportView: 'rep-general:view',
   reportExport: 'rep-general:export',
   userCreate: 'org-usuarios:create',
@@ -58,8 +59,23 @@ export const PERM = {
   payrollGenerate: 'per-planilla:generate',
   payrollAdjust: 'per-planilla:adjust',
   payrollClose: 'per-planilla:close',
-  payrollPay: 'per-planilla:pay',
   payrollReopen: 'per-planilla:reopen',
+  payView: 'per-remuneracion:view',
+  auditView: 'sis-auditoria:view',
+  reportEnrollments: 'rep-matriculas:view',
+  reportPortfolio: 'rep-cartera:view',
+  reportCash: 'rep-caja:view',
+  reportVerification: 'rep-verificacion:view',
+  reportStock: 'rep-stock:view',
+  reportPsychopedagogy: 'rep-psicopedagogia:view',
+  reportStaff: 'rep-personal:view',
+  recipeCreate: 'com-recetas:create',
+  recipeEdit: 'com-recetas:edit',
+  recipeStatus: 'com-recetas:deactivate',
+  itemSale: 'op-caja:sell_item',
+  stockEntry: 'log-stock:entry',
+  deliverMaterials: 'op-verificacion:deliver',
+  allBranches: 'org-alcance:all_branches',
 } as const;
 
 export type ChangeKind = 'Caída' | 'Reactivación' | 'Cambio de programa' | 'Traslado de sede';

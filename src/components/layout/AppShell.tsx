@@ -55,9 +55,13 @@ import { Drawer } from '../ui/Drawer';
 import { Modal } from '../ui/Modal';
 import { NewEnrollmentWizard } from '../../pages/NewEnrollmentWizard';
 import { useData } from '../../context/DataContext';
+import { NoAccess } from './NoAccess';
+import { menuVisible } from '../../utils/guards';
+import { UserSwitcher } from './UserSwitcher';
+import { firstPathFor } from '../../utils/session';
 
 export function AppShell() {
-  const { isEnrollmentWizardOpen, setIsEnrollmentWizardOpen } = useData();
+  const { isEnrollmentWizardOpen, setIsEnrollmentWizardOpen, can, currentUser, sessionLocked } = useData();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -76,6 +80,14 @@ export function AppShell() {
     }
   }, [location.pathname, navigate]);
 
+  // Al entrar otra cuenta se abre su primera pantalla (la de su rol), no la que dejó la persona anterior
+  const lastUser = useRef(currentUser.id);
+  useEffect(() => {
+    if (lastUser.current === currentUser.id) return;
+    lastUser.current = currentUser.id;
+    if (currentUser.id) navigate(firstPathFor(can), { replace: true });
+  }, [currentUser.id]);
+
   const handleItemSelect = (item: string, moduleId: string) => {
     navigate(`/${moduleId}/${slugify(item)}`);
   };
@@ -85,6 +97,10 @@ export function AppShell() {
   };
 
   const renderContent = () => {
+    // Una pantalla solo se abre si el rol tiene su función (también por la barra de direcciones)
+    const menuItem = activeModule === 'mensajeria' ? 'Mensajería' : activeItem;
+    if (!menuVisible(activeModule, menuItem, can)) return <NoAccess moduleId={activeModule} item={menuItem} />;
+
     if (activeModule === 'dashboard') return <Dashboard />;
     if (activeModule === 'mensajeria') return <Messaging />;
     
@@ -185,6 +201,9 @@ export function AppShell() {
           </main>
         </div>
       </div>
+
+      {/* Sin cuenta activa nadie trabaja: se entra con el PIN de una cuenta */}
+      {sessionLocked && <UserSwitcher locked onClose={() => undefined} />}
 
       {/* Global Enrollment Wizard */}
       <Modal 

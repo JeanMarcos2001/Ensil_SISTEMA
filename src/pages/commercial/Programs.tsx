@@ -11,7 +11,7 @@ import { useData, Program } from '../../context/DataContext';
 import { Search, Plus, BookOpen, Layers, X, AlertCircle } from 'lucide-react';
 
 export function Programs() {
-  const { programs, addProgram, updateProgram, deleteProgram, branches } = useData();
+  const { programs, addProgram, updateProgram, deleteProgram, branches, can } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
@@ -207,10 +207,12 @@ export function Programs() {
           <p className="text-sm text-text-secondary">Gestión de la oferta académica base del sistema</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Programa
-          </Button>
+          {can('com-programas:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Programa
+            </Button>
+          )}
         </div>
       </div>
 
@@ -286,9 +288,9 @@ export function Programs() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenForm(row, true) },
-                        { label: 'Editar programa', onClick: () => handleOpenForm(row) },
+                        { label: 'Editar programa', hidden: !can('com-programas:edit'), onClick: () => handleOpenForm(row) },
                         { 
-                          label: 'Duplicar', 
+                          label: 'Duplicar', hidden: !can('com-programas:create'), 
                           onClick: () => openConfirm({
                             title: 'Duplicar Programa',
                             description: `¿Está seguro de que desea duplicar el programa "${row.name}"?`,
@@ -297,7 +299,7 @@ export function Programs() {
                           }) 
                         },
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-programas:edit'), 
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Programa' : 'Activar Programa',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el programa "${row.name}"?`,
@@ -307,7 +309,7 @@ export function Programs() {
                           danger: row.status === 'Activo' 
                         },
                         { 
-                          label: 'Eliminar', 
+                          label: 'Eliminar', hidden: !can('com-programas:delete'), 
                           onClick: () => openConfirm({
                             title: 'Eliminar Programa',
                             description: `¿Está seguro de que desea eliminar el programa "${row.name}"? Esta acción no se puede deshacer.`,

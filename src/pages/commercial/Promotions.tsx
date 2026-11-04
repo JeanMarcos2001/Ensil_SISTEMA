@@ -34,7 +34,7 @@ const initialFormData: Omit<Promotion, 'id'> = {
 };
 
 export function Promotions() {
-  const { promotions, addPromotion, updatePromotion, deletePromotion, programs, paymentTypes, branches } = useData();
+  const { promotions, addPromotion, updatePromotion, programs, paymentTypes, branches, can } = useData();
   
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedPromotion, setSelectedPromotion] = useState<string | null>(null);
@@ -204,10 +204,12 @@ export function Promotions() {
           <p className="text-sm text-text-secondary">Gestión de promociones grupales y precios especiales</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nueva Promoción
-          </Button>
+          {can('com-promociones:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nueva Promoción
+            </Button>
+          )}
         </div>
       </div>
 
@@ -291,9 +293,9 @@ export function Promotions() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenForm(row.id, true) },
-                        { label: 'Editar promoción', onClick: () => handleOpenForm(row.id) },
+                        { label: 'Editar promoción', hidden: !can('com-promociones:edit'), onClick: () => handleOpenForm(row.id) },
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-promociones:edit'), 
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Promoción' : 'Activar Promoción',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} la promoción "${row.name}"?`,

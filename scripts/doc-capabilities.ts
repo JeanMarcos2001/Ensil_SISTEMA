@@ -45,7 +45,7 @@ for (const m of CATALOG_MODULES) {
       const sens = c.sensitive ? ` ${SENS[c.sensitive]}` : '';
       const reserved = c.reserved ? ' _(reservada)_' : '';
       const menu = c.menu ? ` · menú «${c.menu.item}»` : '';
-      const cp = c.counterpart ? `${label(c.counterpart.capability)} ${WHERE[c.counterpart.where]} (${c.counterpart.strength === 'required' ? 'obligatoria' : 'recomendada'})` : '—';
+      const cp = c.counterparts.length ? c.counterparts.map(x => `${label(x.capability)} ${WHERE[x.where]} (${x.strength === 'required' ? 'obligatoria' : 'recomendada'})`).join('<br>') : '—';
       const req = c.requires.length ? c.requires.map(label).join(', ') : '—';
       const rw = `${ent(c.reads)} → ${ent(c.writes)}`;
       const ev = c.emits.length ? c.emits.map(e => EVENTS.find(x => x.id === e)?.label ?? e).join(', ') : '—';
@@ -59,13 +59,12 @@ out.push('## Avisos con destinatario');
 out.push('');
 out.push('El aviso llega a quien tenga la función indicada en la sede que corresponde, no a un nombre de rol. Si nadie la tiene, llega a quien tenga «' + label('sis-avisos:fallback') + '».');
 out.push('');
-out.push('| Aviso | Lo dispara | Llega a quien tenga… | Dónde |');
-out.push('|---|---|---|---|');
+out.push('| Aviso | Lo dispara | Llega a quien tenga… (y dónde) |');
+out.push('|---|---|---|');
 for (const e of EVENTS) {
-  const who = 'person' in e.recipients ? (e.recipients.person === 'requester' ? 'Quien hizo la solicitud' : 'Quien ejecutó la acción') : label(e.recipients.capability);
-  const where = 'person' in e.recipients ? '—' : RWHERE[e.recipients.where];
+  const who = e.recipients.map(r => ('person' in r ? (r.person === 'requester' ? 'Quien hizo la solicitud' : 'Quien ejecutó la acción') : `${label(r.capability)} (${RWHERE[r.where]})`)).join('<br>');
   const by = e.trigger === 'sistema' ? 'La regla del sistema (por fecha o estado)' : ALL_CAPABILITIES.filter(c => c.emits.includes(e.id)).map(c => c.label).join(' · ');
-  out.push(`| ${e.label} | ${cell(by)} | ${cell(who)} | ${where} |`);
+  out.push(`| ${e.label} | ${cell(by)} | ${cell(who)} |`);
 }
 out.push('');
 

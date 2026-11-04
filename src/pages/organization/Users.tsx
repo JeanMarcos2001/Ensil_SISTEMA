@@ -9,16 +9,23 @@ import { Search, Plus, Shield, Users as UsersIcon, Settings, Mail, Phone, AlertT
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { accessAssignments, accessCheck, defaultsFromStaff, staffDisplayName, userOfStaff } from '../../utils/staffAccess';
+import { seatsUsed } from '../../utils/roleBuilder';
+import { SUPERUSER } from '../../utils/authority';
+import { AccessStorageBar } from '../../components/people/AccessStorageBar';
+import { pinError } from '../../utils/session';
+import { nextSequentialId } from '../../utils/ids';
 
 export function Users() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
+  const [resetPin, setResetPin] = useState('');
+  const [resetError, setResetError] = useState<string | null>(null);
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [activationNote, setActivationNote] = useState<string | null>(null);
 
-  const { users, branches, roles, staff, assignments, addUser, updateUser } = useData();
+  const { users, branches, roles, staff, assignments, addUser, updateUser, can, currentUser } = useData();
   const [params, setParams] = useSearchParams();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -38,8 +45,8 @@ export function Users() {
     role: '',
     mainBranch: '',
     additionalBranches: [] as string[],
-    passwordType: 'auto' as 'auto' | 'manual',
-    password: '',
+    /** PIN de acceso rápido (en blanco al editar = no se cambia). */
+    pin: '',
     status: 'Activo'
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -48,7 +55,7 @@ export function Users() {
     const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          u.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter ? u.role.toLowerCase().includes(roleFilter.toLowerCase()) : true;
+    const matchesRole = roleFilter ? u.role === roleFilter : true;
     const matchesBranch = branchFilter ? u.branch.toLowerCase().includes(branchFilter.toLowerCase()) : true;
     const matchesStatus = statusFilter ? u.status.toLowerCase() === statusFilter.toLowerCase() : true;
     return matchesSearch && matchesRole && matchesBranch && matchesStatus;
@@ -73,7 +80,18 @@ export function Users() {
 
   const handleResetPassword = (id: string) => {
     setSelectedUser(id);
+    setResetPin('');
+    setResetError(null);
     setIsResetPasswordModalOpen(true);
+  };
+
+  const submitResetPin = () => {
+    if (!selectedUser) return;
+    const problem = pinError(resetPin);
+    if (problem) { setResetError(problem); return; }
+    const result = updateUser(selectedUser, { pin: resetPin });
+    if (!result.ok) { setResetError(result.error ?? 'No se pudo cambiar el PIN.'); return; }
+    setIsResetPasswordModalOpen(false);
   };
 
   const handleDeactivate = (id: string) => {
@@ -92,7 +110,7 @@ export function Users() {
         const [firstName, ...rest] = d.name.split(' ');
         setFormData({
           staffId: member.id, firstName, lastName: rest.join(' '), document: d.document, phone: d.phone, email: '', role: d.role, mainBranch: d.branch,
-          additionalBranches: d.additionalBranches, passwordType: 'auto', password: '', status: 'Activo',
+          additionalBranches: d.additionalBranches, pin: '', status: 'Activo',
         });
         setErrors({});
         setIsDetailOpen(false);
@@ -114,8 +132,7 @@ export function Users() {
           role: user.role,
           mainBranch: user.branch,
           additionalBranches: user.additionalBranches || [],
-          passwordType: 'auto',
-          password: '',
+          pin: '',
           status: user.status
         });
       }
@@ -130,8 +147,7 @@ export function Users() {
         role: '',
         mainBranch: '',
         additionalBranches: [],
-        passwordType: 'auto',
-        password: '',
+        pin: '',
         status: 'Activo'
       });
     }
@@ -161,12 +177,9 @@ export function Users() {
     if (!formData.role) newErrors.role = 'El rol principal es obligatorio';
     if (!formData.mainBranch) newErrors.mainBranch = 'La sede principal es obligatoria';
     
-    if (formData.passwordType === 'manual') {
-      if (!formData.password) {
-        newErrors.password = 'La contraseña es obligatoria';
-      } else if (formData.password.length < 8) {
-        newErrors.password = 'Debe tener al menos 8 caracteres';
-      }
+    if (formData.pin) {
+      const pinProblem = pinError(formData.pin);
+      if (pinProblem) newErrors.pin = pinProblem;
     }
 
     setErrors(newErrors);
@@ -190,8 +203,8 @@ export function Users() {
       };
 
       const result = selectedUser
-        ? updateUser(selectedUser, newUserData)
-        : addUser({ ...newUserData, id: `USR-${String(users.length + 1).padStart(3, '0')}` });
+        ? updateUser(selectedUser, { ...newUserData, pin: formData.pin || undefined })
+        : addUser({ ...newUserData, id: nextSequentialId('USR', users.map(x => x.id)), pin: formData.pin || undefined });
       if (!result.ok) { setServerError(result.error ?? 'No se pudo guardar el usuario.'); return; }
       setIsFormOpen(false);
     }
@@ -240,12 +253,16 @@ export function Users() {
           <p className="text-sm text-text-secondary">Gestión de cuentas de acceso al sistema</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Usuario
-          </Button>
+          {can('org-usuarios:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Usuario
+            </Button>
+          )}
         </div>
       </div>
+
+      <AccessStorageBar />
 
       {activationNote && (
         <div className="mb-4 bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
@@ -276,10 +293,7 @@ export function Users() {
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
               >
                 <option value="">Rol</option>
-                <option value="Administrador">Administrador</option>
-                <option value="Director">Director</option>
-                <option value="Coordinador">Coordinador</option>
-                <option value="Docente">Docente</option>
+                {roles.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
               </select>
               <select 
                 value={branchFilter}
@@ -350,11 +364,11 @@ export function Users() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Editar usuario', onClick: () => handleOpenForm(row.id) },
-                        { label: 'Restablecer contraseña', onClick: () => handleResetPassword(row.id) },
+                        { label: 'Editar usuario', hidden: !can('org-usuarios:edit'), onClick: () => handleOpenForm(row.id) },
+                        { label: 'Restablecer PIN', hidden: !can('org-usuarios:reset_access'), onClick: () => handleResetPassword(row.id) },
                         row.status === 'Activo'
-                          ? { label: 'Desactivar', onClick: () => handleDeactivate(row.id), danger: true }
-                          : { label: 'Activar', onClick: () => handleActivate(row.id) },
+                          ? { label: 'Desactivar', hidden: !can('org-usuarios:deactivate'), onClick: () => handleDeactivate(row.id), danger: true }
+                          : { label: 'Activar', hidden: !can('org-usuarios:edit'), onClick: () => handleActivate(row.id) },
                       ]} 
                     />
                   </td>
@@ -412,7 +426,7 @@ export function Users() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => handleOpenForm(selectedUser || undefined)}>Editar Perfil</Button>
+            {can('org-usuarios:edit') && <Button variant="primary" onClick={() => handleOpenForm(selectedUser || undefined)}>Editar Perfil</Button>}
           </div>
         }
       >
@@ -605,21 +619,36 @@ export function Users() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-text-primary">Rol Principal <span className="text-error">*</span></label>
-                  <select 
+                  <select
                     value={formData.role}
+                    disabled={!!selectedUser && !can('org-usuarios:assign_role')}
                     onChange={(e) => setFormData({...formData, role: e.target.value})}
                     className={`w-full h-10 bg-surface border ${errors.role ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
                   >
                     <option value="">Seleccionar rol...</option>
-                    {roles.filter(r => r.status === 'Activo' || r.name === formData.role).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                    {/* Solo se ofrecen los roles que se pueden dar: activos, y el del sistema solo si quien asigna es Superusuario */}
+                    {roles.filter(r => r.name === formData.role || (r.status === 'Activo' && (!r.locked || currentUser.role === SUPERUSER))).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
                   </select>
                   {errors.role && <p className="text-xs text-error">{errors.role}</p>}
+                  {(() => {
+                    const chosen = roles.find(r => r.name === formData.role);
+                    if (!chosen) return null;
+                    const seatBranch = formData.mainBranch && formData.mainBranch !== 'Todas' ? formData.mainBranch : '';
+                    const used = seatBranch ? seatsUsed(chosen.name, users, seatBranch, selectedUser ?? undefined) : 0;
+                    return (
+                      <p className="text-[11px] text-text-muted">
+                        {chosen.desc}
+                        {chosen.branchUserLimit && seatBranch ? ` · En ${seatBranch}: ${used} de ${chosen.branchUserLimit} cuentas activas con este rol.` : chosen.branchUserLimit ? ` · Máximo ${chosen.branchUserLimit} cuentas activas por sede.` : ''}
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-text-primary">Sede Principal <span className="text-error">*</span></label>
-                  <select 
+                  <select
                     value={formData.mainBranch}
+                    disabled={!!selectedUser && !can('org-usuarios:assign_branch')}
                     onChange={(e) => setFormData({...formData, mainBranch: e.target.value})}
                     className={`w-full h-10 bg-surface border ${errors.mainBranch ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
                   >
@@ -638,9 +667,10 @@ export function Users() {
                 <div className="flex flex-wrap gap-2 p-3 border border-border-soft rounded-lg bg-surface-muted/30">
                   {(formData.staffId ? branches.filter(b => accessAssignments(formData.staffId, assignments).some(a => a.branch === b.name)) : branches).filter(b => b.name !== formData.mainBranch).map(branch => (
                     <label key={branch.id} className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         checked={formData.additionalBranches.includes(branch.name)}
+                        disabled={!!selectedUser && !can('org-usuarios:assign_branch')}
                         onChange={() => handleAdditionalBranchToggle(branch.name)}
                         className="rounded border-border-strong text-primary-accent focus:ring-primary-accent" 
                       />
@@ -655,47 +685,22 @@ export function Users() {
           {/* Bloque 3: Seguridad */}
           <div className="border-t border-border-soft pt-4">
             <h4 className="text-sm font-bold text-text-primary mb-3">3. Seguridad</h4>
-            <div className="space-y-3">
-              <label className="flex items-start gap-3 p-3 border border-border-soft rounded-lg cursor-pointer hover:border-primary-accent/50 transition-colors">
-                <input 
-                  type="radio" 
-                  name="password_type" 
-                  className="mt-1 text-primary-accent focus:ring-primary-accent" 
-                  checked={formData.passwordType === 'auto'}
-                  onChange={() => {
-                    setFormData({...formData, passwordType: 'auto', password: ''});
-                    setErrors({...errors, password: ''});
-                  }}
-                />
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Generar contraseña automáticamente</p>
-                  <p className="text-xs text-text-secondary">Se enviará un correo al usuario con instrucciones para establecer su contraseña.</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-3 p-3 border border-border-soft rounded-lg cursor-pointer hover:border-primary-accent/50 transition-colors">
-                <input 
-                  type="radio" 
-                  name="password_type" 
-                  className="mt-1 text-primary-accent focus:ring-primary-accent" 
-                  checked={formData.passwordType === 'manual'}
-                  onChange={() => setFormData({...formData, passwordType: 'manual'})}
-                />
-                <div className="w-full">
-                  <p className="text-sm font-medium text-text-primary mb-2">Establecer contraseña manualmente</p>
-                  {formData.passwordType === 'manual' && (
-                    <div className="mt-2">
-                      <input 
-                        type="password" 
-                        placeholder="Ingresar contraseña" 
-                        value={formData.password}
-                        onChange={(e) => setFormData({...formData, password: e.target.value})}
-                        className={`w-full h-9 bg-surface border ${errors.password ? 'border-error' : 'border-border-soft'} rounded-md px-3 text-sm focus:outline-none focus:border-primary-accent`} 
-                      />
-                      {errors.password && <p className="text-xs text-error mt-1">{errors.password}</p>}
-                    </div>
-                  )}
-                </div>
-              </label>
+            <div>
+              <label className="block text-sm font-medium text-text-primary mb-1">PIN de acceso rápido {selectedUser ? '(opcional)' : ''}</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={6}
+                placeholder={selectedUser ? 'Dejar en blanco para no cambiarlo' : '4 a 6 números'}
+                value={formData.pin}
+                onChange={(e) => { setFormData({ ...formData, pin: e.target.value.replace(/\D/g, '') }); setErrors({ ...errors, pin: '' }); }}
+                className={`w-full h-9 bg-surface border ${errors.pin ? 'border-error' : 'border-border-soft'} rounded-md px-3 text-sm focus:outline-none focus:border-primary-accent`}
+              />
+              {errors.pin && <p className="text-xs text-error mt-1">{errors.pin}</p>}
+              <p className="text-xs text-text-secondary mt-1">
+                Con el PIN la persona entra a su cuenta al cambiar de usuario. Sin PIN la cuenta no puede entrar; cada persona puede cambiar el suyo desde el menú de su cuenta.
+              </p>
             </div>
           </div>
 
@@ -717,25 +722,38 @@ export function Users() {
         </div>
       </Modal>
 
-      {/* Reset Password Modal */}
+      {/* Reset PIN Modal */}
       <Modal
         isOpen={isResetPasswordModalOpen}
         onClose={() => setIsResetPasswordModalOpen(false)}
-        title="Restablecer Contraseña"
+        title="Restablecer PIN"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsResetPasswordModalOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => setIsResetPasswordModalOpen(false)}>Enviar Enlace</Button>
+            <Button variant="primary" onClick={submitResetPin} disabled={resetPin.length < 4}>Guardar PIN</Button>
           </div>
         }
       >
         <div className="space-y-4">
           <p className="text-sm text-text-secondary">
-            Se enviará un correo electrónico al usuario con un enlace seguro para que pueda restablecer su contraseña.
+            Fija un PIN nuevo para esta cuenta (4 a 6 números). Entrégaselo a la persona: puede cambiarlo después desde el menú de su cuenta.
           </p>
           <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
-            <p className="text-sm font-medium text-text-primary">{users.find(u => u.id === selectedUser)?.email}</p>
+            <p className="text-sm font-medium text-text-primary">{users.find(u => u.id === selectedUser)?.name}</p>
+            <p className="text-xs text-text-muted">{users.find(u => u.id === selectedUser)?.email}</p>
           </div>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            placeholder="PIN nuevo"
+            aria-label="PIN nuevo"
+            value={resetPin}
+            onChange={(e) => { setResetPin(e.target.value.replace(/\D/g, '')); setResetError(null); }}
+            className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent"
+          />
+          {resetError && <p className="text-sm text-danger-text" role="alert">{resetError}</p>}
         </div>
       </Modal>
 

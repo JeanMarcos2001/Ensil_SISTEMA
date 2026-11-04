@@ -127,10 +127,12 @@ export function Payments() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewPaymentOpen(true)}>
-            <Plus size={16} />
-            Registrar pago
-          </Button>
+          {can('op-pagos:register') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewPaymentOpen(true)}>
+              <Plus size={16} />
+              Registrar pago
+            </Button>
+          )}
         </div>
       </div>
 

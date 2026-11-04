@@ -25,6 +25,8 @@ export function AuditReport() {
   const [module, setModule] = useState<'' | AuditModule>('');
   const [user, setUser] = useState('');
   const [text, setText] = useState('');
+  // Los sueldos del detalle (contratos y planilla) solo los ve quien tiene «Ver remuneraciones»
+  const showPay = d.can(PERM.payView);
 
   const all = useMemo(() => buildAudit({
     enrollmentChanges: d.enrollmentChanges, changeRequests: d.changeRequests, dropRequests: d.dropRequests, enrollments: d.enrollments, payments: d.payments, creditNotes: d.creditNotes,
@@ -32,9 +34,10 @@ export function AuditReport() {
     reminderLogs: d.reminderLogs, payrollRuns: d.payrollRuns, contracts: d.contracts, adjustments: d.adjustments,
     staffName: id => { const s = d.staff.find(x => x.id === id); return s ? `${s.names} ${s.lastNameP}` : id; },
     studentName: id => d.students.find(x => x.id === id)?.name ?? id,
-  }), [d.enrollmentChanges, d.changeRequests, d.dropRequests, d.enrollments, d.payments, d.creditNotes, d.cashMovements, d.pettyCashMovements, d.cashClosures, d.psyEvents, d.psyReminderLogs, d.reminderLogs, d.payrollRuns, d.contracts, d.adjustments, d.staff, d.students]);
+    showPay,
+  }), [showPay, d.enrollmentChanges, d.changeRequests, d.dropRequests, d.enrollments, d.payments, d.creditNotes, d.cashMovements, d.pettyCashMovements, d.cashClosures, d.psyEvents, d.psyReminderLogs, d.reminderLogs, d.payrollRuns, d.contracts, d.adjustments, d.staff, d.students]);
   const entries = useMemo(() => filterAudit(all, { range, module, user, text }), [all, range, module, user, text]);
-  if (!d.can(PERM.reportView)) return <NoAccess />;
+  if (!d.can(PERM.auditView)) return <NoAccess />;
 
   const rows = entries.map(e => [dmy(dayOf(e.at)), hour(e.at), e.module, e.action, e.detail, e.by, e.ref ?? '']);
   const byModule = AUDIT_MODULES.map(m => ({ name: m, value: entries.filter(e => e.module === m).length })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);

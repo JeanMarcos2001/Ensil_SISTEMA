@@ -16,7 +16,7 @@ import { guardianBalance } from '../utils/guardianStatement';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 
 export function Guardians() {
-  const { guardians, students, enrollments, plans, payments, promotionGroups } = useData();
+  const { guardians, students, enrollments, plans, payments, promotionGroups, can } = useData();
   const [statementId, setStatementId] = useState<string | null>(null);
   const [debtFilter, setDebtFilter] = useState('');
   const today = todayLocalISO();
@@ -49,6 +49,8 @@ export function Guardians() {
     return new Map(guardians.map(g => [g.id, guardianBalance(ctx, g.id, today)]));
   }, [guardians, students, enrollments, plans, payments, promotionGroups, today]);
   const usd = (n: number) => `USD ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Saldo, deuda y estado de cuenta son dinero: solo los ve quien puede ver los pagos (Psicopedagogía ve al titular, no lo que debe)
+  const seesMoney = can('op-pagos:view');
 
   const filteredGuardians = guardians.filter(g => {
     const matchesSearch =
@@ -57,7 +59,7 @@ export function Guardians() {
       g.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       g.phone.toLowerCase().includes(searchTerm.toLowerCase());
     const owes = (figures.get(g.id)?.balanceUSD ?? 0) > 0;
-    const matchesDebt = !debtFilter || (debtFilter === 'si' ? owes : !owes);
+    const matchesDebt = !seesMoney || !debtFilter || (debtFilter === 'si' ? owes : !owes);
     return matchesSearch && matchesDebt;
   });
   const hasFilters = !!(searchTerm || debtFilter);
@@ -66,8 +68,8 @@ export function Guardians() {
   const handleExport = () => {
     downloadCsv(
       csvFileName('Titulares', today),
-      ['Titular', 'Documento', 'Teléfono', 'Correo', 'Alumnos', 'Matrículas', 'Saldo pendiente (USD)', 'Deuda vencida (USD)'],
-      filteredGuardians.map(g => { const f = figures.get(g.id); return [g.name, `${g.docType || 'DNI'} ${g.doc}`, g.phone, g.email, f?.students ?? 0, f?.enrollments ?? 0, f?.balanceUSD ?? 0, f?.overdueUSD ?? 0]; })
+      ['Titular', 'Documento', 'Teléfono', 'Correo', 'Alumnos', 'Matrículas', ...(seesMoney ? ['Saldo pendiente (USD)', 'Deuda vencida (USD)'] : [])],
+      filteredGuardians.map(g => { const f = figures.get(g.id); return [g.name, `${g.docType || 'DNI'} ${g.doc}`, g.phone, g.email, f?.students ?? 0, f?.enrollments ?? 0, ...(seesMoney ? [f?.balanceUSD ?? 0, f?.overdueUSD ?? 0] : [])]; })
     );
   };
 
@@ -93,10 +95,12 @@ export function Guardians() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
-            <Plus size={16} />
-            Nuevo titular
-          </Button>
+          {can('per-titulares:create') && (
+            <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
+              <Plus size={16} />
+              Nuevo titular
+            </Button>
+          )}
         </div>
       </div>
 
@@ -114,7 +118,7 @@ export function Guardians() {
             />
           </div>
           <div className="flex gap-3 overflow-x-auto pb-2 md:pb-0">
-            <select
+            {seesMoney && <select
               value={debtFilter}
               onChange={(e) => setDebtFilter(e.target.value)}
               className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
@@ -122,7 +126,7 @@ export function Guardians() {
               <option value="">Con deuda: todos</option>
               <option value="si">Con deuda</option>
               <option value="no">Sin deuda</option>
-            </select>
+            </select>}
             <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
@@ -138,7 +142,7 @@ export function Guardians() {
                 <th className="px-6 py-4 font-medium">Contacto</th>
                 <th className="px-6 py-4 font-medium text-center">Alumnos</th>
                 <th className="px-6 py-4 font-medium text-center">Matrículas</th>
-                <th className="px-6 py-4 font-medium">Saldo Pendiente</th>
+                {seesMoney && <th className="px-6 py-4 font-medium">Saldo Pendiente</th>}
                 <th className="px-6 py-4 font-medium text-right">Acciones</th>
               </tr>
             </thead>
@@ -155,18 +159,18 @@ export function Guardians() {
                   </td>
                   <td className="px-6 py-4 text-center text-text-secondary">{figures.get(row.id)?.students ?? 0}</td>
                   <td className="px-6 py-4 text-center text-text-secondary">{figures.get(row.id)?.enrollments ?? 0}</td>
-                  <td className="px-6 py-4">
+                  {seesMoney && <td className="px-6 py-4">
                     <span className={`font-medium ${(figures.get(row.id)?.balanceUSD ?? 0) > 0 ? 'text-danger-text' : 'text-text-secondary'}`}>
                       {usd(figures.get(row.id)?.balanceUSD ?? 0)}
                     </span>
                     {(figures.get(row.id)?.overdueUSD ?? 0) > 0 && <div className="text-xs text-danger-text">Vencido {usd(figures.get(row.id)!.overdueUSD)}</div>}
-                  </td>
+                  </td>}
                   <td className="px-6 py-4 text-right">
                     <ActionMenu 
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
-                        { label: 'Ver estado de cuenta', onClick: () => setStatementId(row.id) },
-                        { label: 'Editar datos', onClick: () => handleOpenForm(row) },
+                        { label: 'Ver estado de cuenta', hidden: !seesMoney, onClick: () => setStatementId(row.id) },
+                        { label: 'Editar datos', hidden: !can('per-titulares:edit'), onClick: () => handleOpenForm(row) },
                       ]} 
                     />
                   </td>
@@ -224,10 +228,12 @@ export function Guardians() {
         footer={
           <div className="flex justify-end gap-3 w-full">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => {
-              setIsDetailOpen(false);
-              handleOpenForm(selectedGuardian);
-            }}>Editar Perfil</Button>
+            {can('per-titulares:edit') && (
+              <Button variant="primary" onClick={() => {
+                setIsDetailOpen(false);
+                handleOpenForm(selectedGuardian);
+              }}>Editar Perfil</Button>
+            )}
           </div>
         }
       >
@@ -256,7 +262,7 @@ export function Guardians() {
                 <span className="text-xs text-text-muted uppercase tracking-wider">Dirección</span>
                 <p className="text-sm font-medium text-text-primary">{selectedGuardian.direccion || '—'}</p>
               </div>
-              <div className="space-y-1">
+              {seesMoney && <div className="space-y-1">
                 <span className="text-xs text-text-muted uppercase tracking-wider">Estado de Cuenta</span>
                 <div className="pt-1">
                   <Badge variant={(figures.get(selectedGuardian.id)?.balanceUSD ?? 0) > 0 ? 'danger' : 'neutral'}>
@@ -264,7 +270,7 @@ export function Guardians() {
                   </Badge>
                   <button className="ml-3 text-xs text-primary-accent hover:underline" onClick={() => { setIsDetailOpen(false); setStatementId(selectedGuardian.id); }}>Ver estado de cuenta</button>
                 </div>
-              </div>
+              </div>}
             </div>
 
             <div className="border-t border-border-soft pt-4">

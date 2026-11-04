@@ -25,7 +25,7 @@ export function StaffReport() {
     () => staffReport({ staff, contracts, assignments, users, branches, payrollRuns, today }, { branchId, range }),
     [staff, contracts, assignments, users, branches, payrollRuns, today, branchId, range]
   );
-  if (!can(PERM.reportView)) return <NoAccess />;
+  if (!can(PERM.reportStaff)) return <NoAccess />;
 
   const { kpis } = report;
   const rows = report.rows.map(r => [r.name, `${r.staff.docType} ${r.staff.docNumber}`, r.branch, r.area, r.role, r.staff.status, r.contractState, r.account ? `${r.account.id} (${r.account.status})` : 'Sin cuenta']);
@@ -52,7 +52,7 @@ export function StaffReport() {
         <Kpi label="Bajas del período" value={String(kpis.leavers)} hint={period} />
         <Kpi label="Con cuenta de acceso" value={String(kpis.withAccount)} hint={`${kpis.withoutAccount} sin cuenta activa`} />
         <Kpi label="Sin asignación" value={String(kpis.withoutAssignment)} tone={kpis.withoutAssignment > 0 ? 'text-warning-text' : undefined} hint="No figuran en ninguna sede" />
-        {report.payroll && <Kpi label={`Planilla ${periodLabel(report.payroll.period)}`} value={money(report.payroll.employerCost, 'PEN')} hint={`Costo del empleador · neto ${money(report.payroll.net, 'PEN')} · ${report.payroll.status}`} />}
+        {report.payroll && can(PERM.payView) && <Kpi label={`Planilla ${periodLabel(report.payroll.period)}`} value={money(report.payroll.employerCost, 'PEN')} hint={`Costo del empleador · neto ${money(report.payroll.net, 'PEN')} · ${report.payroll.status}`} />}
       </div>
 
       <TableCard
@@ -71,7 +71,7 @@ export function StaffReport() {
         headers={['Trabajador', 'Desde', 'Retorno']}
         rows={report.vacations.map(v => [v.staffName, dmy(v.from), dmy(v.to)])}
         empty="No hay vacaciones programadas."
-        note="Hoy las vacaciones no bloquean la agenda de Psicopedagogía: conviene reasignar sus asesorías a mano."
+        note="Quien está de vacaciones no puede ser responsable de asesorías ni actividades esos días: antes de programarlas se reasigna su agenda."
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -81,7 +81,7 @@ export function StaffReport() {
         <BarsCard title="Contratos vigentes por tipo" items={countItems(report.contractTypes)} tone="bg-success-text" />
       </div>
 
-      {report.payroll && (
+      {report.payroll && can(PERM.payView) && (
         <TableCard
           title={`Costo de la planilla de ${periodLabel(report.payroll.period)} por sede`}
           headers={['Sede', 'Trabajadores', 'Neto', 'Costo del empleador']}

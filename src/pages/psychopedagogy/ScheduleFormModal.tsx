@@ -32,6 +32,7 @@ import {
 } from '../../utils/schedule';
 import { labelCls, nativeFieldCls, textareaCls } from './formStyles';
 import { DateInput } from '../../components/ui/DateInput';
+import { sessionResponsibleUnavailable } from '../../utils/staffAvailability';
 
 interface Props {
   isOpen: boolean;
@@ -67,7 +68,7 @@ function programOf(student: Student, enrollments: ReturnType<typeof useData>['en
 }
 
 export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defaultStudentId }: Props) {
-  const { students, enrollments, programs, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, addSchedule, updateSchedule, gateOfSchedule, can } = useData();
+  const { students, enrollments, programs, schedules, staff, assignments, branches, capacityConfig, monthlySchedules, contracts, addSchedule, updateSchedule, gateOfSchedule, can } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<FormState>(() => emptyForm(defaultDate || today));
   const [query, setQuery] = useState('');
@@ -180,6 +181,9 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
       ? validateReservation(ctx, { ...cand, checkPast: true }, today, schedule?.id)
       : validateSchedule({ ...cand, checkPast: false }, today) ?? (findScheduleConflict(schedules, cand, schedule?.id) ? 'El alumno ya tiene otra asesoría a esa hora.' : null);
     if (problem) { setError(problem); return; }
+    // El responsable debe trabajar ese día: ni de vacaciones ni después de su cese
+    const away = sessionResponsibleUnavailable(form.responsible, form.date, staff, contracts);
+    if (away) { setError(away); return; }
 
     const base = {
       student: form.student.trim(), studentId: form.studentId || undefined, branchId: form.branchId, program: form.program, level: form.level,
@@ -401,7 +405,10 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
                 <label className={labelCls}>Responsable <span className="text-error">*</span></label>
                 <select className={nativeFieldCls} value={form.responsible} onChange={e => set({ responsible: e.target.value })}>
                   <option value="">{responsibleOptions.length ? 'Seleccionar responsable...' : 'No hay personal asignado a Psicopedagogía'}</option>
-                  {responsibleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {responsibleOptions.map(r => {
+                    const away = form.date ? sessionResponsibleUnavailable(r.value, form.date, staff, contracts) : null;
+                    return <option key={r.value} value={r.value} disabled={!!away && r.value !== form.responsible}>{away ? `${r.label} (no está ese día)` : r.label}</option>;
+                  })}
                 </select>
               </div>
             </div>

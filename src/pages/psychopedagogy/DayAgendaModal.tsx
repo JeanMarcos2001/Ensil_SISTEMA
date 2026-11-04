@@ -39,6 +39,9 @@ interface Props {
   onHistory: (schedule: Schedule) => void;
   onClose: () => void;
   onReserve: (date: string) => void;
+  /** ¿El rol puede hacer esta acción sobre esta asesoría? */
+  canDo: (action: ScheduleAction, schedule: Schedule) => boolean;
+  canReserve: boolean;
   onAction: (action: ScheduleAction, schedule: Schedule) => void;
   onShowActivity: (activityId: string) => void;
 }
@@ -53,7 +56,7 @@ export const ACTION_LABEL: Record<ScheduleAction, string> = {
 
 /** Agenda de un día: actividades especiales y, por horario, los alumnos con sus acciones. */
 export function DayAgendaModal({
-  date, today, schedules, activities, capacity, branchId, branchName, trackings, gateOf, canChangeLate, onHistory, onClose, onReserve, onAction, onShowActivity,
+  date, today, schedules, activities, capacity, branchId, branchName, trackings, gateOf, canChangeLate, onHistory, onClose, onReserve, canDo, canReserve, onAction, onShowActivity,
 }: Props) {
   if (!date) return null;
   const day = schedules.filter(s => s.date === date);
@@ -69,7 +72,7 @@ export function DayAgendaModal({
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cerrar</Button>
-          {date >= today && <Button variant="primary" onClick={() => onReserve(date)}>Reservar asesoría</Button>}
+          {date >= today && canReserve && <Button variant="primary" onClick={() => onReserve(date)}>Reservar asesoría</Button>}
         </div>
       }
     >
@@ -115,7 +118,7 @@ export function DayAgendaModal({
                 const session = trackings.find(t => t.scheduleId === s.id);
                 const now = new Date();
                 const gate = gateOf(s);
-                const actions = availableActions(s, today, now, gate.blocked, canChangeLate);
+                const actions = availableActions(s, today, now, gate.blocked, canChangeLate).filter(a => canDo(a, s));
                 const lockedByNotice = changeBlockedByNotice(s, now) && !gate.blocked;
                 return (
                   <div key={s.id} className="p-3 border border-border-soft rounded-xl space-y-2">

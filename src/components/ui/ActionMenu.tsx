@@ -7,13 +7,18 @@ export interface ActionMenuItem {
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** No se ofrece (p. ej. el rol no tiene la función); distinto de `disabled`, que se muestra apagado. */
+  hidden?: boolean;
+  /** Por qué está apagado (se ve al pasar el cursor). */
+  reason?: string;
 }
 
 interface ActionMenuProps {
   items: ActionMenuItem[];
 }
 
-export function ActionMenu({ items }: ActionMenuProps) {
+export function ActionMenu({ items: allItems }: ActionMenuProps) {
+  const items = allItems.filter(i => !i.hidden);
   const [isOpen, setIsOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -54,9 +59,11 @@ export function ActionMenu({ items }: ActionMenuProps) {
     setIsOpen(!isOpen);
   };
 
+  if (items.length === 0) return null;
+
   return (
     <>
-      <button 
+      <button
         ref={buttonRef}
         onClick={toggleMenu}
         className={`p-1.5 rounded-lg transition-colors ${isOpen ? 'bg-surface-muted text-text-primary' : 'text-text-muted hover:text-text-primary hover:bg-surface-muted'}`}
@@ -84,6 +91,7 @@ export function ActionMenu({ items }: ActionMenuProps) {
                 }
               }}
               disabled={item.disabled}
+              title={item.disabled ? item.reason : undefined}
               className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
                 item.disabled
                   ? 'text-text-muted cursor-not-allowed opacity-50'

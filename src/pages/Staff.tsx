@@ -114,10 +114,12 @@ export function StaffPage() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
-            <UserPlus size={16} />
-            Nuevo trabajador
-          </Button>
+          {can('per-personal:create') && (
+            <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
+              <UserPlus size={16} />
+              Nuevo trabajador
+            </Button>
+          )}
         </div>
       </div>
 
@@ -213,16 +215,16 @@ export function StaffPage() {
                       <ActionMenu 
                         items={[
                           { label: 'Ver detalle', onClick: () => handleOpenDetail(member) },
-                          { label: 'Editar datos', onClick: () => handleOpenForm(member) },
-                          { label: 'Ver contratos', onClick: () => navigate(`/personas/contratos?trabajador=${member.id}`) },
-                          { label: 'Ver asignaciones', onClick: () => navigate(`/personas/asignaciones?trabajador=${member.id}`) },
+                          { label: 'Editar datos', hidden: !can('per-personal:edit'), onClick: () => handleOpenForm(member) },
+                          { label: 'Ver contratos', hidden: !can('per-contratos:view'), onClick: () => navigate(`/personas/contratos?trabajador=${member.id}`) },
+                          { label: 'Ver asignaciones', hidden: !can('per-asignaciones:view'), onClick: () => navigate(`/personas/asignaciones?trabajador=${member.id}`) },
                           account
                             ? { label: `Ver usuario (${account.id})`, onClick: () => navigate(`/organizacion/usuarios?usuario=${account.id}`) }
                             : { label: 'Crear usuario de acceso', onClick: () => navigate(`/organizacion/usuarios?personal=${member.id}`), disabled: !access.ok || !can(PERM.userCreate) },
-                          { label: 'Ver planillas', onClick: () => navigate(`/personas/planilla?trabajador=${member.id}`) },
+                          { label: 'Ver planillas', hidden: !can(PERM.payrollView), onClick: () => navigate(`/personas/planilla?trabajador=${member.id}`) },
                           member.status === 'Activo'
-                            ? { label: 'Inactivar', onClick: () => setToInactivate(member), danger: true }
-                            : { label: 'Reactivar', onClick: () => setToReactivate(member) },
+                            ? { label: 'Inactivar', hidden: !can('per-personal:inactivate'), onClick: () => setToInactivate(member), danger: true }
+                            : { label: 'Reactivar', hidden: !can('per-personal:reactivate'), onClick: () => setToReactivate(member) },
                         ]} 
                       />
                     </td>
@@ -281,10 +283,12 @@ export function StaffPage() {
         footer={
           <div className="flex justify-end gap-3 w-full">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => {
-              setIsDetailOpen(false);
-              handleOpenForm(selectedStaff || undefined);
-            }}>Editar Ficha</Button>
+            {can('per-personal:edit') && (
+              <Button variant="primary" onClick={() => {
+                setIsDetailOpen(false);
+                handleOpenForm(selectedStaff || undefined);
+              }}>Editar Ficha</Button>
+            )}
           </div>
         }
       >
@@ -417,10 +421,12 @@ export function StaffPage() {
                       <label className="text-xs text-text-muted uppercase tracking-wider">Jornada</label>
                       <p className="text-sm font-medium text-text-primary mt-1">{activeContract.shift}</p>
                     </div>
-                    <div>
-                      <label className="text-xs text-text-muted uppercase tracking-wider">Sueldo Neto</label>
-                      <p className="text-sm font-medium text-text-primary mt-1">S/ {activeContract.netSalary?.toLocaleString()}</p>
-                    </div>
+                    {can(PERM.payView) && (
+                      <div>
+                        <label className="text-xs text-text-muted uppercase tracking-wider">Sueldo Neto</label>
+                        <p className="text-sm font-medium text-text-primary mt-1">S/ {activeContract.netSalary?.toLocaleString()}</p>
+                      </div>
+                    )}
                   </div>
                 );
               })()}

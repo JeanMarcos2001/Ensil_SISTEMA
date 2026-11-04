@@ -10,6 +10,7 @@ import { useData, ShippingMethod, Courier, ShipmentItem, Shipment, ShipmentBox, 
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
 import { nextSequentialId } from '../../utils/ids';
+import { centralWarehouse } from '../../utils/logisticsRoutes';
 
 export function Shipments() {
   const { 
@@ -23,7 +24,9 @@ export function Shipments() {
     updateShipmentStatus,
     updateShipment,
     deleteShipment,
-    currentBranchId
+    currentBranchId,
+    can,
+    availabilityOf
   } = useData();
   const [isNewShipmentOpen, setIsNewShipmentOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -138,7 +141,9 @@ export function Shipments() {
     setBoxes(boxes.map(b => b.id === boxId ? { ...b, observation } : b));
   };
 
-  const originId = currentBranchId === 'all' ? 'FIL-PIU' : currentBranchId;
+  // Los envíos salen siempre del almacén central de la empresa (se define en Organización → Filiales)
+  const warehouse = centralWarehouse(branches);
+  const originId = warehouse?.id ?? '';
 
   const validateForm = () => {
     setFormError(null);
@@ -305,6 +310,10 @@ export function Shipments() {
     setAttachments([]);
     setFormError(null);
   };
+
+  const destinationBranch = branches.find(b => b.id === destinationId);
+  const dispatchAvailability = destinationBranch ? availabilityOf('log-envios:dispatch', { branchId: destinationBranch.id, branchName: destinationBranch.name }) : null;
+  const canSaveDraft = can(selectedShipment ? 'log-envios:edit' : 'log-envios:create');
 
   const handleManualEnable = (shipment: Shipment) => {
     let description = '¿Estás seguro de que deseas habilitar la recepción manualmente?';
@@ -482,14 +491,16 @@ export function Shipments() {
           <p className="text-sm text-text-secondary">Gestión de envíos desde Sede Central hacia filiales</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => {
-            setSelectedShipment(null);
-            resetForm();
-            setIsNewShipmentOpen(true);
-          }}>
-            <Plus size={16} />
-            Crear envío
-          </Button>
+          {can('log-envios:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => {
+              setSelectedShipment(null);
+              resetForm();
+              setIsNewShipmentOpen(true);
+            }}>
+              <Plus size={16} />
+              Crear envío
+            </Button>
+          )}
         </div>
       </div>
 
@@ -575,7 +586,7 @@ export function Shipments() {
                         items={[
                           { label: 'Ver detalles', onClick: () => handleOpenDetail(shipment) },
                           ...(shipment.status === 'Borrador' ? [
-                            { label: 'Continuar editando', onClick: () => {
+                            { label: 'Continuar editando', hidden: !can('log-envios:edit'), onClick: () => {
                               setSelectedShipment(shipment);
                               setDestinationId(shipment.destinationId);
                               setEta(shipment.eta || '');
@@ -592,7 +603,7 @@ export function Shipments() {
                               setAttachments([]);
                               setIsNewShipmentOpen(true);
                             } },
-                            { label: 'Eliminar borrador', danger: true, onClick: () => {
+                            { label: 'Eliminar borrador', danger: true, hidden: !can('log-envios:delete'), onClick: () => {
                               openConfirm({
                                 title: 'Eliminar borrador',
                                 description: 'Eliminarás todo tu avance en el formulario. ¿Deseas continuar?',
@@ -603,8 +614,8 @@ export function Shipments() {
                             }}
                           ] : []),
                           ...(shipment.status === 'En tránsito' ? [
-                            { label: 'Habilitar recepción manual', onClick: () => handleManualEnable(shipment) },
-                            { label: 'Cancelar Envío', onClick: () => {
+                            { label: 'Habilitar recepción manual', hidden: !can('log-envios:edit'), onClick: () => handleManualEnable(shipment) },
+                            { label: 'Cancelar Envío', hidden: !can('log-envios:dispatch'), onClick: () => {
                               openConfirm({
                                 title: 'Cancelar Envío',
                                 description: '¿Estás seguro de que deseas cancelar este envío?',
@@ -681,8 +692,8 @@ export function Shipments() {
             )}
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => setIsNewShipmentOpen(false)}>Cancelar</Button>
-              <Button variant="secondary" onClick={() => handleSaveShipment('Borrador')}>Guardar Borrador</Button>
-              <Button variant="primary" onClick={handleOpenSummary}>Siguiente</Button>
+              {canSaveDraft && <Button variant="secondary" onClick={() => handleSaveShipment('Borrador')}>Guardar Borrador</Button>}
+              {can('log-envios:dispatch') && <Button variant="primary" onClick={handleOpenSummary}>Siguiente</Button>}
             </div>
           </div>
         }
@@ -715,7 +726,7 @@ export function Shipments() {
                     onChange={(e) => setDestinationId(e.target.value)}
                   >
                     <option value="">Seleccionar filial destino</option>
-                    {branches.filter(b => b.id !== '1').map(b => (
+                    {branches.filter(b => b.status === 'Activo' && b.id !== originId).map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -891,11 +902,19 @@ export function Shipments() {
         title="Resumen del Envío"
         size="lg"
         footer={
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => { setIsSummaryOpen(false); setIsNewShipmentOpen(true); }}>Volver a editar</Button>
-            <Button variant="primary" onClick={handleConfirmProperly}>
-              {selectedShipment?.status === 'Borrador' ? 'Finalizar Despacho' : 'Confirmar Envío'}
-            </Button>
+          <div className="flex flex-col items-end gap-2 w-full">
+            {dispatchAvailability && !dispatchAvailability.available && (
+              <p className="self-start text-sm text-danger-text">{dispatchAvailability.reason}</p>
+            )}
+            {dispatchAvailability?.advisories.map(a => (
+              <p key={a} className="self-start text-xs text-warning-text">{a}</p>
+            ))}
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => { setIsSummaryOpen(false); setIsNewShipmentOpen(true); }}>Volver a editar</Button>
+              <Button variant="primary" onClick={handleConfirmProperly} disabled={!can('log-envios:dispatch') || dispatchAvailability?.available === false}>
+                {selectedShipment?.status === 'Borrador' ? 'Finalizar Despacho' : 'Confirmar Envío'}
+              </Button>
+            </div>
           </div>
         }
       >
@@ -903,7 +922,7 @@ export function Shipments() {
           <div className="bg-surface-muted p-4 rounded-xl border border-border-soft grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-text-secondary block mb-1">Origen:</span>
-              <span className="font-medium text-text-primary">Sede Central / Almacén Central</span>
+              <span className="font-medium text-text-primary">{warehouse?.name ?? 'Almacén central'} (almacén central)</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Destino:</span>
@@ -986,7 +1005,7 @@ export function Shipments() {
                 <div className="space-y-2">
                   <div>
                     <span className="text-xs text-text-muted block">Origen</span>
-                    <span className="text-sm font-medium text-text-primary">Sede Central / Almacén Central</span>
+                    <span className="text-sm font-medium text-text-primary">{branches.find(b => b.id === selectedShipment.originId)?.name ?? 'Almacén central'} (almacén central)</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">Destino</span>

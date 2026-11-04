@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { MODULE_DATA } from '../src/config/modules';
 import { PERM } from '../src/utils/authority';
 import {
-  ALL_CAPABILITIES, availability, buildHolders, capabilityById, connectionsOf, eventById, holdersWith, menuCapabilities, permissionCatalog,
+  ALL_CAPABILITIES, availability, buildHolders, capabilityById, connectionsOf, eventById, holdersWith, isKnownCapability, menuCapabilities, permissionCatalog,
   removalBlockers, requiredBy, roleClosure, roleWarnings, toggleCapability,
 } from '../src/utils/capabilities';
 import {
@@ -37,11 +37,16 @@ check('Cada función tiene nombre y tipo', ALL_CAPABILITIES.every(c => c.label.t
 check('Todo lo que una función requiere existe', ALL_CAPABILITIES.every(c => c.requires.every(r => idSet.has(r))), list(ALL_CAPABILITIES.flatMap(c => c.requires.filter(r => !idSet.has(r)).map(r => `${c.id}→${r}`))));
 check('Ninguna función se requiere a sí misma (ni en ciclo)', ALL_CAPABILITIES.every(c => !requiredBy(c.id).includes(c.id)), list(ALL_CAPABILITIES.filter(c => requiredBy(c.id).includes(c.id)).map(c => c.id)));
 check('Ninguna función requiere una reservada', ALL_CAPABILITIES.every(c => c.requires.every(r => !capabilityById(r)?.reserved)));
-check('Toda contraparte existe y no es la misma función', ALL_CAPABILITIES.every(c => !c.counterpart || (idSet.has(c.counterpart.capability) && c.counterpart.capability !== c.id)));
-check('Toda contraparte explica por qué', ALL_CAPABILITIES.every(c => !c.counterpart || c.counterpart.why.trim().length > 10));
+check('Toda contraparte existe y no es la misma función', ALL_CAPABILITIES.every(c => c.counterparts.every(x => idSet.has(x.capability) && x.capability !== c.id)));
+check('Toda contraparte explica por qué', ALL_CAPABILITIES.every(c => c.counterparts.every(x => x.why.trim().length > 10)));
+check('Ninguna función repite la misma contraparte', ALL_CAPABILITIES.every(c => new Set(c.counterparts.map(x => x.capability)).size === c.counterparts.length));
 check('Los datos que lee y escribe cada función existen', ALL_CAPABILITIES.every(c => [...c.reads, ...c.writes].every(e => e in ENTITIES)), list(ALL_CAPABILITIES.flatMap(c => [...c.reads, ...c.writes].filter(e => !(e in ENTITIES)).map(e => `${c.id}:${e}`))));
 check('Los avisos que dispara cada función existen', ALL_CAPABILITIES.every(c => c.emits.every(e => !!eventById(e))));
-check('Todo aviso tiene destinatario y respaldo que existen', EVENTS.every(e => ('person' in e.recipients || idSet.has(e.recipients.capability)) && idSet.has(e.fallback)), list(EVENTS.filter(e => !('person' in e.recipients) && !idSet.has(e.recipients.capability)).map(e => e.id)));
+const recipientCaps = (e: (typeof EVENTS)[number]) => e.recipients.flatMap(r => ('capability' in r ? [r.capability] : []));
+check('Todo aviso tiene al menos un destinatario', EVENTS.every(e => e.recipients.length > 0));
+check('Todo aviso tiene destinatarios y respaldo que existen', EVENTS.every(e => recipientCaps(e).every(c => idSet.has(c)) && idSet.has(e.fallback)), list(EVENTS.filter(e => !recipientCaps(e).every(c => idSet.has(c))).map(e => e.id)));
+check('Un aviso que llega a una sede dice a cuál (origen, destino o la del alumno) o a todas', EVENTS.every(e => e.recipients.every(r => 'person' in r || ['destination-branch', 'origin-branch', 'subject-branch', 'any'].includes(r.where))));
+check('Todo aviso de control llega a la supervisión', ['payment_reversed', 'cash_movement_reversed', 'cash_reopened', 'reception_with_differences', 'installment_refinanced', 'role_permissions_changed'].every(id => eventById(id)!.recipients.some(r => 'capability' in r && r.capability === 'sis-avisos:supervise')));
 check('Los avisos no se repiten', new Set(EVENTS.map(e => e.id)).size === EVENTS.length);
 check('Todo aviso de acción lo dispara alguna función', EVENTS.filter(e => e.trigger === 'accion').every(e => ALL_CAPABILITIES.some(c => c.emits.includes(e.id))), list(EVENTS.filter(e => e.trigger === 'accion' && !ALL_CAPABILITIES.some(c => c.emits.includes(e.id))).map(e => e.id)));
 check('Las combinaciones incompatibles usan funciones que existen', INCOMPATIBILITIES.every(r => r.capabilities.length >= 2 && r.capabilities.every(c => idSet.has(c))));
@@ -98,12 +103,12 @@ const LEGACY_67 = [
   'op-caja-chica:view', 'op-caja-chica:reverse_movement', 'op-caja-chica:count', 'op-caja-chica:config',
   'op-cobranza:view', 'op-cobranza:remind', 'op-cobranza:charge_mora', 'op-cobranza:config',
   'log-transfer:req_transfer', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive',
-  'per-planilla:view', 'per-planilla:generate', 'per-planilla:adjust', 'per-planilla:close', 'per-planilla:pay', 'per-planilla:reopen',
+  'per-planilla:view', 'per-planilla:generate', 'per-planilla:adjust', 'per-planilla:close', 'per-planilla:reopen',
   'psi-prog:view', 'psi-prog:create', 'psi-prog:reg_tracking', 'psi-prog:export_schedule', 'psi-prog:activity_lead', 'psi-prog:activity_attendance', 'psi-prog:institutional_change',
   'psi-recordatorios:view', 'psi-recordatorios:remind', 'psi-recordatorios:config',
   'rep-general:view', 'rep-general:export', 'rep-general:save_views',
 ];
-check('Los 67 permisos del catálogo anterior siguen existiendo con el mismo identificador', LEGACY_67.length === 67 && LEGACY_67.every(p => idSet.has(p)), list(LEGACY_67.filter(p => !idSet.has(p))));
+check('Los 66 permisos del catálogo anterior que siguen vigentes conservan su identificador (se retiró «pagar la planilla»: el sistema no registra pagos al personal)', LEGACY_67.length === 66 && LEGACY_67.every(p => idSet.has(p)), list(LEGACY_67.filter(p => !idSet.has(p))));
 
 // Ningún permiso escrito a mano en el código apunta a algo que no existe
 const SRC_DIR = join(ROOT, 'src');
@@ -132,7 +137,7 @@ check('Cada módulo del catálogo tiene funcionalidades', catalog.every(m => m.f
 // ------------------------------------------------------------------------------------------------------------------ Reglas de roles
 const closure = roleClosure(['log-envios:dispatch']);
 check('Marcar «Realizar el envío» marca solas «Ver envíos» y «Ver el stock»', closure.added.includes('log-envios:view') && closure.added.includes('log-stock:view') && closure.all.length === 3, list(closure.added));
-check('El cierre es transitivo (la planilla arrastra las remuneraciones)', roleClosure(['per-planilla:pay']).all.includes('per-remuneracion:view'));
+check('El cierre es transitivo (la planilla arrastra las remuneraciones)', roleClosure(['per-planilla:close']).all.includes('per-remuneracion:view'));
 check('El cierre conserva permisos desconocidos y no repite', roleClosure(['x-y:z', 'op-caja:view', 'op-caja:view']).all.filter(x => x === 'op-caja:view').length === 1 && roleClosure(['x-y:z']).all.includes('x-y:z'));
 check('No se puede quitar «Ver el stock» mientras «Realizar el envío» lo necesite', removalBlockers('log-stock:view', closure.all).includes('log-envios:dispatch'));
 check('Sí se puede quitar lo que nadie necesita', removalBlockers('log-envios:dispatch', closure.all).length === 0);
@@ -181,17 +186,35 @@ check('Una función sin contraparte siempre se ofrece', availability('op-caja:vi
 check('Sin sede destino no se puede juzgar y se ofrece', availability('log-envios:dispatch', []).available);
 
 const advisory = availability('op-matriculas:create', buildHolders({ users: [user('U6', 'Secretaria', 'Rol apagado', 'Piura')], roles, permissions, branches }), target('SED-002'));
-check('Una contraparte recomendada avisa pero no bloquea', advisory.available && /entregue|Nadie tiene/.test(advisory.advisory ?? ''), JSON.stringify(advisory));
-check('Con quien entregue materiales en la sede ya no avisa', availability('op-matriculas:create', piura, target('SED-002')).advisory === undefined);
+check('Las contrapartes recomendadas avisan pero no bloquean (matrícula sin quien verifique ni agende)', advisory.available && advisory.advisories.length === 2 && /entregue/.test(advisory.advisories[0]) && /agende/.test(advisory.advisories[1]), JSON.stringify(advisory));
+check('Con quien entregue materiales en la sede, solo falta quien agende', availability('op-matriculas:create', piura, target('SED-002')).advisories.length === 1);
+const fullyCovered = buildHolders({ users: [user('U8', 'Admin completo', 'Administrador de sede', 'Piura')], roles, permissions: [{ roleId: 'R-ADM', permissions: ['op-verificacion:deliver', 'psi-prog:create'] }, ...permissions.filter(x => x.roleId !== 'R-ADM')], branches });
+check('Con verificación y agenda cubiertas en la sede no avisa nada', availability('op-matriculas:create', fullyCovered, target('SED-002')).advisories.length === 0);
+check('Cobrar sin nadie que cierre la caja en la sede avisa', availability('op-pagos:register', [], target('SED-002')).advisories.length === 1);
+check('Armar la planilla sin quien la cierre avisa (contraparte de alcance general)', availability('per-planilla:generate', []).advisories.length === 1 && availability('per-planilla:generate', []).available);
+check('Una función con dos contrapartes obligatorias o recomendadas las reporta todas', availability('op-matriculas:create', [], target('SED-001')).advisories.length === 2);
 check('`holdersWith` filtra por sede', holdersWith('log-recepciones:confirm', piura, 'SED-002').length === 1 && holdersWith('log-recepciones:confirm', piura, 'SED-001').length === 0);
 
 // ------------------------------------------------------------------------------------------------------------------ Mapa de conexiones
 const conn = connectionsOf('log-envios:dispatch')!;
 check('El mapa de «Realizar el envío» muestra lo que necesita', conn.requires.map(c => c.id).sort().join() === 'log-envios:view,log-stock:view');
-check('El mapa muestra su contraparte, lo que lee y escribe y el aviso', conn.counterpart?.capability.id === 'log-recepciones:confirm' && conn.reads.includes('Stock') && conn.writes.includes('Kardex') && conn.events.some(e => e.id === 'shipment_dispatched'));
+check('El mapa muestra su contraparte, lo que lee y escribe y el aviso', conn.counterparts.some(x => x.capability.id === 'log-recepciones:confirm' && x.strength === 'required') && conn.reads.includes('Stock') && conn.writes.includes('Kardex') && conn.events.some(e => e.id === 'shipment_dispatched'));
 check('El mapa de «Confirmar la recepción» sabe que es la contraparte del envío y que recibe el aviso', connectionsOf('log-recepciones:confirm')!.counterpartOf.some(c => c.id === 'log-envios:dispatch') && connectionsOf('log-recepciones:confirm')!.receives.some(e => e.id === 'shipment_dispatched'));
 check('«Ver el stock» sabe quién lo necesita', connectionsOf('log-stock:view')!.neededBy.some(c => c.id === 'log-envios:dispatch'));
 check('Una función desconocida no tiene mapa', connectionsOf('no:existe') === undefined);
+
+// ------------------------------------------------------------------------------------------------------------------ Revisión de contrapartes, avisos y combinaciones
+check('Aprobar una solicitud exige poder ver la bandeja donde se resuelve', ['approve_drop', 'approve_reactivation', 'approve_program_change', 'approve_transfer'].every(a => roleClosure([`op-matriculas:${a}`]).all.includes('sis-solicitudes:view')));
+check('Crear un usuario exige ver al personal (la cuenta nace de la ficha)', roleClosure(['org-usuarios:create']).all.includes('per-personal:view'));
+check('Despachar y recibir en un mismo rol se advierte', roleWarnings(['log-envios:dispatch', 'log-recepciones:confirm']).some(r => r.id === 'despachar-recibir'));
+check('Ya no existe la función de pagar la planilla ni las combinaciones que la nombraban (el sistema no registra pagos al personal)', !isKnownCapability('per-planilla:pay') && !INCOMPATIBILITIES.some(r => r.capabilities.includes('per-planilla:pay')));
+check('Crear ficha, cuenta y rol a la vez se advierte', roleWarnings(['per-personal:create', 'org-usuarios:create', 'org-usuarios:assign_role']).some(r => r.id === 'ficha-cuenta-rol'));
+check('Cobrar y emitir notas de crédito se advierte', roleWarnings(['op-pagos:register', 'op-pagos:credit_note']).some(r => r.id === 'cobrar-nota-credito'));
+check('Un administrador de sede típico (cobra, cierra, matricula) no recibe ninguna advertencia', roleWarnings(['op-matriculas:create', 'op-pagos:register', 'op-caja:close_box', 'op-verificacion:deliver', 'psi-prog:create', 'log-recepciones:confirm', 'op-matriculas:req_drop']).length === 0);
+check('El almacenero típico (despacha, ajusta, prepara) no recibe advertencia', roleWarnings(['log-envios:create', 'log-envios:dispatch', 'log-ajustes:create', 'log-stock:entry', 'log-stock:edit_min']).length === 0);
+check('Hay al menos una combinación por área (dinero, solicitudes, mercadería, personal, accesos)', ['cobrar-reversar-cerrar', 'pedir-aprobar-caida', 'despachar-recibir', 'ficha-cuenta-rol', 'roles-asignar'].every(id => INCOMPATIBILITIES.some(r => r.id === id)));
+check('Los avisos nuevos existen y cada uno lo dispara alguna función', ['shipment_cancelled', 'shipment_received', 'transfer_requested', 'transfer_decided', 'transfer_received', 'role_permissions_changed'].every(id => !!eventById(id) && ALL_CAPABILITIES.some(c => c.emits.includes(id))));
+check('La supervisión y el respaldo son funciones distintas', capabilityById('sis-avisos:supervise')!.id !== capabilityById('sis-avisos:fallback')!.id);
 
 // ------------------------------------------------------------------------------------------------------------------ Resumen
 const sensitive = ALL_CAPABILITIES.filter(c => c.sensitive).length;

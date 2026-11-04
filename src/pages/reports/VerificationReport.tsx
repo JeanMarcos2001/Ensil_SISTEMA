@@ -26,7 +26,7 @@ export function VerificationReport() {
     () => verificationReport({ enrollments, recipes, items, branches, gates: pendingFirstSessions(), today }, { range, branchId, program }),
     [enrollments, recipes, items, branches, pendingFirstSessions, today, range, branchId, program]
   );
-  if (!can(PERM.reportView)) return <NoAccess />;
+  if (!can(PERM.reportVerification)) return <NoAccess />;
 
   const { kpis } = report;
   const all = [...report.pendingRows, ...report.incompleteRows];

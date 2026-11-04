@@ -6,6 +6,7 @@ import { ActionMenu } from '../components/ui/ActionMenu';
 import { Search, Bookmark, X } from 'lucide-react';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { useData } from '../context/DataContext';
+import { PERM } from '../utils/authority';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { longDayLabel, todayLocalISO } from '../utils/schedule';
@@ -56,7 +57,7 @@ function readSavedView(): SavedView | null {
 }
 
 export function Enrollments() {
-  const { enrollments, students, branches, programs, schedules, dropRequests, changeRequests, enableExtension, setIsEnrollmentWizardOpen, plans } = useData();
+  const { enrollments, students, branches, programs, schedules, dropRequests, changeRequests, enableExtension, setIsEnrollmentWizardOpen, plans, can } = useData();
   const today = todayLocalISO();
   const [searchParams, setSearchParams] = useSearchParams();
   const vigenciaFilter = (searchParams.get('vigencia') ?? '') as ValidityState | '';
@@ -169,7 +170,7 @@ export function Enrollments() {
             <Bookmark size={16} />
             Guardar vista
           </Button>
-          <Button variant="primary" onClick={() => setIsEnrollmentWizardOpen(true)}>Nueva matrícula</Button>
+          {can('op-matriculas:create') && <Button variant="primary" onClick={() => setIsEnrollmentWizardOpen(true)}>Nueva matrícula</Button>}
         </div>
       </div>
 
@@ -324,18 +325,18 @@ export function Enrollments() {
                         { label: 'Ver detalle', onClick: () => handleOpenDetail(row.id) },
                         ...(() => {
                           const v = validityOf(row);
-                          return v && canEnableExtension(v)
+                          return v && canEnableExtension(v) && can('op-matriculas:extend')
                             ? [{ label: 'Habilitar extensión', onClick: () => { setExtendError(null); setToExtend({ id: row.id, student: row.student, validity: v }); } }]
                             : [];
                         })(),
-                        ...(row.status === 'Activa' ? [{ label: 'Corregir datos', onClick: () => setEditFor(row.id) }] : []),
+                        ...(row.status === 'Activa' && can(PERM.correctData) ? [{ label: 'Corregir datos', onClick: () => setEditFor(row.id) }] : []),
                         { label: 'Ver plan', onClick: () => navigate(`/operacion/planes-y-cartera?plan=${plans.find(p => p.mat === row.id)?.id ?? ''}`) },
-                        { label: 'Contrato y ficha', onClick: () => { setFichaTab('documentos'); setFichaId(row.id); } },
+                        { label: 'Contrato y ficha', hidden: !can(PERM.documents), onClick: () => { setFichaTab('documentos'); setFichaId(row.id); } },
                         ...lifecycle.items(row),
                         ...(row.status === 'Activa'
                           ? [dropRequests.some(r => r.enrollmentId === row.id && r.status === 'Pendiente')
-                            ? { label: 'Resolver caída solicitada', onClick: () => setFichaId(row.id), danger: true }
-                            : { label: 'Solicitar caída', onClick: () => setDropFor(row.id), danger: true }]
+                            ? { label: 'Resolver caída solicitada', onClick: () => setFichaId(row.id), danger: true, hidden: !can(PERM.dropApprove) }
+                            : { label: 'Solicitar caída', onClick: () => setDropFor(row.id), danger: true, hidden: !can(PERM.dropRequest) }]
                           : []),
                       ]} 
                     />

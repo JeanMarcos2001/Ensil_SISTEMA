@@ -8,7 +8,7 @@ import { useData, Adjustment } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 
 export function Adjustments() {
-  const { adjustments, stockItems, items, branches, addAdjustment } = useData();
+  const { adjustments, stockItems, items, branches, addAdjustment, can } = useData();
   const [isNewAdjustmentOpen, setIsNewAdjustmentOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedAdjustment, setSelectedAdjustment] = useState<Adjustment | null>(null);
@@ -115,10 +115,12 @@ export function Adjustments() {
           <p className="text-sm text-text-secondary">Regularización de inventario por diferencias, pérdidas o deterioro</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewAdjustmentOpen(true)}>
-            <Plus size={16} />
-            Nueva regularización
-          </Button>
+          {can('log-ajustes:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewAdjustmentOpen(true)}>
+              <Plus size={16} />
+              Nueva regularización
+            </Button>
+          )}
         </div>
       </div>
 

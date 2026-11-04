@@ -4,7 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { DateInput } from '../../components/ui/DateInput';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Contract } from '../../context/DataContext';
-import { todayLocalISO } from '../../utils/schedule';
+import { allActivities, todayLocalISO } from '../../utils/schedule';
 import {
   AFP_FUNDS,
   CONTRACT_TYPES,
@@ -40,7 +40,7 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
  * Al editar, el trabajador no se cambia, se pide el motivo y queda la constancia de lo que cambió.
  */
 export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
-  const { staff, contracts, addContract, editContract } = useData();
+  const { staff, contracts, schedules, monthlySchedules, addContract, editContract } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<ContractForm>(emptyContractForm());
   const [submitted, setSubmitted] = useState(false);
@@ -56,7 +56,8 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
   }, [isOpen, editing]);
 
   const member = staff.find(s => s.id === form.staffId);
-  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id), [form, contracts, staff, today, editing?.id]);
+  const agenda = useMemo(() => ({ schedules, activities: allActivities(monthlySchedules) }), [schedules, monthlySchedules]);
+  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id, agenda), [form, contracts, staff, today, editing?.id, agenda]);
   const changes = useMemo(
     () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {})) : []),
     [editing, errors, form, member]

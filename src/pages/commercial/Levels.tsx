@@ -10,7 +10,7 @@ import { useData, Level } from '../../context/DataContext';
 import { Search, Plus, Layers, BookOpen, AlertCircle } from 'lucide-react';
 
 export function Levels() {
-  const { levels, programs, addLevel, updateLevel, deleteLevel } = useData();
+  const { levels, programs, addLevel, updateLevel, deleteLevel, can } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState<Level | null>(null);
@@ -164,10 +164,12 @@ export function Levels() {
           <p className="text-sm text-text-secondary">Estructura interna por programa</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Nivel
-          </Button>
+          {can('com-niveles:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Nivel
+            </Button>
+          )}
         </div>
       </div>
 
@@ -251,9 +253,9 @@ export function Levels() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenForm(row, true) },
-                        { label: 'Editar nivel', onClick: () => handleOpenForm(row) },
+                        { label: 'Editar nivel', hidden: !can('com-niveles:edit'), onClick: () => handleOpenForm(row) },
                         { 
-                          label: 'Duplicar', 
+                          label: 'Duplicar', hidden: !can('com-niveles:create'), 
                           onClick: () => openConfirm({
                             title: 'Duplicar Nivel',
                             description: `¿Está seguro de que desea duplicar el nivel "${row.name}"?`,
@@ -263,7 +265,7 @@ export function Levels() {
                           }) 
                         },
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-niveles:edit'), 
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Nivel' : 'Activar Nivel',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el nivel "${row.name}"?`,
@@ -274,7 +276,7 @@ export function Levels() {
                           danger: row.status === 'Activo' 
                         },
                         { 
-                          label: 'Eliminar', 
+                          label: 'Eliminar', hidden: !can('com-niveles:delete'), 
                           onClick: () => openConfirm({
                             title: 'Eliminar Nivel',
                             description: `¿Está seguro de que desea eliminar el nivel "${row.name}"? Esta acción no se puede deshacer.`,

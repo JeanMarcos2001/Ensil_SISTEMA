@@ -15,7 +15,7 @@ import { useData } from '../../context/DataContext';
 import { Branch } from '../../context/DataContext';
 
 export function Branches() {
-  const { branches, staff, companies, addBranch, updateBranch } = useData();
+  const { branches, staff, companies, addBranch, updateBranch, can } = useData();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
@@ -62,6 +62,7 @@ export function Branches() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [reasonForChange, setReasonForChange] = useState('');
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (selectedBranch) {
@@ -73,6 +74,7 @@ export function Branches() {
         name: '',
         company: '',
         status: 'Activo',
+        isWarehouse: false,
         address: '',
         reference: '',
         department: '',
@@ -115,10 +117,10 @@ export function Branches() {
 
   const handleSubmit = () => {
     if (validateForm()) {
-      if (selectedBranch) {
-        updateBranch(selectedBranch.id, { ...formData });
-      } else {
-        addBranch(formData as Branch);
+      const result = selectedBranch ? updateBranch(selectedBranch.id, { ...formData }) : addBranch(formData as Branch);
+      if (!result.ok) {
+        setErrors({ isWarehouse: result.error ?? 'No se pudo guardar la filial.' });
+        return;
       }
       setIsFormOpen(false);
     }
@@ -136,12 +138,18 @@ export function Branches() {
 
   const handleDeactivateClick = (branch: Branch) => {
     setSelectedBranch(branch);
+    setDeactivateError(null);
     setIsDeactivateModalOpen(true);
   };
 
   const confirmDeactivation = () => {
     if (selectedBranch) {
-      updateBranch(selectedBranch.id, { status: 'Inactivo' });
+      const result = updateBranch(selectedBranch.id, { status: 'Inactivo' });
+      if (!result.ok) {
+        setDeactivateError(result.error ?? 'No se pudo inactivar la filial.');
+        return;
+      }
+      setDeactivateError(null);
       setIsDeactivateModalOpen(false);
     }
   };
@@ -164,10 +172,12 @@ export function Branches() {
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Filiales</h2>
           <p className="text-sm text-text-secondary">Gestión de sedes operativas y puntos de atención</p>
         </div>
-        <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-          <Plus size={16} />
-          Nueva Filial
-        </Button>
+        {can('org-filiales:create') && (
+          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+            <Plus size={16} />
+            Nueva Filial
+          </Button>
+        )}
       </div>
 
       {/* Main Content Card (Filters + Table + Pagination) */}
@@ -218,7 +228,10 @@ export function Branches() {
                   <td className="px-6 py-3 font-mono text-xs text-text-secondary">{branch.id}</td>
                   <td className="px-6 py-3">
                     <div className="flex flex-col">
-                      <span className="font-medium text-text-primary">{branch.name}</span>
+                      <span className="font-medium text-text-primary flex items-center gap-2">
+                        {branch.name}
+                        {branch.isWarehouse && <Badge variant="info">Almacén central</Badge>}
+                      </span>
                       <span className="text-xs text-text-muted">{branch.address}</span>
                     </div>
                   </td>
@@ -238,8 +251,8 @@ export function Branches() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(branch) },
-                        { label: 'Editar filial', onClick: () => handleOpenForm(branch) },
-                        { label: 'Desactivar', onClick: () => handleDeactivateClick(branch), danger: true },
+                        { label: 'Editar filial', hidden: !can('org-filiales:edit'), onClick: () => handleOpenForm(branch) },
+                        { label: 'Desactivar', hidden: !can('org-filiales:edit'), onClick: () => handleDeactivateClick(branch), danger: true },
                       ]} 
                     />
                   </td>
@@ -343,6 +356,22 @@ export function Branches() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 error={errors.name}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={!!formData.isWarehouse}
+                  onChange={(e) => setFormData({ ...formData, isWarehouse: e.target.checked })}
+                />
+                <span className="text-sm text-text-primary">
+                  Es el almacén central de la empresa
+                  <span className="block text-xs text-text-muted">Solo puede haber uno. De él salen los envíos a todas las filiales y en él termina lo que se devuelve; entre filiales todo pasa por el almacén.</span>
+                </span>
+              </label>
+              {errors.isWarehouse && <p className="text-xs text-danger-text">{errors.isWarehouse}</p>}
             </div>
           </section>
 
@@ -518,9 +547,11 @@ export function Branches() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsDetailOpen(false)}>Cerrar</Button>
-            <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenForm(selectedBranch!); }}>
-              Editar Filial
-            </Button>
+            {can('org-filiales:edit') && (
+              <Button variant="primary" onClick={() => { setIsDetailOpen(false); handleOpenForm(selectedBranch!); }}>
+                Editar Filial
+              </Button>
+            )}
           </div>
         }
       >
@@ -611,6 +642,8 @@ export function Branches() {
             </div>
           </div>
           
+          {deactivateError && <p className="text-sm font-medium text-danger-text">{deactivateError}</p>}
+
           <ul className="space-y-2 text-sm text-text-secondary pl-4">
             <li className="flex items-start gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-text-muted mt-1.5 shrink-0" />

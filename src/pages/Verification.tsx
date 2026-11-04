@@ -8,6 +8,7 @@ import { Search, CheckCircle, Package, AlertCircle, ArrowRight, Layers, ShieldAl
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { useData, Enrollment, Recipe } from '../context/DataContext';
+import { PERM } from '../utils/authority';
 import { availableStock } from '../utils/inventory';
 import { longDayLabel, to12h, todayLocalISO } from '../utils/schedule';
 import { firstSessionOf } from '../utils/validity';
@@ -38,7 +39,7 @@ interface PendingConfirm {
 }
 
 export function Verification() {
-  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, schedules, updateStock, updateEnrollmentVerification, pendingFirstSessions } = useData();
+  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, schedules, updateEnrollmentVerification, pendingFirstSessions, can } = useData();
   const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<Enrollment | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<Recipe | null>(null);
@@ -131,25 +132,19 @@ export function Verification() {
   /** Confirmada la entrega: descuenta el stock de la sede y deja la matrícula verificada. */
   const applyVerification = () => {
     if (!selectedEnrollment || !verification || !verifierStaff || !confirm) return;
-    const branchId = selectedEnrollment.branchId || '';
-    confirm.deductions.forEach(d => {
-      updateStock(
-        branchId,
-        d.itemId,
-        -d.quantity,
-        'Entrega por Verificación',
-        `Entrega a alumno ${selectedEnrollment.student} (Matrícula: ${selectedEnrollment.id})`,
-        selectedEnrollment.id
-      );
-    });
-
-    updateEnrollmentVerification(selectedEnrollment.id, {
+    // La acción comprueba el stock de todas las líneas y descuenta solo si alcanza para todas
+    const result = updateEnrollmentVerification(selectedEnrollment.id, {
       status: verification.status,
       items: verification.deliveredIds,
       observation,
       date: verificationDate,
       verifier: `${verifierStaff.names} ${verifierStaff.lastNameP} ${verifierStaff.lastNameM}`.trim(),
-    });
+    }, confirm.deductions.map(d => ({ itemId: d.itemId, quantity: d.quantity })));
+    if (!result.ok) {
+      setConfirm(null);
+      setFormError(result.error ?? 'No se pudo registrar la entrega de materiales.');
+      return;
+    }
 
     setConfirm(null);
     setIsVerifyOpen(false);
@@ -341,10 +336,12 @@ export function Verification() {
                     </Badge>
                   </td>
                   <td className="px-6 py-3 text-right">
-                    <Button variant="primary" className="text-xs py-1.5 px-3 flex items-center gap-2 ml-auto" onClick={() => handleOpenVerify(row)}>
-                      <span>Verificar</span>
-                      <ArrowRight size={14} />
-                    </Button>
+                    {can(PERM.deliverMaterials) && (
+                      <Button variant="primary" className="text-xs py-1.5 px-3 flex items-center gap-2 ml-auto" onClick={() => handleOpenVerify(row)}>
+                        <span>Verificar</span>
+                        <ArrowRight size={14} />
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -16,7 +16,7 @@ import { STUDENT_STATUSES, ageText, holderNameOfStudent, studentAge, studentStat
 import { formatDisplayDate } from '../utils/tariffs';
 
 export function Students() {
-  const { students, guardians, enrollments, schedules, trackings, branches } = useData();
+  const { students, guardians, enrollments, schedules, trackings, branches, can } = useData();
   const today = todayLocalISO();
   const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -95,10 +95,12 @@ export function Students() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
-            <Plus size={16} />
-            Nuevo alumno
-          </Button>
+          {can('per-alumnos:create') && (
+            <Button variant="primary" onClick={() => handleOpenForm()} className="flex items-center gap-2">
+              <Plus size={16} />
+              Nuevo alumno
+            </Button>
+          )}
         </div>
       </div>
 
@@ -173,7 +175,7 @@ export function Students() {
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
                         { label: 'Ver matrículas', onClick: () => navigate(`/operacion/matriculas?alumno=${row.id}`) },
-                        { label: 'Editar datos', onClick: () => handleOpenForm(row) },
+                        { label: 'Editar datos', hidden: !can('per-alumnos:edit'), onClick: () => handleOpenForm(row) },
                       ]} 
                     />
                   </td>
@@ -248,7 +250,7 @@ export function Students() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => handleOpenForm(selectedStudent)}>Editar Ficha</Button>
+                {can('per-alumnos:edit') && <Button variant="secondary" onClick={() => handleOpenForm(selectedStudent)}>Editar Ficha</Button>}
               </div>
             </div>
 

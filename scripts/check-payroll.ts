@@ -8,7 +8,7 @@ import {
 } from '../src/utils/payrollEngine';
 import { estimateNet, pensionRate } from '../src/utils/payroll';
 import {
-  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, totalsOf, validateAdjustment, validateClose, validateGenerate, validatePay, validateReopen,
+  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
 } from '../src/utils/payrollRun';
 import { NO_ACCESS, accessCheck, defaultsFromStaff, deactivationNote, syncPatch, validateLinkedUser } from '../src/utils/staffAccess';
 
@@ -127,10 +127,9 @@ check('Generar: el mes anterior del año debe estar cerrado (la renta depende de
 const okAdj = { kind: 'Ingreso', concept: 'Bono', amount: 100, reason: 'Metas del mes' };
 check('Ajuste: solo en borrador, con concepto, monto y motivo', validateAdjustment({ status: 'Borrador' }, okAdj, true).length === 0 && validateAdjustment({ status: 'Cerrada' }, okAdj, true).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, amount: 0 }, true).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, reason: 'x' }, true).length === 1 && validateAdjustment({ status: 'Borrador' }, okAdj, false).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, kind: 'Otro' }, true).length === 1);
 check('Cerrar: sin trabajadores o con errores no se cierra; sin errores sí', validateClose({ status: 'Borrador', period: '2026-10' }, { lines: [], warnings: [] }, '2026-10-24').length === 1 && validateClose({ status: 'Borrador', period: '2026-10' }, built, '2026-10-24').length === 0 && validateClose({ status: 'Cerrada', period: '2026-10' }, built, '2026-10-24').length === 1);
-check('Pagar: solo una cerrada, con fecha válida', validatePay({ status: 'Cerrada', period: '2026-10' }, '2026-10-24', '2026-10-24').length === 0 && validatePay({ status: 'Borrador', period: '2026-10' }, '2026-10-24', '2026-10-24').length === 1 && validatePay({ status: 'Cerrada', period: '2026-10' }, '2026-10-25', '2026-10-24').length === 1 && validatePay({ status: 'Cerrada', period: '2026-10' }, '2026-09-30', '2026-10-24').length === 1 && validatePay({ status: 'Pagada', period: '2026-10' }, '2026-10-24', '2026-10-24').length === 1);
 const closedSep = run('PLA-2026-09', '2026-09', 'Cerrada', []);
 const closedOct = run('PLA-2026-10', '2026-10', 'Cerrada', []);
-check('Reabrir: con motivo, no si está pagada ni si ya hay una posterior cerrada', validateReopen(closedOct, [closedSep, closedOct], 'Error en un bono').length === 0 && validateReopen(closedOct, [closedSep, closedOct], '').length === 1 && validateReopen({ ...closedOct, status: 'Pagada' }, [closedOct], 'motivo largo').length === 1 && validateReopen(closedSep, [closedSep, closedOct], 'motivo largo').length === 1);
+check('Reabrir: con motivo, y no si ya hay una posterior cerrada del año (no existe «pagada»: el sistema no registra pagos al personal)', validateReopen(closedOct, [closedSep, closedOct], 'Error en un bono').length === 0 && validateReopen(closedOct, [closedSep, closedOct], '').length === 1 && validateReopen(closedSep, [closedSep, closedOct], 'motivo largo').length === 1 && validateReopen(run('PLA-2026-11', '2026-11', 'Borrador', []), [], 'motivo largo').length === 1);
 
 // Lo cerrado alimenta la renta de los meses siguientes
 const sepLines = buildLines('2026-09', ctx, []).lines;
@@ -153,7 +152,7 @@ const chk = accessCheck(mariaStaff, assignments, users);
 check('María: puede tener cuenta; su sede principal es la de su asignación principal y las demás pasan a adicionales', chk.ok && chk.mainBranch === 'Chiclayo' && chk.branches.join() === 'Chiclayo,Piura', JSON.stringify(chk));
 check('Quien ya tiene cuenta, está inactivo o no tiene asignación no puede', !accessCheck(staffList[0], assignments, users).ok && !accessCheck(staffList[3], assignments, users).ok && !accessCheck(staffList[2], assignments, users).ok);
 check('«Sin acceso» en todas las asignaciones impide la cuenta', (() => { const r = accessCheck(mariaStaff, assignments.map(a => (a.staffId === '2' ? { ...a, systemRole: NO_ACCESS } : a)), users); return !r.ok && /Sin acceso/.test(r.reasons[0]); })());
-check('Rol sugerido según el rol del sistema', accessCheck(staffList[0], assignments, []).suggestedRole === 'Docente' && chk.suggestedRole === '');
+check('Rol sugerido según el rol del sistema', accessCheck(staffList[0], assignments, []).suggestedRole === 'Psicopedagogía' && chk.suggestedRole === 'Administrador de sede');
 const def = defaultsFromStaff(mariaStaff, assignments, users);
 check('La cuenta nace de la ficha', def.name === 'María Torres' && def.document === '87654321' && def.phone === '912345678' && def.branch === 'Chiclayo' && def.additionalBranches.join() === 'Piura');
 const input = { staffId: '2', email: 'm@x.pe', role: 'Cajero', branch: 'Chiclayo', additionalBranches: ['Piura'], status: 'Activo' };

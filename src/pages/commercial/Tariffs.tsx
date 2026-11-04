@@ -13,7 +13,7 @@ import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
 
 export function Tariffs() {
-  const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff } = useData();
+  const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff, can } = useData();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedTariff, setSelectedTariff] = useState<Tariff | null>(null);
@@ -238,10 +238,12 @@ export function Tariffs() {
           <p className="text-sm text-text-secondary">Precios base por programa, sede y tipo de pago</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
-            <Plus size={16} />
-            Nuevo Tarifario
-          </Button>
+          {can('com-tarifarios:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+              <Plus size={16} />
+              Nuevo Tarifario
+            </Button>
+          )}
         </div>
       </div>
 
@@ -336,9 +338,9 @@ export function Tariffs() {
                     <ActionMenu 
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenForm(row, true) },
-                        { label: 'Editar tarifario', onClick: () => handleOpenForm(row) },
+                        { label: 'Editar tarifario', hidden: !can('com-tarifarios:edit'), onClick: () => handleOpenForm(row) },
                         { 
-                          label: 'Duplicar', 
+                          label: 'Duplicar', hidden: !can('com-tarifarios:create'), 
                           onClick: () => openConfirm({
                             title: 'Duplicar Tarifario',
                             description: `¿Está seguro de que desea duplicar el tarifario "${row.name}"?`,
@@ -348,7 +350,7 @@ export function Tariffs() {
                           }) 
                         },
                         { 
-                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', 
+                          label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('com-tarifarios:edit'), 
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Tarifario' : 'Activar Tarifario',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el tarifario "${row.name}"?`,
@@ -359,7 +361,7 @@ export function Tariffs() {
                           danger: row.status === 'Activo' 
                         },
                         { 
-                          label: 'Eliminar', 
+                          label: 'Eliminar', hidden: !can('com-tarifarios:delete'), 
                           onClick: () => openConfirm({
                             title: 'Eliminar Tarifario',
                             description: `¿Está seguro de que desea eliminar el tarifario "${row.name}"? Esta acción no se puede deshacer.`,

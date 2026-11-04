@@ -25,7 +25,7 @@ import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { localDateOf, todayLocalISO } from '../utils/schedule';
 
 export function Cash() {
-  const { stockItems, items, branches, updateStock, payments, plans, itemPrices, cashMovements, addCashMovement, reverseCashMovement, cashClosures, can, currentBranchId } = useData();
+  const { stockItems, items, branches, registerItemSale, payments, plans, itemPrices, cashMovements, addCashMovement, reverseCashMovement, cashClosures, can, currentBranchId } = useData();
   const navigate = useNavigate();
   const [currency, setCurrency] = useState<'PEN' | 'USD'>('USD');
   const [typeFilter, setTypeFilter] = useState('');
@@ -152,56 +152,26 @@ export function Cash() {
       setFormError('Por favor complete todos los campos obligatorios.');
       return;
     }
-    const saleClosed = closedMessage(cashClosures, 'caja', saleCurrency, todayLocalISO());
-    if (saleClosed) { setFormError(saleClosed); return; }
-
-    if (!(unitPrice > 0)) {
-      setFormError('El artículo no tiene un precio de venta vigente. Configúrelo en Logística → Catálogo de artículos.');
-      return;
-    }
-
-    if (!currentStock || currentStock.stock < saleQty) {
-      setFormError('No hay stock suficiente para realizar la venta.');
-      return;
-    }
-    
-    const tc = parseFloat(saleTC);
-    if (saleCurrency === 'PEN' && !(tc > 0)) {
-      setFormError('Indique el tipo de cambio (TC) para cobrar en soles.');
-      return;
-    }
-
-    // 1. Deduct stock and generate Kardex
-    const stockResult = updateStock(
-      selectedBranchId,
-      selectedItemId,
-      -saleQty, 
-      'Venta', 
-      `Venta directa en caja a ${customerName || 'Cliente General'}. Comprobante: ${receiptType} ${receiptNumber}`,
-      receiptNumber
-    );
-    if (!stockResult.ok) {
-      setFormError(stockResult.error || 'No se pudo descontar el stock.');
-      return;
-    }
-
-    // 2. Ingreso a caja: el precio es en USD; si se cobra en soles se registra con su TC.
-    addCashMovement({
-      kind: 'Ingreso',
-      concept: 'Venta de artículo',
-      reference: `${receiptType} ${receiptNumber || 'S/N'} / ${customerName || 'Cliente General'}`,
-      currency: saleCurrency,
-      amount: saleCurrency === 'USD' ? totalAmount : Math.round(totalAmount * tc * 100) / 100,
-      exchangeRate: saleCurrency === 'PEN' ? tc : undefined,
-      amountUSD: totalAmount,
-      method: paymentMethod,
+    // Las reglas (precio vigente, stock, tipo de cambio, caja cerrada) y el descuento de stock + el ingreso viven en la acción
+    const sale = registerItemSale({
       branchId: selectedBranchId,
-      sale: { itemId: selectedItemId, branchId: selectedBranchId, qty: saleQty },
+      itemId: selectedItemId,
+      qty: saleQty,
+      currency: saleCurrency,
+      exchangeRate: parseFloat(saleTC) || undefined,
+      method: paymentMethod,
+      customerName,
+      receiptType,
+      receiptNumber,
     });
+    if (!sale.ok) {
+      setFormError(sale.error ?? 'No se pudo registrar la venta.');
+      return;
+    }
     setCurrency(saleCurrency);
     setSaleTC('');
 
-    // 3. Close modal and reset
+    // Close modal and reset
     setIsSaleOpen(false);
     setSelectedItemId('');
     setSaleQty(1);
@@ -248,15 +218,19 @@ export function Cash() {
             <Download size={16} />
             Exportar
           </Button>
-          <Button variant="secondary" onClick={() => { setIsSaleOpen(true); setFormError(null); }} className="flex items-center gap-2">
-            <Package size={16} />
-            Venta de artículo
-          </Button>
-          <Button variant="secondary" onClick={() => { setIsLoteOpen(true); setFormError(null); }}>Crear lote de depósito</Button>
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => { openExpense(); setFormError(null); }}>
-            <Plus size={16} />
-            Registrar egreso
-          </Button>
+          {can('op-caja:sell_item') && (
+            <Button variant="secondary" onClick={() => { setIsSaleOpen(true); setFormError(null); }} className="flex items-center gap-2">
+              <Package size={16} />
+              Venta de artículo
+            </Button>
+          )}
+          {can(PERM.deposit) && <Button variant="secondary" onClick={() => { setIsLoteOpen(true); setFormError(null); }}>Crear lote de depósito</Button>}
+          {can('op-caja:reg_expense') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => { openExpense(); setFormError(null); }}>
+              <Plus size={16} />
+              Registrar egreso
+            </Button>
+          )}
         </div>
       </div>
 

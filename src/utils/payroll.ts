@@ -9,6 +9,7 @@
  *  - La locación de servicios no tiene pensión ni 5.ª; retiene 4.ª categoría (8 %) si el honorario pasa de S/ 3 300.
  */
 import type { Contract, ContractRevisionChange, Staff } from '../context/DataContext';
+import { vacationAgendaError, type AgendaContext } from './staffAvailability';
 import { AFP_RATES as ENGINE_AFP_RATES, ONP_RATE as ENGINE_ONP_RATE, RMV, regularMonth, type RegularMonth } from './payrollEngine';
 
 export const CONTRACT_TYPES = ['Indeterminado', 'Plazo Fijo', 'Locación de servicios'] as const;
@@ -89,7 +90,7 @@ export const hasVacations = (type: string) => type !== 'Locación de servicios';
 export const contractStatus = (c: Pick<Contract, 'status' | 'endDate'>, today: string): string =>
   c.status === 'Vigente' && c.endDate && c.endDate < today ? 'Vencido' : c.status;
 
-export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string): ContractErrors {
+export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string, agenda?: AgendaContext): ContractErrors {
   const e: ContractErrors = {};
   if (!f.staffId || !staff.some(s => s.id === f.staffId)) e.staffId = 'Seleccione al trabajador.';
   if (!(CONTRACT_TYPES as readonly string[]).includes(f.type)) e.type = 'Seleccione el tipo de contrato.';
@@ -112,6 +113,14 @@ export function validateContractForm(f: ContractForm, contracts: Contract[], sta
     else if (f.vacationStart && f.vacationEnd && f.vacationEnd < f.vacationStart) e.vacationEnd = 'El retorno no puede ser anterior al inicio.';
     if (f.vacationStart && f.startDate && f.vacationStart < f.startDate) e.vacationStart = 'Las vacaciones no pueden empezar antes del contrato.';
     if (f.vacationEnd && f.endDate && f.vacationEnd > f.endDate) e.vacationEnd = 'Las vacaciones no pueden terminar después del contrato.';
+    // Vacaciones nuevas o cambiadas: no pueden cruzarse con la agenda de la persona (primero se reasigna)
+    const member = staff.find(s => s.id === f.staffId);
+    const before = editingId ? contracts.find(c => c.id === editingId) : undefined;
+    const changed = !before || before.vacationStart !== (f.vacationStart || undefined) || before.vacationEnd !== (f.vacationEnd || undefined);
+    if (agenda && member && changed && f.vacationStart && f.vacationEnd && !e.vacationStart && !e.vacationEnd) {
+      const crossed = vacationAgendaError(member, f.vacationStart, f.vacationEnd, today, agenda);
+      if (crossed) e.vacationStart = crossed;
+    }
   }
   // Un trabajador tiene un solo contrato vigente
   if (f.staffId && contracts.some(c => c.id !== editingId && c.staffId === f.staffId && contractStatus(c, today) === 'Vigente')) {

@@ -33,6 +33,9 @@ interface ReceivedItem {
   observation: string;
 }
 
+/** La función que se necesita para recibir ese documento. */
+const receiveCapability = (docType: string) => (docType === 'Transferencia' ? 'log-transfer:receive' : 'log-recepciones:confirm');
+
 export function Receptions() {
   const { 
     shipments, 
@@ -42,9 +45,11 @@ export function Receptions() {
     shippingMethods,
     couriers,
     currentBranchId,
-    setCurrentBranchId,
+    selectBranch,
+    sessionScope,
     currentUser,
-    confirmReception
+    confirmReception,
+    can
   } = useData();
   
   const [isReceptionOpen, setIsReceptionOpen] = useState(false);
@@ -60,9 +65,8 @@ export function Receptions() {
   const [filterStatus, setFilterStatus] = useState('');
 
   // Access Control
+  // La recepción es siempre de una sede: quien alcanza todas elige primero cuál
   const isGlobalView = currentBranchId === 'all';
-  const isSuperUser = currentUser.role === 'Superusuario';
-  const canAccess = !isGlobalView || !isSuperUser;
 
   // Combine and format data
   const allDocuments = [
@@ -190,7 +194,7 @@ export function Receptions() {
     }
   };
 
-  if (isGlobalView && isSuperUser) {
+  if (isGlobalView) {
     return (
       <div className="flex flex-col h-full items-center justify-center text-center p-8">
         <div className="w-20 h-20 bg-surface-muted rounded-full flex items-center justify-center mb-6 border border-border-soft shadow-sm">
@@ -198,13 +202,13 @@ export function Receptions() {
         </div>
         <h2 className="text-2xl font-semibold text-text-primary mb-2">Módulo deshabilitado en Vista Global</h2>
         <p className="text-text-secondary max-w-md mb-8">
-          Para gestionar recepciones, por favor selecciona una filial específica en el selector de contexto superior.
+          Para gestionar recepciones, elige una filial específica.
         </p>
         <div className="flex gap-4">
-          {branches.slice(0, 3).map(branch => (
+          {branches.filter(b => sessionScope.branchIds.includes(b.id)).map(branch => (
             <button
               key={branch.id}
-              onClick={() => setCurrentBranchId(branch.id)}
+              onClick={() => selectBranch(branch.id)}
               className="px-4 py-2 bg-surface border border-border-soft rounded-xl text-sm font-medium text-text-primary hover:border-primary-accent hover:text-primary-accent transition-all shadow-sm"
             >
               {branch.name}
@@ -325,7 +329,7 @@ export function Receptions() {
                         <Button variant="outline" size="sm" onClick={() => handleOpenReception(doc)}>
                           Ver ticket
                         </Button>
-                        {['En tránsito', 'Listo para recepción'].includes(doc.status) && (
+                        {['En tránsito', 'Listo para recepción'].includes(doc.status) && can(receiveCapability(doc.docType)) && (
                           <div title={!ready ? 'Documento no habilitado para recepción (ETA pendiente)' : ''}>
                             <Button 
                               variant="primary" 
@@ -520,13 +524,15 @@ export function Receptions() {
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setIsReceptionOpen(false)}>Cancelar</Button>
-                <Button 
-                  variant="primary" 
-                  onClick={handleConfirmReception}
-                  className="px-8"
-                >
-                  Confirmar recepción y cargar stock
-                </Button>
+                {selectedDocument && can(receiveCapability(selectedDocument.type)) && (
+                  <Button
+                    variant="primary"
+                    onClick={handleConfirmReception}
+                    className="px-8"
+                  >
+                    Confirmar recepción y cargar stock
+                  </Button>
+                )}
               </div>
             </div>
           </div>
