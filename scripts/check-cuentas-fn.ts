@@ -46,7 +46,7 @@ const FUNCIONES: Record<string, string[]> = {
 // Las personas de Personal y sus asignaciones
 const persona = (id: string, nombre: string, extra: Partial<PersonaInfo> = {}): PersonaInfo => ({ id, nombre, estado: 'Activo', correoPersonal: null, ...extra });
 const asg = (personalId: string, lugar: string, extra: Partial<AsignacionInfo> = {}): AsignacionInfo => ({
-  personalId, sedeId: lugar.startsWith('FIL') ? lugar : null, almacenId: lugar.startsWith('ALM') ? lugar : null, rolSistema: lugar.startsWith('ALM') ? 'Almacén' : 'Administración',
+  personalId, sedeId: lugar.startsWith('FIL') ? lugar : null, almacenId: lugar.startsWith('ALM') ? lugar : null, conAcceso: true,
   esPrincipal: false, estado: 'Activa', fechaInicio: '2026-01-01', ...extra,
 });
 const personasBase = (): PersonaInfo[] => [
@@ -56,10 +56,10 @@ const personasBase = (): PersonaInfo[] => [
 ];
 const asignacionesBase = (): AsignacionInfo[] => [
   asg('P-LAURA', 'FIL-002', { esPrincipal: true }),
-  asg('P-ANA', 'FIL-002', { esPrincipal: true }), asg('P-ANA', 'FIL-001', { rolSistema: 'Psicopedagogía', fechaInicio: '2026-02-01' }),
+  asg('P-ANA', 'FIL-002', { esPrincipal: true }), asg('P-ANA', 'FIL-001', { fechaInicio: '2026-02-01' }),
   asg('P-ROSA', 'ALM-001', { esPrincipal: true }), asg('P-ROSA2', 'ALM-001', { esPrincipal: true }),
   asg('P-MIXTO', 'FIL-001', { esPrincipal: true }), asg('P-MIXTO', 'ALM-001'), asg('P-MIXTO2', 'FIL-001', { esPrincipal: true }), asg('P-MIXTO2', 'ALM-001'),
-  asg('P-LIMPIEZA', 'FIL-002', { esPrincipal: true, rolSistema: 'Sin acceso' }),
+  asg('P-LIMPIEZA', 'FIL-002', { esPrincipal: true, conAcceso: false }),
   asg('P-ADM', 'FIL-002', { esPrincipal: true }), asg('P-SIN', 'FIL-002', { esPrincipal: true }), asg('P-OTRO', 'FIL-001', { esPrincipal: true }),
   asg('P-LAURA', 'FIL-001', { estado: 'Cerrada', fechaInicio: '2025-01-01' }),
 ];
@@ -173,13 +173,14 @@ const tecnica = (extra: Record<string, unknown> = {}) => ({ accion: 'invitar', n
   check('Una persona inactiva no recibe cuenta', /está inactivo/.test((await quien('P-BAJA'))!));
   check('Una persona ya con cuenta no recibe otra', /ya tiene una cuenta/.test((await quien('P-SIN'))!));
   check('Sin ninguna asignación activa no se puede, y dice dónde crearla', /no tiene una asignación activa.*Personas → Asignaciones/.test((await quien('P-SINASIG'))!));
-  check('Solo con asignaciones «Sin acceso» (limpieza) tampoco, y lo explica', /solo tiene asignaciones «Sin acceso»/.test((await quien('P-LIMPIEZA'))!));
+  check('Solo con asignaciones sin acceso al sistema (limpieza) tampoco, y lo explica', /solo tiene asignaciones sin acceso al sistema/.test((await quien('P-LIMPIEZA'))!));
   check('errorPersona: lo dicho a nivel de reglas', errorPersona('P-LAURA', { personal: personasBase(), cuentas: [], asignaciones: asignacionesBase() }) === null && errorPersona('P-LAURA', { personal: personasBase(), cuentas: [cuenta('x', 'ROL-003', { personalId: 'P-LAURA' })], asignaciones: asignacionesBase() }, 'x') === null);
 
   // El rol
   const rolErr = async (rolId: string, quienLlama = SU) => (await manejar(como(quienLlama), invitar({ rolId, correo: 'r@ensilperu.com' }), memoria(base()).db)).cuerpo.error;
   check('El rol debe existir, estar activo; el del sistema solo lo da un Superusuario', /no existe/.test((await rolErr('ROL-999'))!) && /inactivo/.test((await rolErr('ROL-005'))!) && /Solo el Superusuario/.test((await rolErr('ROL-001', ADM))!));
-  check('El Superusuario sí puede dar el rol del sistema a una persona (sin las reglas del almacén)', (await manejar(como(SU), invitar({ rolId: 'ROL-001', personalId: 'P-ROSA', correo: 'otro-su@ensilperu.com' }), memoria(base()).db)).cuerpo.ok === true);
+  check('El rol del sistema es solo para cuentas técnicas: ni el Superusuario se lo da a una persona', (() => true)()
+    && /solo para cuentas técnicas, sin persona/.test((await manejar(como(SU), invitar({ rolId: 'ROL-001', personalId: 'P-ROSA', correo: 'otro-su@ensilperu.com' }), memoria(base()).db)).cuerpo.error ?? ''));
 
   // Permisos y alcance
   const m2 = memoria(base());
@@ -247,6 +248,7 @@ const tecnica = (extra: Record<string, unknown> = {}) => ({ accion: 'invitar', n
   check('Las sedes y el almacén salen de las asignaciones: no se cambian desde la cuenta', /Personas → Asignaciones/.test((await run(e1.db, edit(SIN, { sedeIds: ['FIL-001'] }))).cuerpo.error!) && /Personas → Asignaciones/.test((await run(e1.db, edit(SIN, { almacenIds: ['ALM-001'] }))).cuerpo.error!)
     && /Personas → Asignaciones/.test((await run(e1.db, edit(SIN, { todasLasSedes: true }))).cuerpo.error!));
   check('Pero mandar las mismas sedes que ya tiene no es un cambio', (await run(e1.db, edit(SIN, { sedeIds: ['FIL-002'] }))).cuerpo.ok === true);
+  check('Tampoco se pasa a una persona al rol del sistema al editar (ni el Superusuario)', /solo para cuentas técnicas, sin persona/.test((await run(e1.db, edit(SIN, { rolId: 'ROL-001' }))).cuerpo.error ?? ''));
   check('En una cuenta técnica (sin persona) sí se edita el nombre', (await run(e1.db, edit(SU, { nombre: 'Soporte' }))).cuerpo.ok === true && e1.cuentas.find(c => c.id === SU)!.nombre === 'Soporte');
 
   // Rol y coherencia al editar
@@ -310,13 +312,13 @@ const tecnica = (extra: Record<string, unknown> = {}) => ({ accion: 'invitar', n
 
   // lugares derivados de las asignaciones
   const asigs: AsignacionInfo[] = [
-    asg('P1', 'FIL-002', { fechaInicio: '2026-03-01' }), asg('P1', 'FIL-001', { esPrincipal: true, fechaInicio: '2026-05-01' }), asg('P1', 'ALM-001'), asg('P1', 'FIL-003', { rolSistema: 'Sin acceso' }),
+    asg('P1', 'FIL-002', { fechaInicio: '2026-03-01' }), asg('P1', 'FIL-001', { esPrincipal: true, fechaInicio: '2026-05-01' }), asg('P1', 'ALM-001'), asg('P1', 'FIL-003', { conAcceso: false }),
     asg('P1', 'FIL-002', { estado: 'Cerrada' }), asg('P2', 'FIL-002'),
   ];
   const lug = lugaresDeAsignaciones(asigs, 'P1');
   check('Los lugares de la cuenta salen de las asignaciones activas con acceso; la principal es la de su asignación principal', lug.sedeIds.join() === 'FIL-001,FIL-002' && lug.sedePrincipalId === 'FIL-001' && lug.almacenIds.join() === 'ALM-001');
   check('Sin asignación principal, la principal es la sede más antigua; sin asignaciones con acceso, no hay lugares', lugaresDeAsignaciones([asg('P1', 'FIL-002', { fechaInicio: '2026-03-01' }), asg('P1', 'FIL-001', { fechaInicio: '2026-01-01' })], 'P1').sedePrincipalId === 'FIL-001'
-    && lugaresDeAsignaciones([asg('P1', 'FIL-002', { rolSistema: 'Sin acceso' })], 'P1').sedeIds.length === 0);
+    && lugaresDeAsignaciones([asg('P1', 'FIL-002', { conAcceso: false })], 'P1').sedeIds.length === 0);
   check('Solo asignaciones al almacén: no hay sede principal', lugaresDeAsignaciones([asg('P1', 'ALM-001')], 'P1').sedePrincipalId === undefined);
 
   // ------------------------------------------------------------------------------------------ Reenviar e ingreso

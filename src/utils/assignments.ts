@@ -10,10 +10,11 @@
  *  - una asignación no se borra: se CIERRA con fecha y motivo (queda en el historial) y, si era la principal, la activa más
  *    antigua pasa a ser la principal;
  *  - no se cierra la última asignación de Psicopedagogía de quien tiene asesorías futuras: primero se reasignan;
- *  - el LUGAR de una asignación es UNA sede o el almacén central (nunca las dos): en el almacén solo se trabaja con el rol del sistema
- *    «Almacén» (o «Sin acceso», p. ej. limpieza) y «Almacén» no existe en una sede. De las asignaciones con acceso salen las sedes y el
- *    almacén de la cuenta de la persona, así que esta regla mantiene coherente su rol con su lugar de trabajo;
- *  - el almacén central es un lugar de logística: allí solo se trabaja en el área «Logística» (una sede admite todas las áreas).
+ *  - el LUGAR de una asignación es UNA sede o el almacén central (nunca las dos);
+ *  - el almacén central es un lugar de logística: allí solo se trabaja en el área «Logística» (una sede admite todas las áreas);
+ *  - la asignación dice si la persona NECESITA ACCESO al sistema (Sí/No; «No» p. ej. limpieza). Su rol real no se elige aquí: se elige una
+ *    sola vez, en Usuarios, y se filtra por el lugar de trabajo. De las asignaciones con acceso salen las sedes y el almacén de su cuenta;
+ *  - quien no alcanza todas las sedes solo asigna en las suyas, y en el almacén solo si es Superusuario o trabaja en él (`assignablePlaces`).
  */
 import type { Assignment, Branch, Schedule, Staff } from '../context/DataContext';
 import { INTERVIEWER_AREA } from './enrollment';
@@ -22,21 +23,10 @@ import type { FlatActivity } from './schedule';
 import { nextSequentialId } from './ids';
 
 export const AREAS = ['Administración', 'Psicopedagogía', 'Logística', 'Ventas'];
-export const SYSTEM_ROLES = ['Administración', 'Psicopedagogía', 'Ventas', 'Almacén', 'Sin acceso'];
-/** Rol del sistema de quien trabaja en el almacén central (el único, además de «Sin acceso», que admite). */
-export const WAREHOUSE_SYSTEM_ROLE = 'Almacén';
 
 /** Un lugar de trabajo: una sede o el almacén central. Los nombres no se repiten entre sedes y almacenes (el formulario guarda el nombre). */
 export interface Place { id?: string; name: string; kind?: 'sede' | 'almacen'; status?: string }
 
-/** Error de combinar un rol del sistema con un lugar (vacío = coherente). Sin saber el tipo de lugar no se opina. */
-export function placeRoleError(kind: Place['kind'], systemRole: string): string | undefined {
-  if (kind === 'almacen' && systemRole && systemRole !== WAREHOUSE_SYSTEM_ROLE && systemRole !== 'Sin acceso') {
-    return 'En el almacén solo se trabaja con el rol del sistema «Almacén» (o «Sin acceso»).';
-  }
-  if (kind === 'sede' && systemRole === WAREHOUSE_SYSTEM_ROLE) return 'El rol del sistema «Almacén» es solo para el almacén central, no para una sede.';
-  return undefined;
-}
 /** Área del almacén central: el único lugar con un área propia. */
 export const WAREHOUSE_AREA = 'Logística';
 
@@ -49,6 +39,16 @@ export function placeAreaError(kind: Place['kind'], area: string): string | unde
   return undefined;
 }
 
+/** Quién asigna: lo que su cuenta alcanza (igual que lo exige la base en sus políticas y la Edge Function de usuarios). */
+export interface Assigner { allBranches: boolean; isSuperuser: boolean; branchNames: string[]; warehouseIds: string[] }
+
+/**
+ * Los lugares en los que se puede crear o cambiar una asignación: una sede que la cuenta alcanza (todas si alcanza todas) y el almacén solo si
+ * es Superusuario o trabaja en él (alcanzar todas las sedes lo deja VER, no mover a su gente). `keepName` conserva el de la asignación que se edita.
+ */
+export const assignablePlaces = (places: Place[], who: Assigner, keepName?: string): Place[] =>
+  places.filter(p => p.name === keepName || (p.kind === 'almacen' ? who.isSuperuser || (!!p.id && who.warehouseIds.includes(p.id)) : who.allBranches || who.branchNames.includes(p.name)));
+
 export const MIN_REASON = 5;
 export const ACTIVE = 'Activa';
 export const CLOSED = 'Cerrada';
@@ -59,7 +59,8 @@ export interface AssignmentForm {
   staffId: string;
   branch: string;
   area: string;
-  systemRole: string;
+  /** La persona necesita acceso al sistema en este lugar de trabajo. */
+  hasAccess: boolean;
   startDate: string;
   endDate: string;
   isMain: boolean;
@@ -69,14 +70,14 @@ export interface AssignmentForm {
 export type AssignmentErrors = Partial<Record<keyof AssignmentForm, string>>;
 
 export const emptyAssignmentForm = (startDate = ''): AssignmentForm => ({
-  staffId: '', branch: '', area: '', systemRole: '', startDate, endDate: '', isMain: false, observations: '',
+  staffId: '', branch: '', area: '', hasAccess: true, startDate, endDate: '', isMain: false, observations: '',
 });
 
 /** ¿La asignación es de ese lugar? Por id cuando lo tiene (guardada en la base) y si no por el nombre (datos de ejemplo). */
 const isPlace = (a: Pick<Assignment, 'branch' | 'placeId'>, p: Place) => (a.placeId && p.id ? a.placeId === p.id : norm(a.branch) === norm(p.name));
 
 export const assignmentToForm = (a: Assignment): AssignmentForm => ({
-  staffId: a.staffId, branch: a.branch, area: a.area, systemRole: a.systemRole ?? '', startDate: a.startDate,
+  staffId: a.staffId, branch: a.branch, area: a.area, hasAccess: a.hasAccess, startDate: a.startDate,
   endDate: a.endDate ?? '', isMain: a.isMain, observations: a.observations ?? '',
 });
 
@@ -102,11 +103,6 @@ export function validateAssignmentForm(
   else {
     const areaMismatch = placeAreaError(place?.kind, f.area);
     if (areaMismatch) e.area = areaMismatch;
-  }
-  if (!SYSTEM_ROLES.includes(f.systemRole)) e.systemRole = 'Seleccione el rol del sistema.';
-  else {
-    const mismatch = placeRoleError(place?.kind, f.systemRole);
-    if (mismatch) e.systemRole = mismatch;
   }
   if (!f.startDate) e.startDate = 'La fecha de inicio es obligatoria.';
   if (f.endDate) {
@@ -142,7 +138,7 @@ export function buildAssignment(f: AssignmentForm, id: string, assignments: Assi
     staffId: f.staffId,
     branch: f.branch,
     area: f.area,
-    systemRole: f.systemRole,
+    hasAccess: f.hasAccess,
     startDate: f.startDate,
     endDate: f.endDate || undefined,
     isMain: willBeMain(f, assignments, editingId),

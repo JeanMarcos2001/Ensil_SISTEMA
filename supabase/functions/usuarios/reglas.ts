@@ -12,6 +12,7 @@
  *  - solo un Superusuario modifica una cuenta de Superusuario;
  *  - **una cuenta nace de una persona de Personal** (una persona, una cuenta); solo el Superusuario puede existir sin persona;
  *  - **las sedes y el almacén de la cuenta salen de las asignaciones activas de la persona** (no se eligen en la cuenta);
+ *  - el rol del sistema (Superusuario) es solo para cuentas técnicas, sin persona;
  *  - coherencia rol ↔ lugar: un rol que mueve el almacén exige trabajar en él, y quien trabaja en el almacén necesita un rol que lo mueva;
  *  - el correo de ingreso nunca es el correo personal de la ficha.
  * Este archivo también lo usa la pantalla (para avisar antes de enviar): así hay UNA sola definición de estas reglas.
@@ -30,7 +31,8 @@ export interface CuentaInfo {
 }
 export interface PersonaInfo { id: string; nombre: string; estado: Estado; correoPersonal: string | null }
 export interface AsignacionInfo {
-  personalId: string; sedeId: string | null; almacenId: string | null; rolSistema: string; esPrincipal: boolean; estado: 'Activa' | 'Cerrada'; fechaInicio: string;
+  personalId: string; sedeId: string | null; almacenId: string | null; /** La persona necesita acceso al sistema en este lugar de trabajo. */ conAcceso: boolean;
+  esPrincipal: boolean; estado: 'Activa' | 'Cerrada'; fechaInicio: string;
 }
 /** Quien llama: su cuenta, su rol y las funciones que ese rol tiene guardadas. */
 export interface Llamante { cuenta: CuentaInfo; rol: RolInfo; funciones: string[] }
@@ -177,9 +179,12 @@ export function errorPlazas(
 export const FUNCIONES_QUE_MUEVEN_ALMACEN: readonly string[] = ['log-envios:dispatch', 'log-stock:entry', 'log-stock:pack', 'log-ajustes:create', 'log-transfer:dispatch'];
 export const rolMueveAlmacen = (funciones: string[]): boolean => funciones.some(f => FUNCIONES_QUE_MUEVEN_ALMACEN.includes(f));
 
-/** Asignaciones activas que dan acceso al sistema (las de rol «Sin acceso», como limpieza, no cuentan). */
+/** Asignaciones activas que dan acceso al sistema (las marcadas «sin acceso», como limpieza, no cuentan). */
 export const asignacionesConAcceso = (asignaciones: AsignacionInfo[], personalId: string): AsignacionInfo[] =>
-  asignaciones.filter(a => a.personalId === personalId && a.estado === 'Activa' && a.rolSistema !== 'Sin acceso');
+  asignaciones.filter(a => a.personalId === personalId && a.estado === 'Activa' && a.conAcceso);
+
+/** El rol del sistema (Superusuario) es solo para cuentas técnicas, sin persona: igual que lo exige la base. */
+export const ROL_SISTEMA_SOLO_TECNICO = 'El rol del sistema (Superusuario) es solo para cuentas técnicas, sin persona: no se le da a una persona de Personal.';
 
 export interface LugaresDerivados { sedeIds: string[]; sedePrincipalId?: string; almacenIds: string[] }
 
@@ -200,7 +205,7 @@ export function errorPersona(personalId: string, ctx: Pick<Contexto, 'personal' 
   if (asignacionesConAcceso(ctx.asignaciones, personalId).length === 0) {
     const algunaActiva = ctx.asignaciones.some(a => a.personalId === personalId && a.estado === 'Activa');
     return algunaActiva
-      ? `${persona.nombre} solo tiene asignaciones «Sin acceso»: asígnele un rol del sistema en Personas → Asignaciones.`
+      ? `${persona.nombre} solo tiene asignaciones sin acceso al sistema: marque «Sí» en el acceso de alguna en Personas → Asignaciones.`
       : `${persona.nombre} no tiene una asignación activa: defina su sede o almacén y su área en Personas → Asignaciones.`;
   }
   return null;
@@ -258,6 +263,7 @@ export function errorInvitacion(s: SolicitudInvitar, ctx: Contexto): string | nu
     ?? errorPersona(s.personalId, ctx)
     ?? errorCorreoPersonal(s.correo, persona!)
     ?? errorRol(s.rolId, ctx.roles, l)
+    ?? (rol?.esSistema ? ROL_SISTEMA_SOLO_TECNICO : null)
     ?? errorCoherenciaRolLugar(rol!, lugares)
     ?? errorLugares(l, ctx.sedes, ctx.almacenes, { sedeIds: lugares.sedeIds, almacenIds: lugares.almacenIds, todasLasSedes: false }, undefined, false)
     ?? errorPlazas(rol, ctx.cuentas, ctx.sedes, { estado: 'Activo', sedeIds: lugares.sedeIds, almacenIds: lugares.almacenIds });
@@ -319,6 +325,7 @@ export function errorEdicion(cuentaId: string, c: Cambios, ctx: Contexto): strin
     const reactiva = antes.estado === 'Inactivo' && estado === 'Activo';
     return errorPermisos(l, funcionesDelCambio(c, antes))
       ?? errorRol(rolId, ctx.roles, l, antes)
+      ?? (cambiaRol && rolDespues?.esSistema ? ROL_SISTEMA_SOLO_TECNICO : null)
       ?? (cambiaRol || reactiva ? errorCoherenciaRolLugar(rolDespues!, lugares) : null)
       ?? (reactiva ? errorPersona(antes.personalId, ctx, antes.id) : null)
       ?? errorPlazas(rolDespues, ctx.cuentas, ctx.sedes, { estado, sedeIds: lugares.sedeIds, almacenIds: lugares.almacenIds }, antes);

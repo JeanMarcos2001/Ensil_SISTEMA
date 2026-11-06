@@ -14,14 +14,17 @@ import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { AssignmentFormModal } from './people/AssignmentFormModal';
 import { AREAS, closeImpact, isActive } from '../utils/assignments';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
-import { allActivities, todayLocalISO } from '../utils/schedule';
+import { todayLocalISO } from '../utils/schedule';
+import { NOT_YET_IN_DB } from '../utils/staffDb';
 import { StaffDbNotice } from '../components/people/StaffDbNotice';
 import { accountPlaceWarning } from '../utils/staffDb';
 import { userOfStaff } from '../utils/staffAccess';
 import { closeAssignmentIn } from '../utils/assignments';
 
 export function AssignmentsPage() {
-  const { orgAssignments: assignments, orgStaff: staff, orgPlaces: places, schedules, monthlySchedules, users, roles, permissions, closeAssignment, can } = useData();
+  const { orgAssignments: assignments, orgStaff: staff, orgPlaces: places, users, roles, permissions, closeAssignment, can } = useData();
+  // La agenda aún no está en la base: no se cruza con las personas de la base (ver NOT_YET_IN_DB)
+  const { schedules, activities } = NOT_YET_IN_DB;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';
@@ -74,7 +77,7 @@ export function AssignmentsPage() {
   const openEdit = (a: Assignment) => { setEditing(a); setIsFormOpen(true); };
 
   const impact = useMemo(
-    () => (toClose ? closeImpact(toClose, assignments, staff.find(s => s.id === toClose.staffId), schedules, today, allActivities(monthlySchedules)) : undefined),
+    () => (toClose ? closeImpact(toClose, assignments, staff.find(s => s.id === toClose.staffId), schedules, today, activities) : undefined),
     [toClose, assignments, staff, schedules, today]
   );
   // Si quien pierde esta asignación tiene cuenta, se avisa si su rol y su lugar de trabajo dejarían de corresponderse
@@ -87,8 +90,8 @@ export function AssignmentsPage() {
   const handleExport = () => {
     downloadCsv(
       csvFileName('Asignaciones', today),
-      ['Trabajador', 'Lugar', 'Área', 'Rol del sistema', 'Principal', 'Estado', 'Inicio', 'Fin', 'Motivo de cierre'],
-      filteredAssignments.map(a => [getStaffName(a.staffId), a.branch, a.area, a.systemRole ?? '', a.isMain ? 'Sí' : 'No', a.status, a.startDate, a.endDate ?? '', a.closeReason ?? ''])
+      ['Trabajador', 'Lugar', 'Área', 'Acceso al sistema', 'Principal', 'Estado', 'Inicio', 'Fin', 'Motivo de cierre'],
+      filteredAssignments.map(a => [getStaffName(a.staffId), a.branch, a.area, a.hasAccess ? 'Sí' : 'No', a.isMain ? 'Sí' : 'No', a.status, a.startDate, a.endDate ?? '', a.closeReason ?? ''])
     );
   };
 
@@ -177,7 +180,7 @@ export function AssignmentsPage() {
                 <th className="px-6 py-4 font-medium">Trabajador</th>
                 <th className="px-6 py-4 font-medium">Lugar</th>
                 <th className="px-6 py-4 font-medium">Área</th>
-                <th className="px-6 py-4 font-medium">Rol del sistema</th>
+                <th className="px-6 py-4 font-medium">Acceso</th>
                 <th className="px-6 py-4 font-medium">Principal</th>
                 <th className="px-6 py-4 font-medium">Estado</th>
                 <th className="px-6 py-4 font-medium text-right">Acciones</th>
@@ -189,7 +192,7 @@ export function AssignmentsPage() {
                   <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{getStaffName(asg.staffId)}</td>
                   <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.branch}</td>
                   <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.area}</td>
-                  <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.systemRole || '—'}</td>
+                  <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.hasAccess ? 'Sí' : 'No'}</td>
                   <td className="px-6 py-4">
                     {asg.isMain ? <Badge variant="primary">Sí</Badge> : <Badge variant="secondary">No</Badge>}
                   </td>
@@ -284,10 +287,10 @@ export function AssignmentsPage() {
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.area}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-text-muted uppercase tracking-wider">Rol del sistema</label>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Acceso al sistema</label>
                   <div className="flex items-center gap-2 mt-1">
                     <UserCheck size={16} className="text-primary-accent" />
-                    <p className="text-sm font-medium text-text-primary">{selectedAssignment.systemRole || '—'}</p>
+                    <p className="text-sm font-medium text-text-primary">{selectedAssignment.hasAccess ? 'Sí' : 'No'}</p>
                   </div>
                 </div>
                 <div>
@@ -309,10 +312,6 @@ export function AssignmentsPage() {
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">{selectedAssignment.status === 'Activa' ? 'Fecha de fin prevista' : 'Fecha de cierre'}</label>
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.endDate || '—'}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-text-muted uppercase tracking-wider">Rol del sistema</label>
-                  <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.systemRole || '—'}</p>
                 </div>
               </div>
             </section>

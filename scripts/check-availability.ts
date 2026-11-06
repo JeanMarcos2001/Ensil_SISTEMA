@@ -65,7 +65,7 @@ check('El responsable de una asesoría (texto con título) se reconoce y se revi
 check('Un responsable que no es del personal, o vacío, no se bloquea (no hay ficha que revisar)', sessionResponsibleUnavailable('Externo Ninguno', '2026-11-12', [juan], vac) === null && sessionResponsibleUnavailable('', '2026-11-12', [juan], vac) === null);
 check('Quien cesó no puede ser responsable de una asesoría posterior', sessionResponsibleUnavailable('Juan Pérez', '2026-11-05', [juan], ceased) !== null);
 
-const area = (id: string, staffId: string, branch = 'Piura') => ({ id, staffId, branch, area: 'Psicopedagogía', role: 'R', systemRole: 'S', startDate: '2023-01-01', isMain: true, status: 'Activa' }) as never;
+const area = (id: string, staffId: string, branch = 'Piura') => ({ id, staffId, branch, area: 'Psicopedagogía', hasAccess: true, startDate: '2023-01-01', isMain: true, status: 'Activa' }) as never;
 const rctx = (unavailable?: (id: string, date: string) => string | null) => ({ schedules: [] as Schedule[], activities: [] as FlatActivity[], staff: [juan, maria], assignments: [area('a1', '1'), area('a2', '2')], branches: [{ id: 'PIU', name: 'Piura' }], unavailable });
 const activity = act('a', { responsibleId: undefined });
 check('Asignar como responsable de una actividad a quien está de vacaciones se rechaza', validateResponsible(activity, '1', rctx((id, d) => unavailableOn(id, d, vac))).length === 1 && /vacaciones/.test(validateResponsible(activity, '1', rctx((id, d) => unavailableOn(id, d, vac)))[0]));

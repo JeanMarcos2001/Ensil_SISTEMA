@@ -158,9 +158,9 @@ export const seedContracts = (): Contract[] => [
   ];
 
 export const seedAssignments = (): Assignment[] => [
-    { id: 'ASG-001', staffId: 'STF-001', branch: 'Piura', area: 'Psicopedagogía', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-002', staffId: 'STF-002', branch: 'Chiclayo', area: 'Administración', systemRole: 'Administración', startDate: '2023-06-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-003', staffId: 'STF-002', branch: 'Chiclayo', area: 'Psicopedagogía', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
+    { id: 'ASG-001', staffId: 'STF-001', branch: 'Piura', area: 'Psicopedagogía', hasAccess: true, startDate: '2023-01-01', isMain: true, status: 'Activa' },
+    { id: 'ASG-002', staffId: 'STF-002', branch: 'Chiclayo', area: 'Administración', hasAccess: true, startDate: '2023-06-01', isMain: true, status: 'Activa' },
+    { id: 'ASG-003', staffId: 'STF-002', branch: 'Chiclayo', area: 'Psicopedagogía', hasAccess: true, startDate: '2023-06-01', isMain: false, status: 'Activa' },
   ];
 
 /** Los 6 roles de partida salen de las plantillas (`utils/roleTemplates.ts`): son datos y se pueden editar o duplicar. */

@@ -33,7 +33,7 @@ const maria = staff('2', 'María', 'Torres');
 const luis = staff('3', 'Luis', 'Rojas');
 const ana = staff('4', 'Ana', 'Cruz', { status: 'Inactivo' });
 const asg = (id: string, staffId: string, branch: string, area = 'Psicopedagogía', status = 'Activa'): Assignment =>
-  ({ id, staffId, branch, area, role: 'R', systemRole: 'S', startDate: '2023-01-01', isMain: true, status } as Assignment);
+  ({ id, staffId, branch, area, hasAccess: true, startDate: '2023-01-01', isMain: true, status } as Assignment);
 const assignments = [asg('a1', '1', 'Piura'), asg('a2', '2', 'Chiclayo'), asg('a3', '3', 'Piura', 'Administración'), asg('a4', '4', 'Piura')];
 const branches = [{ id: 'PIU', name: 'Piura' }, { id: 'CHI', name: 'Chiclayo' }];
 

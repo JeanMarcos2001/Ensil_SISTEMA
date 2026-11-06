@@ -9,11 +9,12 @@
  *  - el rol dice QUÉ puede hacer y el lugar DÓNDE: un rol que mueve el almacén exige trabajar en él y al revés (`errorCoherenciaRolLugar`);
  *  - el correo de ingreso es institucional: nunca el personal de la ficha (bloquea) y, si no es del dominio de la institución, se avisa
  *    sin bloquear (puede haber un dominio nuevo o un asesor externo);
- *  - el rol del sistema (Superusuario) solo lo da un Superusuario y no tiene restricción de lugar.
+ *  - el rol del sistema (Superusuario) es SOLO para cuentas técnicas, sin persona (y solo lo da un Superusuario): no se le ofrece ni se le
+ *    da a una persona de Personal.
  */
 import type { Assignment, Permission, Role, Staff, User } from '../context/DataContext';
 import {
-  CORREO_RE, errorCoherenciaRolLugar, errorCorreoPersonal, errorPersona, rolMueveAlmacen,
+  CORREO_RE, ROL_SISTEMA_SOLO_TECNICO, errorCoherenciaRolLugar, errorCorreoPersonal, errorPersona, rolMueveAlmacen,
   type AsignacionInfo, type CuentaInfo, type PersonaInfo,
 } from '../../supabase/functions/usuarios/reglas.ts';
 import type { Place } from './assignments';
@@ -68,7 +69,7 @@ export function rulesInput(staff: Staff[], assignments: Assignment[], users: Use
     personal: staff.map(s => ({ id: s.id, nombre: `${s.names} ${s.lastNameP}`.trim(), estado: s.status === 'Inactivo' ? 'Inactivo' : 'Activo', correoPersonal: s.personalEmail ?? null })),
     asignaciones: assignments.map(a => ({
       personalId: a.staffId, sedeId: a.placeKind === 'almacen' ? null : a.placeId ?? a.branch, almacenId: a.placeKind === 'almacen' ? a.placeId ?? a.branch : null,
-      rolSistema: a.systemRole ?? 'Sin acceso', esPrincipal: a.isMain, estado: a.status === 'Cerrada' ? 'Cerrada' : 'Activa', fechaInicio: a.startDate,
+      conAcceso: a.hasAccess, esPrincipal: a.isMain, estado: a.status === 'Cerrada' ? 'Cerrada' : 'Activa', fechaInicio: a.startDate,
     })),
     cuentas: users.map(u => ({
       id: u.id, nombre: u.name, correo: u.email, rolId: '', estado: u.status, todasLasSedes: u.branch === 'Todas', sedeIds: [], almacenIds: u.warehouses ?? [], ultimoAcceso: null, personalId: u.staffId ?? null,
@@ -88,9 +89,9 @@ export function roleFitError(role: Pick<Role, 'id' | 'name' | 'locked'>, staffId
   );
 }
 
-/** Los roles que se pueden ofrecer a esa persona: activos, no reservados (salvo para un Superusuario) y coherentes con su lugar de trabajo. */
+/** Los roles que se pueden ofrecer a esa persona: activos, no reservados (el del sistema es solo de las cuentas técnicas) y coherentes con su lugar de trabajo. */
 export function rolesFor(staffId: string, ctx: Pick<AccountRulesContext, 'roles' | 'assignments' | 'permissions' | 'actorIsSuperuser'>, keepRole?: string): typeof ctx.roles {
-  return ctx.roles.filter(r => r.name === keepRole || (r.status === 'Activo' && (!r.locked || ctx.actorIsSuperuser) && roleFitError(r, staffId, ctx.assignments, ctx.permissions) === null));
+  return ctx.roles.filter(r => r.name === keepRole || (r.status === 'Activo' && !r.locked && roleFitError(r, staffId, ctx.assignments, ctx.permissions) === null));
 }
 
 // ------------------------------------------------------------------------------------------------------------------ Crear
@@ -125,6 +126,7 @@ export function accountCreateCheck(input: AccountCreateInput, ctx: AccountRulesC
   if (!input.staffId) {
     return role?.locked ? { warning } : fail('Una cuenta sin persona solo puede tener un rol del sistema (Superusuario): las demás nacen de una persona de Personal.');
   }
+  if (role?.locked) return fail(ROL_SISTEMA_SOLO_TECNICO);
   const fit = role ? roleFitError(role, input.staffId, ctx.assignments, ctx.permissions) : null;
   if (fit) return fail(fit);
   const placesOf = accountPlacesOf(input.staffId, ctx.assignments, ctx.places);
@@ -152,6 +154,7 @@ export function accountEditCheck(before: User, change: { role?: string; status?:
   }
   if (nextRole !== before.role || reactivates) {
     const role = ctx.roles.find(r => r.name === nextRole);
+    if (nextRole !== before.role && role?.locked) return ROL_SISTEMA_SOLO_TECNICO;
     const fit = role ? roleFitError(role, before.staffId, ctx.assignments, ctx.permissions) : null;
     if (fit) return fit;
   }

@@ -5,15 +5,13 @@ import { DateInput } from '../../components/ui/DateInput';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Assignment } from '../../context/DataContext';
 import { todayLocalISO } from '../../utils/schedule';
-import { INTERVIEWER_AREA } from '../../utils/enrollment';
+import { SUPERUSER } from '../../utils/authority';
 import {
-  SYSTEM_ROLES,
   WAREHOUSE_AREA,
-  WAREHOUSE_SYSTEM_ROLE,
   areasForPlace,
+  assignablePlaces,
   assignmentToForm,
   buildAssignment,
-  placeRoleError,
   emptyAssignmentForm,
   mainToDemote,
   validateAssignmentForm,
@@ -40,7 +38,7 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
  * Psicopedagogía) y los verificadores de cada sede. Cada trabajador tiene UNA principal.
  */
 export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }: Props) {
-  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, roles, permissions, saveAssignment } = useData();
+  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, roles, permissions, saveAssignment, currentUser, sessionScope } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<AssignmentForm>(emptyAssignmentForm(today));
   const [submitted, setSubmitted] = useState(false);
@@ -62,28 +60,26 @@ export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }:
   const demoted = form.staffId ? mainToDemote(form, assignments, editing?.id) : undefined;
   const forcedMain = !!form.staffId && !form.isMain && willBeMain(form, assignments, editing?.id);
   const count = Object.keys(errors).length;
-  const isInterviewerArea = form.area === INTERVIEWER_AREA;
 
   const place = places.find(p => p.name === form.branch);
-  // Los roles del sistema que admite el lugar: en el almacén solo «Almacén» o «Sin acceso»; «Almacén» no existe en una sede
-  const roleOptions = SYSTEM_ROLES.filter(r => !placeRoleError(place?.kind, r));
+  // Los lugares en los que quien asigna puede hacerlo: sus sedes (todas si alcanza todas) y el almacén solo si lo opera (Superusuario o asignado)
+  const me = users.find(u => u.id === currentUser.id);
+  const placeChoices = assignablePlaces(places, {
+    allBranches: sessionScope.allBranches, isSuperuser: currentUser.role === SUPERUSER,
+    branchNames: [me?.branch, ...(me?.additionalBranches ?? [])].filter((n): n is string => !!n), warehouseIds: me?.warehouses ?? [],
+  }, editing?.branch);
   // Las áreas que admite el lugar: el almacén central solo trabaja en Logística; una sede admite todas
   const areaOptions = areasForPlace(place?.kind);
   const changePlace = (name: string) => {
     const next = places.find(p => p.name === name);
-    const systemRole = next && form.systemRole && placeRoleError(next.kind, form.systemRole) ? '' : form.systemRole;
     const area = next && !areasForPlace(next.kind).includes(form.area) ? '' : form.area;
-    set({
-      branch: name,
-      // En el almacén solo cabe una opción: queda elegida sola
-      area: next?.kind === 'almacen' && !area ? WAREHOUSE_AREA : area,
-      systemRole: next?.kind === 'almacen' && !systemRole ? WAREHOUSE_SYSTEM_ROLE : systemRole,
-    });
+    // En el almacén solo cabe una opción: queda elegida sola
+    set({ branch: name, area: next?.kind === 'almacen' && !area ? WAREHOUSE_AREA : area });
   };
 
   // Qué pasará con la cuenta de la persona (si la tiene): sus sedes y su almacén salen de estas asignaciones
   const account = form.staffId ? userOfStaff(form.staffId, users) : undefined;
-  const accessNote = form.systemRole ? assignmentAccessNote(form.systemRole, place?.kind) : undefined;
+  const accessNote = assignmentAccessNote(form.hasAccess, place?.kind);
   const accountWarning = useMemo(() => {
     if (!account || !place || count > 0) return undefined;
     const built = { ...buildAssignment(form, editing?.id ?? 'ASG-NUEVA', assignments, editing?.id), placeId: place.id, placeKind: place.kind };
@@ -139,10 +135,10 @@ export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }:
             <select className={cls('branch')} value={form.branch} onChange={e => changePlace(e.target.value)}>
               <option value="">Seleccionar sede o almacén...</option>
               <optgroup label="Sedes">
-                {places.filter(p => p.kind === 'sede' && (p.status === 'Activo' || p.name === form.branch)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                {placeChoices.filter(p => p.kind === 'sede' && (p.status === 'Activo' || p.name === form.branch)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
               </optgroup>
               <optgroup label="Almacén central">
-                {places.filter(p => p.kind === 'almacen' && (p.status === 'Activo' || p.name === form.branch)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                {placeChoices.filter(p => p.kind === 'almacen' && (p.status === 'Activo' || p.name === form.branch)).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
               </optgroup>
             </select>
           </Field>
@@ -152,10 +148,10 @@ export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }:
               {areaOptions.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </Field>
-          <Field label="Rol del sistema" required error={err('systemRole')}>
-            <select className={cls('systemRole')} value={form.systemRole} onChange={e => set({ systemRole: e.target.value })}>
-              <option value="">Seleccionar rol...</option>
-              {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+          <Field label="Acceso al sistema" required hint="El rol de su cuenta se elige después, en Organización → Usuarios.">
+            <select className={inputCls} value={form.hasAccess ? 'si' : 'no'} onChange={e => set({ hasAccess: e.target.value === 'si' })}>
+              <option value="si">Sí, necesita acceso</option>
+              <option value="no">No necesita acceso (p. ej. limpieza)</option>
             </select>
           </Field>
           <Field label="Fecha de inicio" required error={err('startDate')}>
@@ -198,13 +194,6 @@ export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }:
           <div className="flex gap-2 text-xs text-warning-text bg-warning-tint border border-warning-text/20 rounded-xl p-3">
             <TriangleAlert size={14} className="shrink-0 mt-0.5" />
             <p>{accountWarning} Se guarda igual, pero corrija su rol en Organización → Usuarios.</p>
-          </div>
-        )}
-
-        {isInterviewerArea && (
-          <div className="flex gap-2 text-xs text-text-secondary bg-info-tint rounded-xl p-3">
-            <Info size={14} className="shrink-0 mt-0.5 text-info-text" />
-            <p>Con esta asignación activa, el trabajador aparecerá como responsable de entrevistas y de asesorías en Matrículas y Psicopedagogía.</p>
           </div>
         )}
 

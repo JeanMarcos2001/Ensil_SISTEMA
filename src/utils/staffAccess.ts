@@ -4,7 +4,8 @@
  * Reglas:
  *  - La cuenta nace DE la ficha: nombre, documento y teléfono salen de Personal (se editan allí, no en Usuarios) y las sedes
  *    salen de las asignaciones activas. Un trabajador tiene como máximo UNA cuenta.
- *  - Solo el personal ACTIVO, con una asignación activa cuyo «rol del sistema» no sea «Sin acceso», puede tener cuenta.
+ *  - Solo el personal ACTIVO, con una asignación activa marcada «con acceso al sistema», puede tener cuenta. El rol de la cuenta se
+ *    elige una sola vez, en Usuarios (no se sugiere desde la asignación).
  *  - La sede principal de la cuenta es la de su asignación principal; las adicionales, las de sus otras asignaciones con acceso.
  *  - Al INACTIVAR al trabajador, su cuenta se desactiva sola (con constancia). Al reactivarlo, la cuenta NO se reactiva sola:
  *    se hace a propósito en Usuarios (no se devuelve un acceso sin que alguien lo decida).
@@ -13,11 +14,6 @@
  */
 import type { Assignment, Staff, User } from '../context/DataContext';
 
-export const NO_ACCESS = 'Sin acceso';
-
-/** Rol sugerido según el «rol del sistema» de la asignación (solo una sugerencia: quien crea la cuenta elige). */
-export const SUGGESTED_ROLE: Record<string, string> = { 'Psicopedagogía': 'Psicopedagogía', Administración: 'Administrador de sede', Ventas: 'Administrador de sede', 'Almacén': 'Almacén central' };
-
 export const staffDisplayName = (s: Pick<Staff, 'names' | 'lastNameP'>) => `${s.names} ${s.lastNameP}`.replace(/\s+/g, ' ').trim();
 
 export const userOfStaff = (staffId: string, users: User[]): User | undefined => users.find(u => u.staffId === staffId);
@@ -25,7 +21,7 @@ export const userOfStaff = (staffId: string, users: User[]): User | undefined =>
 /** Asignaciones activas que dan acceso (principal primero). */
 export function accessAssignments(staffId: string, assignments: Assignment[]): Assignment[] {
   return assignments
-    .filter(a => a.staffId === staffId && a.status === 'Activa' && (a.systemRole ?? '') !== NO_ACCESS)
+    .filter(a => a.staffId === staffId && a.status === 'Activa' && a.hasAccess)
     .sort((a, b) => Number(b.isMain) - Number(a.isMain) || a.startDate.localeCompare(b.startDate));
 }
 
@@ -37,7 +33,6 @@ export interface AccessCheck {
   mainBranch: string;
   /** Sedes de todas sus asignaciones con acceso (la principal primero). */
   branches: string[];
-  suggestedRole: string;
 }
 
 export function accessCheck(staff: Staff, assignments: Assignment[], users: User[]): AccessCheck {
@@ -48,12 +43,11 @@ export function accessCheck(staff: Staff, assignments: Assignment[], users: User
   if (existing) reasons.push(`Ya tiene la cuenta ${existing.id}.`);
   if (own.length === 0) {
     const anyActive = assignments.some(a => a.staffId === staff.id && a.status === 'Activa');
-    reasons.push(anyActive ? 'Sus asignaciones activas tienen el rol del sistema «Sin acceso».' : 'No tiene una asignación activa: defina su sede, área y rol en Personas → Asignaciones.');
+    reasons.push(anyActive ? 'Sus asignaciones activas están marcadas «sin acceso al sistema».' : 'No tiene una asignación activa: defina su lugar de trabajo y su área en Personas → Asignaciones.');
   }
   const branches = [...new Set(own.map(a => a.branch))];
   return {
     ok: reasons.length === 0, reasons, mainBranch: branches[0] ?? '', branches,
-    suggestedRole: SUGGESTED_ROLE[own[0]?.systemRole ?? ''] ?? '',
   };
 }
 
@@ -63,13 +57,12 @@ export interface LinkedDefaults {
   phone: string;
   branch: string;
   additionalBranches: string[];
-  role: string;
 }
 
 /** Datos con los que se abre la cuenta de un trabajador. */
 export function defaultsFromStaff(staff: Staff, assignments: Assignment[], users: User[]): LinkedDefaults {
   const check = accessCheck(staff, assignments, users);
-  return { name: staffDisplayName(staff), document: staff.docNumber, phone: staff.phone, branch: check.mainBranch, additionalBranches: check.branches.slice(1), role: check.suggestedRole };
+  return { name: staffDisplayName(staff), document: staff.docNumber, phone: staff.phone, branch: check.mainBranch, additionalBranches: check.branches.slice(1) };
 }
 
 export interface UserInput {

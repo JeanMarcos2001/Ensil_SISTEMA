@@ -170,3 +170,7 @@ Los pasos 2 y 3 son la base: sin ellos el constructor trabajaría con datos inve
 ## Paso 10 (continuación): Personal y asignaciones en la base; la cuenta nace de una persona ✅ (2026-11-06)
 
 Hecho: tablas `personal` y `asignaciones` con RLS por función y disparadores (migración 0004); gancho `useStaffDirectory` y servicios con repositorio inyectable; Usuarios crea la cuenta eligiendo a la persona (nombre, documento, teléfono y lugares salen de Personal y Asignaciones), con roles filtrados por compatibilidad con su lugar de trabajo y correo institucional; cuenta técnica solo para el Superusuario. Pendiente de activar: ejecutar la migración 0004 y redesplegar la Edge Function `usuarios`. Siguen con datos de ejemplo: contratos, planilla, vacaciones, agenda y matrículas (sus ids de personal de ejemplo no se mezclan con los de la base).
+
+## Paso 10 (continuación): un solo lugar para cada dato ✅ (2026-11-06)
+
+Hecho: la asignación solo dice si la persona necesita acceso (Sí/No) y el rol real se elige únicamente en Usuarios (filtrado por su lugar de trabajo); el Superusuario es solo para cuentas técnicas; Personal y Asignaciones respetan el alcance por sede (en la base y en el formulario); Personal y Asignaciones no se cruzan con los contratos y la agenda de ejemplo. Pendiente de activar: migración 0006 y redespliegue de la Edge Function `usuarios`. Siguen: sedes y almacén de la base como única fuente para el resto del sistema, y Contratos y Planilla en la base (con empresa y cargo).

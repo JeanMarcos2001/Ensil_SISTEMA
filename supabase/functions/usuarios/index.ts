@@ -50,7 +50,7 @@ const db: CuentasDb = {
       admin.from('sedes').select('id, nombre, estado'),
       admin.from('almacenes').select('id, nombre, estado'),
       admin.from('personal').select('id, nombres, apellido_paterno, estado, correo_personal'),
-      admin.from('asignaciones').select('personal_id, sede_id, almacen_id, rol_sistema, es_principal, estado, fecha_inicio').eq('estado', 'Activa'),
+      admin.from('asignaciones').select('personal_id, sede_id, almacen_id, con_acceso, es_principal, estado, fecha_inicio').eq('estado', 'Activa'),
       // Qué roles tienen alguna función que mueve el almacén (solo esas filas: son pocas)
       admin.from('rol_funciones').select('rol_id').in('funcion_id', [...FUNCIONES_QUE_MUEVEN_ALMACEN]),
     ]);
@@ -60,7 +60,7 @@ const db: CuentasDb = {
     const infoRoles: RolInfo[] = roles.data.map(r => ({ id: r.id, nombre: r.nombre, estado: r.estado as Estado, esSistema: r.es_sistema, limite: r.limite_cuentas_por_sede, mueveAlmacen: conMovers.has(r.id) }));
     const infoPersonal: PersonaInfo[] = personal.data.map(p => ({ id: p.id, nombre: `${p.nombres} ${p.apellido_paterno}`.trim(), estado: p.estado as Estado, correoPersonal: p.correo_personal }));
     const infoAsignaciones: AsignacionInfo[] = asignaciones.data.map(a => ({
-      personalId: a.personal_id, sedeId: a.sede_id, almacenId: a.almacen_id, rolSistema: a.rol_sistema, esPrincipal: a.es_principal, estado: a.estado as 'Activa' | 'Cerrada', fechaInicio: a.fecha_inicio,
+      personalId: a.personal_id, sedeId: a.sede_id, almacenId: a.almacen_id, conAcceso: a.con_acceso, esPrincipal: a.es_principal, estado: a.estado as 'Activa' | 'Cerrada', fechaInicio: a.fecha_inicio,
     }));
     const infoCuentas: CuentaInfo[] = cuentas.data.map(c => ({
       id: c.id, nombre: c.nombre, correo: c.correo, rolId: c.rol_id, estado: c.estado as Estado, todasLasSedes: c.todas_las_sedes, ultimoAcceso: c.ultimo_acceso, documento: c.documento, telefono: c.telefono, personalId: c.personal_id,

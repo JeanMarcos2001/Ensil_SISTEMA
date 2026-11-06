@@ -10,7 +10,7 @@ import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { StaffFormModal } from './people/StaffFormModal';
 import { contractStatus, positionOf } from '../utils/payroll';
-import { allActivities, todayLocalISO } from '../utils/schedule';
+import { todayLocalISO } from '../utils/schedule';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
@@ -20,9 +20,12 @@ import { StaffDbNotice } from '../components/people/StaffDbNotice';
 import { PERM } from '../utils/authority';
 import { formatDisplayDate } from '../utils/tariffs';
 import { ageText, staffAge } from '../utils/identity';
+import { NOT_YET_IN_DB } from '../utils/staffDb';
 
 export function StaffPage() {
-  const { orgStaff: staff, contracts, orgAssignments: assignments, orgPlaces: places, schedules, monthlySchedules, users, inactivateStaff, reactivateStaff, can } = useData();
+  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, inactivateStaff, reactivateStaff, can } = useData();
+  // Contratos y agenda aún no están en la base: no se cruzan con las personas de la base (ver NOT_YET_IN_DB)
+  const { contracts, schedules, activities } = NOT_YET_IN_DB;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [toInactivate, setToInactivate] = useState<Staff | null>(null);
@@ -78,8 +81,8 @@ export function StaffPage() {
   }, [params, staff, setParams]);
 
   const inactivation = useMemo(
-    () => (toInactivate ? inactivationCheck(toInactivate, { contracts, assignments, schedules, activities: allActivities(monthlySchedules), today }) : undefined),
-    [toInactivate, contracts, assignments, schedules, monthlySchedules, today]
+    () => (toInactivate ? inactivationCheck(toInactivate, { contracts, assignments, schedules, activities, today }) : undefined),
+    [toInactivate, contracts, assignments, schedules, activities, today]
   );
 
   const handleExport = () => {
@@ -151,14 +154,16 @@ export function StaffPage() {
                 <option key={b.id} value={b.name}>{b.name}{b.kind === 'almacen' && !b.name.toLowerCase().includes('almac') ? ' (almacén)' : ''}</option>
               ))}
             </select>
-            <select
-              value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value)}
-              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
-            >
-              <option value="">Todos los cargos</option>
-              {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+            {roleOptions.length > 0 && (
+              <select
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
+              >
+                <option value="">Todos los cargos</option>
+                {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            )}
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
@@ -414,7 +419,7 @@ export function StaffPage() {
               <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Contrato Vigente</h3>
               {(() => {
                 const activeContract = contracts.find(c => c.staffId === selectedStaff.id && contractStatus(c, todayLocalISO()) === 'Vigente');
-                if (!activeContract) return <p className="text-sm text-text-muted italic">No hay contrato vigente registrado.</p>;
+                if (!activeContract) return <p className="text-sm text-text-muted italic">Todavía no hay contrato registrado para esta persona (los contratos de las personas de la base se pasarán a la base de datos).</p>;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 bg-surface-muted p-4 rounded-xl border border-border-soft">
                     <div>

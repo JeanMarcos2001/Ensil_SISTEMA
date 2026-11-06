@@ -17,7 +17,7 @@ import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEn
 import { partsUSD } from '../utils/payments';
 import type { AssignmentForm, Place } from '../utils/assignments';
 import { useStaffDirectory, type StaffDirectoryStatus } from '../hooks/useStaffDirectory';
-import { placesOf } from '../utils/staffDb';
+import { NOT_YET_IN_DB, placesOf } from '../utils/staffDb';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
 import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
 import { buildRenewal, markRenewed, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
@@ -1072,7 +1072,8 @@ export interface Assignment {
   placeId?: string;
   placeKind?: 'sede' | 'almacen';
   area: string;
-  systemRole?: string;
+  /** La persona necesita acceso al sistema en este lugar de trabajo (de las asignaciones con acceso salen las sedes y el almacén de su cuenta). */
+  hasAccess: boolean;
   startDate: string;
   endDate?: string;
   isMain: boolean;
@@ -3179,10 +3180,11 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
   const saveAssignment: DataContextType['saveAssignment'] = (form, editingId) => staffDir.saveAssignment(form, todayLocalISO(), editingId);
 
   const closeAssignment: DataContextType['closeAssignment'] = (id, date, reason) =>
-    staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules, activities: allActivities(monthlySchedules) });
+    staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities });
 
   const inactivateStaff: DataContextType['inactivateStaff'] = async (id, input) => {
-    const ctx = { contracts, assignments: [], schedules, activities: allActivities(monthlySchedules), today: todayLocalISO() };
+    // Los contratos y la agenda de ejemplo no se cruzan con las personas de la base (ver NOT_YET_IN_DB)
+    const ctx = { contracts: NOT_YET_IN_DB.contracts, assignments: [], schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities, today: todayLocalISO() };
     const hasActiveAccount = users.some(u => u.staffId === id && u.status === 'Activo');
     const res = await staffDir.inactivateStaff(id, input, currentUser.name, ctx, hasActiveAccount);
     return { ok: res.ok, error: res.error };

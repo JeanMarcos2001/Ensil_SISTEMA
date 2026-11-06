@@ -7,9 +7,20 @@
  * - Nombre, documento y teléfono de la cuenta de la persona, y las sedes y el almacén de esa cuenta, los mantiene la base a partir de la
  *   ficha y de las asignaciones activas con acceso: aquí solo se explica lo que va a pasar.
  */
-import type { Assignment, Branch, Permission, Role, Staff, User, Warehouse } from '../context/DataContext';
+import type { Assignment, Branch, Contract, Permission, Role, Schedule, Staff, User, Warehouse } from '../context/DataContext';
 import { errorCoherenciaRolLugar, rolMueveAlmacen } from '../../supabase/functions/usuarios/reglas.ts';
-import { type Place, WAREHOUSE_SYSTEM_ROLE } from './assignments';
+import type { Place } from './assignments';
+import type { FlatActivity } from './schedule';
+
+// ------------------------------------------------------------------------------------------------------------------ Lo que todavía no está en la base
+
+/**
+ * Contratos, asesorías y actividades todavía NO están en la base: son datos de ejemplo con sus propios ids de personal (`STF-001`…), que
+ * tienen el MISMO formato que los de la base. Cruzarlos atribuiría a una persona de la base el contrato o las asesorías de otra de ejemplo
+ * (p. ej. el cargo y el contrato de «Laura» a quien en la base también es `STF-001`). Por eso Personal y Asignaciones, que ya leen la base,
+ * usan estas listas vacías: una persona de la base aún no tiene contrato, asesorías ni actividades. Se quita cuando pasen a la base.
+ */
+export const NOT_YET_IN_DB = { contracts: [] as Contract[], schedules: [] as Schedule[], activities: [] as FlatActivity[] };
 
 // ------------------------------------------------------------------------------------------------------------------ Filas de la base
 
@@ -44,7 +55,7 @@ export interface AsignacionRow {
   sede_id: string | null;
   almacen_id: string | null;
   area: string;
-  rol_sistema: string;
+  con_acceso: boolean;
   fecha_inicio: string;
   fecha_fin: string | null;
   es_principal: boolean;
@@ -119,7 +130,7 @@ export function assignmentFromRow(r: AsignacionRow, places: Place[]): Assignment
   const place = places.find(p => p.id === placeId);
   return {
     id: r.id, staffId: r.personal_id, branch: place?.name ?? placeId, placeId, placeKind: r.sede_id ? 'sede' : 'almacen', area: r.area,
-    systemRole: r.rol_sistema, startDate: r.fecha_inicio, endDate: r.fecha_fin ?? undefined, isMain: r.es_principal, status: r.estado,
+    hasAccess: r.con_acceso, startDate: r.fecha_inicio, endDate: r.fecha_fin ?? undefined, isMain: r.es_principal, status: r.estado,
     observations: r.observaciones ?? undefined, closeReason: r.motivo_cierre ?? undefined, closedBy: r.cerrada_por ?? undefined,
   };
 }
@@ -129,15 +140,15 @@ export function assignmentToRow(a: Assignment): AsignacionRow {
   const isWarehouse = a.placeKind === 'almacen';
   return {
     id: a.id, personal_id: a.staffId, sede_id: isWarehouse ? null : a.placeId ?? null, almacen_id: isWarehouse ? a.placeId ?? null : null, area: a.area,
-    rol_sistema: a.systemRole ?? 'Sin acceso', fecha_inicio: a.startDate, fecha_fin: a.endDate ?? null, es_principal: a.isMain, estado: a.status,
+    con_acceso: a.hasAccess, fecha_inicio: a.startDate, fecha_fin: a.endDate ?? null, es_principal: a.isMain, estado: a.status,
     observaciones: orNull(a.observations), motivo_cierre: orNull(a.closeReason), cerrada_por: orNull(a.closedBy),
   };
 }
 
 // ------------------------------------------------------------------------------------------------------------------ Reglas de acceso del personal
 
-/** Roles del sistema de una asignación que dan acceso al sistema (todos menos «Sin acceso»). */
-export const grantsAccess = (a: Pick<Assignment, 'systemRole'>) => (a.systemRole ?? '') !== 'Sin acceso';
+/** ¿La asignación da acceso al sistema? (las marcadas «sin acceso», como las de limpieza, no aportan lugares a la cuenta). */
+export const grantsAccess = (a: Pick<Assignment, 'hasAccess'>) => a.hasAccess;
 
 export const isWarehouseAssignment = (a: Pick<Assignment, 'placeKind'>) => a.placeKind === 'almacen';
 
@@ -157,9 +168,9 @@ export function derivedPlaces(staffId: string, assignments: Assignment[]): Deriv
  * Aviso (no bloquea) al guardar una asignación: dice qué rol de cuenta pide el lugar. Quien trabaja en el almacén necesita un rol que
  * mueva el almacén; quien solo trabaja en sedes, uno que no lo mueva. La regla dura se aplica al crear la cuenta o cambiar su rol.
  */
-export function assignmentAccessNote(systemRole: string, kind: Place['kind']): string | undefined {
-  if (systemRole === 'Sin acceso') return 'Con «Sin acceso» no aporta lugares a la cuenta de la persona (puede ser de limpieza, por ejemplo).';
-  if (kind === 'almacen' && systemRole === WAREHOUSE_SYSTEM_ROLE) return 'Su cuenta necesitará un rol que mueva el almacén (despachar, ingresar compras, ajustar stock).';
+export function assignmentAccessNote(hasAccess: boolean, kind: Place['kind']): string | undefined {
+  if (!hasAccess) return 'Sin acceso al sistema: este lugar no se suma a las sedes ni al almacén de su cuenta (por ejemplo, personal de limpieza).';
+  if (kind === 'almacen') return 'Su cuenta necesitará un rol que mueva el almacén (despachar, ingresar compras, ajustar stock). El rol se elige en Organización → Usuarios.';
   return undefined;
 }
 

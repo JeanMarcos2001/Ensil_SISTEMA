@@ -10,7 +10,7 @@ import { estimateNet, pensionRate } from '../src/utils/payroll';
 import {
   PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
 } from '../src/utils/payrollRun';
-import { NO_ACCESS, accessCheck, defaultsFromStaff, deactivationNote, syncPatch, validateLinkedUser } from '../src/utils/staffAccess';
+import { accessCheck, defaultsFromStaff, deactivationNote, syncPatch, validateLinkedUser } from '../src/utils/staffAccess';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -96,8 +96,8 @@ const contracts: Contract[] = [
   contract('C3', '4', { type: 'Indeterminado', startDate: '2024-01-01', endDate: '2026-10-10', grossSalary: 2000, pensionSystem: 'ONP' }, 'Cesado'),
 ];
 const asg = (id: string, staffId: string, branch: string, o: Partial<Assignment> = {}): Assignment =>
-  ({ id, staffId, branch, area: 'Psicopedagogía', role: 'Psicólogo', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa', ...o } as Assignment);
-const assignments: Assignment[] = [asg('A1', '1', 'Piura'), asg('A2', '2', 'Chiclayo', { systemRole: 'Administración' }), asg('A3', '2', 'Piura', { isMain: false, systemRole: 'Ventas' })];
+  ({ id, staffId, branch, area: 'Psicopedagogía', hasAccess: true, startDate: '2023-01-01', isMain: true, status: 'Activa', ...o } as Assignment);
+const assignments: Assignment[] = [asg('A1', '1', 'Piura'), asg('A2', '2', 'Chiclayo', { area: 'Administración' }), asg('A3', '2', 'Piura', { isMain: false, area: 'Ventas' })];
 const ctx = { contracts, staff: staffList, assignments, runs: [] as PayrollRun[] };
 check('Contratos que cubren el mes (incluye el que cesó dentro de él)', contractsInPeriod(contracts, '2026-10').map(c => c.id).join() === 'C1,C2,C3' && contractsInPeriod(contracts, '2026-11').map(c => c.id).join() === 'C1,C2');
 const built = buildLines('2026-10', ctx, []);
@@ -151,8 +151,8 @@ const mariaStaff = staffList[1];
 const chk = accessCheck(mariaStaff, assignments, users);
 check('María: puede tener cuenta; su sede principal es la de su asignación principal y las demás pasan a adicionales', chk.ok && chk.mainBranch === 'Chiclayo' && chk.branches.join() === 'Chiclayo,Piura', JSON.stringify(chk));
 check('Quien ya tiene cuenta, está inactivo o no tiene asignación no puede', !accessCheck(staffList[0], assignments, users).ok && !accessCheck(staffList[3], assignments, users).ok && !accessCheck(staffList[2], assignments, users).ok);
-check('«Sin acceso» en todas las asignaciones impide la cuenta', (() => { const r = accessCheck(mariaStaff, assignments.map(a => (a.staffId === '2' ? { ...a, systemRole: NO_ACCESS } : a)), users); return !r.ok && /Sin acceso/.test(r.reasons[0]); })());
-check('Rol sugerido según el rol del sistema', accessCheck(staffList[0], assignments, []).suggestedRole === 'Psicopedagogía' && chk.suggestedRole === 'Administrador de sede');
+check('«Sin acceso al sistema» en todas las asignaciones impide la cuenta', (() => { const r = accessCheck(mariaStaff, assignments.map(a => (a.staffId === '2' ? { ...a, hasAccess: false } : a)), users); return !r.ok && /sin acceso/.test(r.reasons[0]); })());
+check('El rol de la cuenta no se sugiere desde la asignación: se elige una sola vez, en Usuarios', !('suggestedRole' in chk) && !('role' in defaultsFromStaff(mariaStaff, assignments, users)));
 const def = defaultsFromStaff(mariaStaff, assignments, users);
 check('La cuenta nace de la ficha', def.name === 'María Torres' && def.document === '87654321' && def.phone === '912345678' && def.branch === 'Chiclayo' && def.additionalBranches.join() === 'Piura');
 const input = { staffId: '2', email: 'm@x.pe', role: 'Cajero', branch: 'Chiclayo', additionalBranches: ['Piura'], status: 'Activo' };
