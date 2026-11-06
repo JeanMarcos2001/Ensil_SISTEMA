@@ -9,19 +9,20 @@ import { useData, Staff } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { StaffFormModal } from './people/StaffFormModal';
-import { contractStatus } from '../utils/payroll';
+import { contractStatus, positionOf } from '../utils/payroll';
 import { allActivities, todayLocalISO } from '../utils/schedule';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { INACTIVATION_REASONS, inactivationCheck, statusNote } from '../utils/staffStatus';
 import { accessCheck, userOfStaff } from '../utils/staffAccess';
+import { StaffDbNotice } from '../components/people/StaffDbNotice';
 import { PERM } from '../utils/authority';
 import { formatDisplayDate } from '../utils/tariffs';
 import { ageText, staffAge } from '../utils/identity';
 
 export function StaffPage() {
-  const { staff, contracts, assignments, branches, schedules, monthlySchedules, users, inactivateStaff, reactivateStaff, can } = useData();
+  const { orgStaff: staff, contracts, orgAssignments: assignments, orgPlaces: places, schedules, monthlySchedules, users, inactivateStaff, reactivateStaff, can } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [toInactivate, setToInactivate] = useState<Staff | null>(null);
@@ -48,12 +49,13 @@ export function StaffPage() {
 
     const memberAssignment = assignments.find(a => a.staffId === member.id && a.isMain);
     const matchesBranch = !selectedBranch || memberAssignment?.branch === selectedBranch;
-    const matchesRole = !selectedRole || memberAssignment?.role === selectedRole;
+    const matchesRole = !selectedRole || positionOf(member.id, contracts, today) === selectedRole;
     const matchesStatus = !selectedStatus || member.status === selectedStatus;
 
     return matchesSearch && matchesBranch && matchesRole && matchesStatus;
   });
-  const roleOptions = useMemo(() => [...new Set(assignments.filter(a => a.isMain).map(a => a.role))].sort(), [assignments]);
+  // El cargo sale del contrato de cada persona (no de sus asignaciones)
+  const roleOptions = useMemo(() => [...new Set(staff.map(s => positionOf(s.id, contracts, today)).filter((p): p is string => !!p))].sort(), [staff, contracts, today]);
   const hasFilters = !!(searchTerm || selectedBranch || selectedRole || selectedStatus);
   const clearFilters = () => { setSearchTerm(''); setSelectedBranch(''); setSelectedRole(''); setSelectedStatus(''); };
 
@@ -86,7 +88,7 @@ export function StaffPage() {
       ['Código', 'Nombres', 'Apellido paterno', 'Apellido materno', 'Documento', 'Celular', 'Correo personal', 'Sede', 'Área', 'Cargo', 'Estado', 'Baja / reactivación'],
       filteredStaff.map(m => {
         const a = assignments.find(x => x.staffId === m.id && x.isMain);
-        return [m.code, m.names, m.lastNameP, m.lastNameM, `${m.docType} ${m.docNumber}`, m.phone, m.personalEmail ?? '', a?.branch ?? '', a?.area ?? '', a?.role ?? '', m.status, statusNote(m)];
+        return [m.code, m.names, m.lastNameP, m.lastNameM, `${m.docType} ${m.docNumber}`, m.phone, m.personalEmail ?? '', a?.branch ?? '', a?.area ?? '', positionOf(m.id, contracts, today) ?? '', m.status, statusNote(m)];
       })
     );
   };
@@ -123,6 +125,8 @@ export function StaffPage() {
         </div>
       </div>
 
+      <StaffDbNotice />
+
       {/* Filters */}
       <Card className="mb-6 p-4">
         <div className="flex flex-col md:flex-row gap-4">
@@ -142,9 +146,9 @@ export function StaffPage() {
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
             >
-              <option value="">Todas las sedes</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.name}>{b.name}</option>
+              <option value="">Todos los lugares</option>
+              {places.map(b => (
+                <option key={b.id} value={b.name}>{b.name}{b.kind === 'almacen' && !b.name.toLowerCase().includes('almac') ? ' (almacén)' : ''}</option>
               ))}
             </select>
             <select
@@ -202,7 +206,7 @@ export function StaffPage() {
                       <div className="text-text-primary">{mainAssignment?.branch || '-'}</div>
                       <div className="text-xs text-text-muted">{mainAssignment?.area || '-'}</div>
                     </td>
-                    <td className="px-6 py-4 text-text-primary">{mainAssignment?.role || '-'}</td>
+                    <td className="px-6 py-4 text-text-primary">{positionOf(member.id, contracts, today) ?? <span className="text-xs text-text-muted">Sin contrato</span>}</td>
                     <td className="px-6 py-4">
                       <Badge variant={member.status === 'Activo' ? 'success' : 'danger'}>{member.status}</Badge>
                     </td>
@@ -218,9 +222,13 @@ export function StaffPage() {
                           { label: 'Editar datos', hidden: !can('per-personal:edit'), onClick: () => handleOpenForm(member) },
                           { label: 'Ver contratos', hidden: !can('per-contratos:view'), onClick: () => navigate(`/personas/contratos?trabajador=${member.id}`) },
                           { label: 'Ver asignaciones', hidden: !can('per-asignaciones:view'), onClick: () => navigate(`/personas/asignaciones?trabajador=${member.id}`) },
-                          account
-                            ? { label: `Ver usuario (${account.id})`, onClick: () => navigate(`/organizacion/usuarios?usuario=${account.id}`) }
-                            : { label: 'Crear usuario de acceso', onClick: () => navigate(`/organizacion/usuarios?personal=${member.id}`), disabled: !access.ok || !can(PERM.userCreate) },
+                          // La cuenta nace de la ficha (se crea en Organización → Usuarios con invitación por correo): sin cuenta se ofrece crearla, con cuenta se enlaza
+                          ...(account
+                            ? [{ label: `Ver usuario (${account.id})`, hidden: !can('org-usuarios:view'), onClick: () => navigate(`/organizacion/usuarios?usuario=${account.id}`) }]
+                            : [{
+                              label: 'Crear usuario de acceso', hidden: !can('org-usuarios:create') || member.status !== 'Activo',
+                              disabled: !access.ok, reason: access.reasons[0], onClick: () => navigate(`/organizacion/usuarios?personal=${member.id}`),
+                            }]),
                           { label: 'Ver planillas', hidden: !can(PERM.payrollView), onClick: () => navigate(`/personas/planilla?trabajador=${member.id}`) },
                           member.status === 'Activo'
                             ? { label: 'Inactivar', hidden: !can('per-personal:inactivate'), onClick: () => setToInactivate(member), danger: true }
@@ -372,7 +380,7 @@ export function StaffPage() {
                 {assignments.filter(a => a.staffId === selectedStaff.id && a.status === 'Activa').map(asg => (
                   <div key={asg.id} className="flex items-center justify-between p-3 bg-surface-muted rounded-lg border border-border-soft">
                     <div>
-                      <div className="text-sm font-medium text-text-primary">{asg.role} - {asg.area}</div>
+                      <div className="text-sm font-medium text-text-primary">{asg.area}</div>
                       <div className="text-xs text-text-muted">{asg.branch} | Desde: {asg.startDate}</div>
                     </div>
                     {asg.isMain && <Badge variant="primary">Principal</Badge>}
@@ -409,6 +417,10 @@ export function StaffPage() {
                 if (!activeContract) return <p className="text-sm text-text-muted italic">No hay contrato vigente registrado.</p>;
                 return (
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 bg-surface-muted p-4 rounded-xl border border-border-soft">
+                    <div>
+                      <label className="text-xs text-text-muted uppercase tracking-wider">Cargo</label>
+                      <p className="text-sm font-medium text-text-primary mt-1">{activeContract.position || '-'}</p>
+                    </div>
                     <div>
                       <label className="text-xs text-text-muted uppercase tracking-wider">Tipo</label>
                       <p className="text-sm font-medium text-text-primary mt-1">{activeContract.type}</p>
@@ -456,9 +468,9 @@ export function StaffPage() {
             {inactivation.activities.length > 0 && <li>Tiene {inactivation.activities.length} actividad(es) especial(es) a su cargo. Asigne otro responsable en Psicopedagogía → Programación → Actividades especiales.</li>}
           </ul>
         ) : null}
-        onSubmit={({ reason, detail, date }) => {
+        onSubmit={async ({ reason, detail, date }) => {
           if (!toInactivate) return;
-          const r = inactivateStaff(toInactivate.id, { reason, detail, date });
+          const r = await inactivateStaff(toInactivate.id, { reason, detail, date });
           return r.ok ? null : r.error ?? 'No se pudo inactivar al trabajador.';
         }}
       >
@@ -493,9 +505,9 @@ export function StaffPage() {
         size="md"
         detailLabel="Motivo de la reactivación"
         detailPlaceholder="Ej: Reingreso a la institución..."
-        onSubmit={({ detail }) => {
+        onSubmit={async ({ detail }) => {
           if (!toReactivate) return;
-          const r = reactivateStaff(toReactivate.id, detail);
+          const r = await reactivateStaff(toReactivate.id, detail);
           return r.ok ? null : r.error ?? 'No se pudo reactivar al trabajador.';
         }}
       >

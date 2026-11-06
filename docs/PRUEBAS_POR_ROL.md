@@ -10,10 +10,10 @@
 | Laura Martínez | Administrador de sede | Piura | 57 | 30 | 23 | 6 | 7 |
 | Marco Salas | Administrador de sede | Los Olivos | 57 | 30 | 23 | 6 | 7 |
 | Juan Pérez | Psicopedagogía | Piura | 15 | 6 | 8 | 0 | 1 |
-| Rosa Quispe | Almacén central | todas (9) | 23 | 12 | 9 | 1 | 5 |
+| Rosa Quispe | Almacén central | todas (9) | 24 | 12 | 9 | 1 | 6 |
 | Admin Sistema | Administración general | todas (9) | 87 | 48 | 31 | 5 | 13 |
 | Elena Ramos | Contabilidad | todas (9) | 17 | 1 | 11 | 2 | 1 |
-| Superadmin | Superusuario | todas (9) | 183 | 121 | 47 | 7 | todos (soporte) |
+| Superadmin | Superusuario | todas (9) | 184 | 122 | 48 | 7 | todos (soporte) |
 
 ## 2. Acciones clave
 
@@ -114,6 +114,7 @@ Solo los ítems que piden una función (todos ven «Preferencias» y el botón �
 | Personas › Titulares | ✔ | ✔ | — | — | — | — | ✔ |
 | Logística › Envíos | — | — | — | ✔ | — | — | ✔ |
 | Logística › Ajustes y mermas | — | — | — | ✔ | — | — | ✔ |
+| Organización › Almacenes | — | — | — | — | — | — | ✔ |
 | Organización › Roles | — | — | — | — | — | — | ✔ |
 | Organización › Permisos | — | — | — | — | — | — | ✔ |
 | Organización › Usuarios | — | — | — | — | — | — | ✔ |
@@ -138,7 +139,7 @@ Para un caso en su propia sede (el origen de los envíos es el almacén). El Sup
 - **Laura Martínez** (Sede (Piura)): Envío despachado, Envío cancelado, Transferencia en tránsito, Stock por debajo del mínimo, Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
 - **Marco Salas** (Sede (Los Olivos)): Envío despachado, Envío cancelado, Transferencia en tránsito, Stock por debajo del mínimo, Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
 - **Juan Pérez** (Psicopedagogía): Primera asesoría sin materiales entregados
-- **Rosa Quispe** (Almacén): Envío recibido, Transferencia solicitada, Transferencia recibida, Recepción con faltante o daño, Stock por debajo del mínimo
+- **Rosa Quispe** (Almacén): Envío recibido, Transferencia solicitada, Transferencia en tránsito, Transferencia recibida, Recepción con faltante o daño, Stock por debajo del mínimo
 - **Admin Sistema** (Admin. general): Transferencia aprobada o rechazada, Recepción con faltante o daño, Solicitud de caída pendiente, Solicitud de reactivación pendiente, Solicitud de cambio de programa pendiente, Solicitud de traslado de sede pendiente, Solicitud resuelta, Pago reversado, Movimiento de caja reversado, Caja reabierta, Cuota refinanciada, Contratos por vencer, Permisos de un rol modificados
 - **Elena Ramos** (Contabilidad): Cuota refinanciada
 

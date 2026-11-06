@@ -129,6 +129,7 @@ check('El contrato anterior sigue siendo el único «vigente» hasta renovar (la
 const built = buildRenewal(expiring, { ...input, grossSalary: '3000' }, juan, 2026);
 check('El contrato nuevo nace vigente, con el sueldo nuevo, el neto calculado, sin vacaciones y con el vínculo y el motivo', built.status === 'Vigente' && built.grossSalary === 3000 && (built.netSalary ?? 0) > 0 && built.vacationStart === undefined && built.renewsId === 'C1' && /Buen desempeño/.test(built.observations ?? ''));
 check('Sin sueldo nuevo se mantiene el anterior', buildRenewal(expiring, input, juan, 2026).grossSalary === 2500);
+check('La renovación conserva el cargo del contrato anterior', buildRenewal({ ...expiring, position: 'Psicólogo Senior' }, input, juan, 2026).position === 'Psicólogo Senior');
 check('El anterior queda «Renovado» sin perder su fecha de fin; a cuál dio paso se deduce', (() => {
   const old = markRenewed(expiring);
   const next = { ...built, id: 'C2' } as Contract;

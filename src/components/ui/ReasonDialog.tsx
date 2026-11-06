@@ -34,7 +34,8 @@ interface Props {
   /** Si hay un impedimento, se muestra y el botón queda deshabilitado. */
   blocked?: React.ReactNode;
   /** Devuelve el mensaje de error, o nada si se aplicó. El diálogo se cierra solo si se aplicó. */
-  onSubmit: (values: ReasonValues) => string | null | undefined | void;
+  /** Devuelve el texto del error si no se pudo, o nada si se hizo. Puede ser asíncrona (guardar en la base de datos). */
+  onSubmit: (values: ReasonValues) => string | null | undefined | void | Promise<string | null | undefined | void>;
 }
 
 /**
@@ -56,10 +57,18 @@ export function ReasonDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  const submit = () => {
-    const r = onSubmit({ reason, detail, date });
-    if (typeof r === 'string' && r) { setError(r); return; }
-    onClose();
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await onSubmit({ reason, detail, date });
+      if (typeof r === 'string' && r) { setError(r); return; }
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -71,7 +80,7 @@ export function ReasonDialog({
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={submit} disabled={!!blocked}>{confirmLabel}</Button>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={() => void submit()} disabled={!!blocked || busy}>{busy ? 'Guardando…' : confirmLabel}</Button>
         </div>
       }
     >

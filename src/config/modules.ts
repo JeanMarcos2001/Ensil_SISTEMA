@@ -38,7 +38,7 @@ export const MODULE_DATA: Record<string, { title: string, groups: { title?: stri
   organizacion: {
     title: 'Organización',
     groups: [
-      { items: ['Empresas', 'Filiales', 'Roles', 'Permisos', 'Usuarios'] }
+      { items: ['Empresas', 'Filiales', 'Almacenes', 'Roles', 'Permisos', 'Usuarios'] }
     ]
   },
   reportes: {

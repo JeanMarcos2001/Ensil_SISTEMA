@@ -40,7 +40,7 @@ export function Receptions() {
   const { 
     shipments, 
     transfers,
-    branches,
+    stockLocations,
     items,
     shippingMethods,
     couriers,
@@ -58,6 +58,7 @@ export function Receptions() {
   const [generalObservation, setGeneralObservation] = useState('');
   const [isAddingExtra, setIsAddingExtra] = useState(false);
   const [extraItemSearch, setExtraItemSearch] = useState('');
+  const [receptionError, setReceptionError] = useState<string | null>(null);
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,6 +121,7 @@ export function Receptions() {
     
     setReceptionItems(initialItems);
     setGeneralObservation('');
+    setReceptionError(null);
     setIsReceptionOpen(true);
   };
 
@@ -162,7 +164,7 @@ export function Receptions() {
   const handleConfirmReception = () => {
     if (!selectedDocument) return;
 
-    confirmReception({
+    const result = confirmReception({
       docId: selectedDocument.data.id,
       docType: selectedDocument.type,
       receivedItems: receptionItems.map(ri => ({
@@ -173,7 +175,9 @@ export function Receptions() {
       })),
       generalObservation
     });
+    if (!result.ok) { setReceptionError(result.error ?? 'No se pudo confirmar la recepción.'); return; }
 
+    setReceptionError(null);
     setIsReceptionOpen(false);
   };
 
@@ -205,7 +209,7 @@ export function Receptions() {
           Para gestionar recepciones, elige una filial específica.
         </p>
         <div className="flex gap-4">
-          {branches.filter(b => sessionScope.branchIds.includes(b.id)).map(branch => (
+          {stockLocations.filter(b => sessionScope.branchIds.includes(b.id) || sessionScope.warehouseIds.includes(b.id)).map(branch => (
             <button
               key={branch.id}
               onClick={() => selectBranch(branch.id)}
@@ -226,7 +230,7 @@ export function Receptions() {
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Recepciones</h2>
           <p className="text-sm text-text-secondary">
-            Bandeja única de recepción para <span className="font-medium text-primary-accent">{branches.find(b => b.id === currentBranchId)?.name}</span>
+            Bandeja única de recepción para <span className="font-medium text-primary-accent">{stockLocations.find(b => b.id === currentBranchId)?.name}</span>
           </p>
         </div>
       </div>
@@ -286,7 +290,7 @@ export function Receptions() {
             </thead>
             <tbody className="divide-y divide-border-soft">
               {filteredDocuments.map((doc) => {
-                const origin = branches.find(b => b.id === doc.originId)?.name || 'Sede Central (Piura)';
+                const origin = stockLocations.find(b => b.id === doc.originId)?.name || doc.originId;
                 const eta = 'eta' in doc ? doc.eta : doc.date;
                 const sm = 'shippingMethodId' in doc ? shippingMethods.find(m => m.id === doc.shippingMethodId) : null;
                 const cr = 'courierId' in doc ? couriers.find(c => c.id === doc.courierId) : null;
@@ -376,13 +380,13 @@ export function Receptions() {
                 <div>
                   <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Origen</p>
                   <p className="text-sm font-semibold text-text-primary">
-                    {branches.find(b => b.id === selectedDocument.data.originId)?.name || selectedDocument.data.originId}
+                    {stockLocations.find(b => b.id === selectedDocument.data.originId)?.name || selectedDocument.data.originId}
                   </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Destino</p>
                   <p className="text-sm font-semibold text-text-primary">
-                    {branches.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId}
+                    {stockLocations.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId}
                   </p>
                 </div>
                 <div>
@@ -515,6 +519,8 @@ export function Receptions() {
                 />
               </div>
             </div>
+
+            {receptionError && <p className="mt-4 text-sm text-danger-text">{receptionError}</p>}
 
             {/* Footer Actions */}
             <div className="pt-6 border-t border-border-soft flex justify-between items-center">

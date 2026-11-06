@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Supabase CLI: estado local del enlace (no se sube)
+supabase/.temp/
+supabase/.branches/

@@ -12,7 +12,7 @@ import { printTable } from '../../utils/printTable';
 import { todayLocalISO } from '../../utils/schedule';
 
 export function Kardex() {
-  const { kardex, branches, currentBranchId } = useData();
+  const { kardex, stockLocations, currentBranchId } = useData();
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,7 +70,7 @@ export function Kardex() {
       row.doc.toLowerCase().includes(searchQuery.toLowerCase()) ||
       row.user.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const currentBranch = branches.find(b => b.id === currentBranchId);
+    const currentBranch = stockLocations.find(b => b.id === currentBranchId);
     const matchesBranch = currentBranchId === 'all'
       ? (filterBranch ? row.branch === filterBranch : true)
       : row.branch === currentBranch?.name;
@@ -144,7 +144,7 @@ export function Kardex() {
                 onChange={(e) => setFilterBranch(e.target.value)}
               >
                 <option value="">Todas las sedes</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.name}>{b.name}</option>
                 ))}
               </select>

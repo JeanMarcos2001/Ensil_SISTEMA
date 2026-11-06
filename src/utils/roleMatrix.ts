@@ -4,7 +4,7 @@
  * Nada se escribe a mano aquí salvo la lista de acciones clave que se quiere mirar: `check-role-matrix.ts` la contrasta con lo que
  * el negocio decidió y `doc-role-matrix.ts` genera `docs/PRUEBAS_POR_ROL.md`.
  */
-import type { Branch, Permission, Role, User } from '../context/DataContext';
+import type { Branch, Permission, Role, User, Warehouse } from '../context/DataContext';
 import { can as canDo } from './authority';
 import { ALL_CAPABILITIES, buildHolders, type Holder } from './capabilities';
 import { EVENTS } from './capabilityRegistry';
@@ -88,7 +88,7 @@ export interface AccountProfile {
   notices: string[];
 }
 
-export interface MatrixSources { users: User[]; roles: Role[]; permissions: Permission[]; branches: Branch[] }
+export interface MatrixSources { users: User[]; roles: Role[]; permissions: Permission[]; branches: Branch[]; warehouses: Warehouse[] }
 
 /** ¿Puede esta cuenta ejecutar la acción con esos argumentos? Es la misma comprobación de `guardActions`. */
 export function canRunKeyAction(can: (capabilityId: string) => boolean, a: KeyAction): boolean {
@@ -109,7 +109,7 @@ export function profileOf(user: User, src: MatrixSources, holders: Holder[]): Ac
   const granted = user.role === 'Superusuario' ? ALL_OFFERED : src.permissions.find(p => p.roleId === role?.id)?.permissions ?? [];
   const menu = menuPreview(granted);
   const own = src.branches.find(b => b.name === user.branch) ?? src.branches.find(b => b.status === 'Activo' && b.name !== 'Todas');
-  const warehouse = src.branches.find(b => b.isWarehouse)?.id;
+  const warehouse = src.warehouses.find(w => w.status === 'Activo')?.id;
   // Un caso típico: algo que pasa en la sede de la cuenta (el origen de los envíos es el almacén)
   const scope = { subjectBranchId: own?.id, destinationBranchId: own?.id, originBranchId: warehouse };
   const guarded = [...new Set(ALL_CAPABILITIES.flatMap(c => c.actions))];
@@ -124,7 +124,7 @@ export function profileOf(user: User, src: MatrixSources, holders: Holder[]): Ac
     settings: menu.settings,
     firstPath: firstPathFor(can),
     dashboard: dashboardLayout(can),
-    scope: scopeOfUser(user, src.branches, can(PERM.allBranches)),
+    scope: scopeOfUser(user, src.branches, can(PERM.allBranches), src.warehouses),
     allowed: KEY_ACTIONS.filter(a => canRunKeyAction(can, a)).map(a => a.id),
     allowedActions: guarded.filter(a => canRunAction(can, a)).length,
     notices: EVENTS.filter(e => resolveRecipients(e, scope, holders).userIds.includes(user.id)).map(e => e.id),

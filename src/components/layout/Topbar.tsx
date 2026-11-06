@@ -13,10 +13,10 @@ interface TopbarProps {
 }
 
 export function Topbar({ title, breadcrumb, isSidebarOpen, onToggleSidebar }: TopbarProps) {
-  const { branches, currentBranchId, selectBranch, sessionScope, can } = useData();
+  const { stockLocations, currentBranchId, selectBranch, sessionScope, can } = useData();
   // La sede que se ve sale de la cuenta: quien alcanza una sola no elige; quien alcanza varias elige solo entre las suyas
-  const options = viewOptions(sessionScope, branches);
-  const currentBranch = branches.find(b => b.id === currentBranchId);
+  const options = viewOptions(sessionScope, stockLocations);
+  const currentBranch = stockLocations.find(b => b.id === currentBranchId);
 
   return (
     <header className="h-[64px] bg-surface flex items-center justify-between px-4 md:px-6 shrink-0 z-30 relative">

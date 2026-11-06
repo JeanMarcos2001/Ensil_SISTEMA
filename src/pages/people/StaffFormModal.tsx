@@ -32,30 +32,48 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
 
 /** Alta y edición de un trabajador. No hay correo institucional; los campos con asterisco son obligatorios. */
 export function StaffFormModal({ isOpen, onClose, editing }: Props) {
-  const { staff, addStaff, updateStaff } = useData();
+  const { orgStaff: staff, addStaff, updateStaff, users } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<StaffForm>(emptyStaffForm());
   const [submitted, setSubmitted] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setForm(editing ? staffToForm(editing) : emptyStaffForm());
     setSubmitted(false);
+    setServerError(null);
   }, [isOpen, editing]);
 
   const errors = useMemo(() => validateStaffForm(form, staff, today, editing?.id), [form, staff, today, editing?.id]);
-  const set = (patch: Partial<StaffForm>) => setForm(f => ({ ...f, ...patch }));
+  const set = (patch: Partial<StaffForm>) => { setForm(f => ({ ...f, ...patch })); setServerError(null); };
   const err = (k: keyof StaffForm) => (submitted ? errors[k] : undefined);
   const cls = (k: keyof StaffForm) => `${inputCls} ${err(k) ? errorCls : ''}`;
   const age = form.birthDate ? ageOn(form.birthDate, today) : null;
   const maxBirth = (() => { const [y, m, d] = today.split('-').map(Number); return `${y - MIN_STAFF_AGE}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; })();
 
-  const handleSave = () => {
+  const account = editing ? users.find(u => u.staffId === editing.id) : undefined;
+  // Con cuenta, un correo personal igual al de ingreso se rechaza (el servidor también lo rechaza): se avisa antes de enviar
+  const sameAsLogin = !!account && !!form.personalEmail.trim() && form.personalEmail.trim().toLowerCase() === account.email.toLowerCase();
+
+  const handleSave = async () => {
     setSubmitted(true);
-    if (Object.keys(errors).length > 0) return;
-    if (editing) updateStaff(editing.id, buildStaff(form, today, { code: editing.code, status: editing.status }));
-    else addStaff(buildStaff(form, today, undefined, staff));
-    onClose();
+    if (Object.keys(errors).length > 0 || saving) return;
+    if (sameAsLogin) { setServerError('Ese correo es el de ingreso de su cuenta: el correo personal debe ser otro.'); return; }
+    setSaving(true);
+    try {
+      const built = buildStaff(form, today, editing ? { code: editing.code, status: editing.status } : undefined, staff);
+      const { code: _code, ...data } = built;
+      // Al editar, un campo opcional vacío se manda como texto vacío para que se borre (un valor ausente significaría «no cambiar»)
+      const r = editing
+        ? await updateStaff(editing.id, { ...data, specialty: data.specialty ?? '', personalEmail: data.personalEmail ?? '', observations: data.observations ?? '' })
+        : await addStaff(data);
+      if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar la ficha.'); return; }
+      onClose();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const count = Object.keys(errors).length;
@@ -69,15 +87,21 @@ export function StaffFormModal({ isOpen, onClose, editing }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="button" variant="primary" onClick={handleSave}>Guardar Trabajador</Button>
+          <Button type="button" variant="primary" onClick={() => void handleSave()} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Trabajador'}</Button>
         </div>
       }
     >
       <div className="space-y-6 pb-4">
-        {submitted && count > 0 && (
+        {(serverError || (submitted && count > 0)) && (
           <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <p>Revise {count} {count === 1 ? 'campo marcado' : 'campos marcados'} antes de guardar.</p>
+            <p>{serverError ?? `Revise ${count} ${count === 1 ? 'campo marcado' : 'campos marcados'} antes de guardar.`}</p>
+          </div>
+        )}
+        {account && (
+          <div className="bg-info-tint border border-info-text/15 rounded-xl p-3 flex gap-2 text-sm text-info-text">
+            <AlertCircle size={16} className="shrink-0 mt-0.5" />
+            <p>Esta persona tiene la cuenta {account.id}: su nombre, documento y teléfono se actualizan solos en la cuenta al guardar.</p>
           </div>
         )}
 

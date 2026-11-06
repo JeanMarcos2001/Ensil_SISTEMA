@@ -5,12 +5,12 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedBranches, seedPermissions, seedRoles, seedUsers } from '../src/data/seedCatalog';
+import { seedBranches, seedPermissions, seedRoles, seedUsers, seedWarehouses } from '../src/data/seedCatalog';
 import { EVENTS } from '../src/utils/capabilityRegistry';
 import { accountProfiles, KEY_ACTIONS } from '../src/utils/roleMatrix';
 
 const branches = seedBranches();
-const profiles = accountProfiles({ users: seedUsers(), roles: seedRoles(), permissions: seedPermissions(), branches });
+const profiles = accountProfiles({ users: seedUsers(), roles: seedRoles(), permissions: seedPermissions(), branches, warehouses: seedWarehouses() });
 const SHORT: Record<string, string> = {
   'Admin Sistema': 'Admin. general', 'Laura Martínez': 'Sede (Piura)', 'Marco Salas': 'Sede (Los Olivos)', 'Juan Pérez': 'Psicopedagogía',
   'Rosa Quispe': 'Almacén', 'Elena Ramos': 'Contabilidad', Superadmin: 'Superusuario',

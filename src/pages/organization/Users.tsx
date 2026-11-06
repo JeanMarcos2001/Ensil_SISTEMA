@@ -5,27 +5,31 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { Modal } from '../../components/ui/Modal';
-import { Search, Plus, Shield, Users as UsersIcon, Settings, Mail, Phone, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Shield, Mail, Phone, AlertTriangle, Info, UserRound } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
-import { accessAssignments, accessCheck, defaultsFromStaff, staffDisplayName, userOfStaff } from '../../utils/staffAccess';
 import { seatsUsed } from '../../utils/roleBuilder';
+import { accountCreateCheck, accountPlacesOf, personSummary, roleFitError, rolesFor, rulesInput, worksInWarehouse, type AccountRulesContext } from '../../utils/accountRules';
+import { errorPersona } from '../../../supabase/functions/usuarios/reglas.ts';
+import { StaffDbNotice } from '../../components/people/StaffDbNotice';
 import { SUPERUSER } from '../../utils/authority';
-import { AccessStorageBar } from '../../components/people/AccessStorageBar';
-import { pinError } from '../../utils/session';
-import { nextSequentialId } from '../../utils/ids';
+import { OrgDbNotice } from '../../components/organization/OrgDbNotice';
+import { accountPlaceLabel } from '../../utils/session';
 
 export function Users() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
-  const [resetPin, setResetPin] = useState('');
-  const [resetError, setResetError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  /** Resultado de «Reenviar acceso» (se muestra arriba de la tabla). */
+  const [accessNote, setAccessNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [activationNote, setActivationNote] = useState<string | null>(null);
 
-  const { users, branches, roles, staff, assignments, addUser, updateUser, can, currentUser } = useData();
+  // Las sedes y los almacenes de las cuentas son los guardados en la base de datos (Organización → Filiales y Almacenes)
+  const { users, orgBranches: branches, orgWarehouses: warehouses, orgStaff: staff, orgAssignments: assignments, orgPlaces: places, permissions, roles, addUser, updateUser, resendAccess, can, currentUser } = useData();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -34,29 +38,31 @@ export function Users() {
   const [branchFilter, setBranchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
-  const [formData, setFormData] = useState({
-    /** Ficha de personal vinculada ('' = usuario externo, sin ficha). */
-    staffId: '',
-    firstName: '',
-    lastName: '',
-    document: '',
-    phone: '',
-    email: '',
-    role: '',
-    mainBranch: '',
-    additionalBranches: [] as string[],
-    /** PIN de acceso rápido (en blanco al editar = no se cambia). */
-    pin: '',
-    status: 'Activo'
-  });
+  // Una cuenta nace de una persona de Personal (`staffId`); solo un Superusuario crea una cuenta técnica, sin persona (`technical`)
+  const [formData, setFormData] = useState({ staffId: '', technical: false, name: '', email: '', role: '', status: 'Activo' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const isSuperuser = currentUser.role === SUPERUSER;
+  const rules: AccountRulesContext = { staff, assignments, places, users, roles, permissions, actorIsSuperuser: isSuperuser };
+  const editingUser = selectedUser ? users.find(u => u.id === selectedUser) : undefined;
+  const person = formData.staffId ? staff.find(s => s.id === formData.staffId) : undefined;
+  /** Las personas que hoy pueden recibir una cuenta: activas, sin cuenta y con una asignación con acceso. */
+  const eligible = staff.filter(s => s.status === 'Activo' && errorPersona(s.id, rulesInput(staff, assignments, users)) === null);
+  const waiting = staff.filter(s => s.status === 'Activo' && !users.some(u => u.staffId === s.id) && !eligible.includes(s));
+  /** Los roles que se ofrecen: solo los coherentes con el lugar de trabajo de la persona. */
+  const roleChoices = formData.technical
+    ? roles.filter(r => r.locked && r.status === 'Activo' && isSuperuser)
+    : formData.staffId
+      ? rolesFor(formData.staffId, rules, editingUser?.role)
+      : roles.filter(r => r.status === 'Activo' && !r.locked);
+  const liveCheck = !selectedUser && (formData.staffId || formData.technical) && formData.email && formData.role
+    ? accountCreateCheck({ staffId: formData.technical ? undefined : formData.staffId, name: formData.name, email: formData.email, role: formData.role }, rules) : null;
 
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          u.id.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter ? u.role === roleFilter : true;
-    const matchesBranch = branchFilter ? u.branch.toLowerCase().includes(branchFilter.toLowerCase()) : true;
+    const matchesBranch = branchFilter ? accountPlaceLabel(u, warehouses).toLowerCase().includes(branchFilter.toLowerCase()) : true;
     const matchesStatus = statusFilter ? u.status.toLowerCase() === statusFilter.toLowerCase() : true;
     return matchesSearch && matchesRole && matchesBranch && matchesStatus;
   });
@@ -78,20 +84,11 @@ export function Users() {
     setIsDetailOpen(true);
   };
 
-  const handleResetPassword = (id: string) => {
-    setSelectedUser(id);
-    setResetPin('');
-    setResetError(null);
-    setIsResetPasswordModalOpen(true);
-  };
-
-  const submitResetPin = () => {
-    if (!selectedUser) return;
-    const problem = pinError(resetPin);
-    if (problem) { setResetError(problem); return; }
-    const result = updateUser(selectedUser, { pin: resetPin });
-    if (!result.ok) { setResetError(result.error ?? 'No se pudo cambiar el PIN.'); return; }
-    setIsResetPasswordModalOpen(false);
+  /** Reenvía la invitación (si nunca entró) o el enlace para fijar la contraseña. */
+  const handleResendAccess = async (id: string) => {
+    setAccessNote(null);
+    const result = await resendAccess(id);
+    setAccessNote(result.ok ? { ok: true, text: 'Listo: se envió el correo para fijar la contraseña.' } : { ok: false, text: result.error ?? 'No se pudo enviar el correo.' });
   };
 
   const handleDeactivate = (id: string) => {
@@ -99,150 +96,99 @@ export function Users() {
     setIsDeactivateModalOpen(true);
   };
 
-  const handleOpenForm = (id?: string, fromStaffId?: string) => {
+  const handleOpenForm = (id?: string, presetStaffId?: string) => {
     setSelectedUser(id || null);
     setServerError(null);
-    if (!id && fromStaffId) {
-      // Cuenta nueva de un trabajador: nace de su ficha y de sus asignaciones
-      const member = staff.find(s => s.id === fromStaffId);
-      if (member) {
-        const d = defaultsFromStaff(member, assignments, users);
-        const [firstName, ...rest] = d.name.split(' ');
-        setFormData({
-          staffId: member.id, firstName, lastName: rest.join(' '), document: d.document, phone: d.phone, email: '', role: d.role, mainBranch: d.branch,
-          additionalBranches: d.additionalBranches, pin: '', status: 'Activo',
-        });
-        setErrors({});
-        setIsDetailOpen(false);
-        setIsFormOpen(true);
-        return;
-      }
-    }
-    if (id) {
-      const user = users.find(u => u.id === id);
-      if (user) {
-        const [firstName, ...lastNameParts] = user.name.split(' ');
-        setFormData({
-          staffId: user.staffId ?? '',
-          firstName: firstName || '',
-          lastName: lastNameParts.join(' ') || '',
-          document: user.document || '45678912', // Mock data fallback
-          phone: user.phone || '+51 987 654 321', // Mock data fallback
-          email: user.email,
-          role: user.role,
-          mainBranch: user.branch,
-          additionalBranches: user.additionalBranches || [],
-          pin: '',
-          status: user.status
-        });
-      }
+    const user = id ? users.find(u => u.id === id) : undefined;
+    if (user) {
+      setFormData({ staffId: user.staffId ?? '', technical: !user.staffId, name: user.name, email: user.email, role: user.role, status: user.status });
     } else {
-      setFormData({
-        staffId: '',
-        firstName: '',
-        lastName: '',
-        document: '',
-        phone: '',
-        email: '',
-        role: '',
-        mainBranch: '',
-        additionalBranches: [],
-        pin: '',
-        status: 'Activo'
-      });
+      const preset = presetStaffId ? staff.find(s => s.id === presetStaffId) : undefined;
+      setFormData({ staffId: preset?.id ?? '', technical: false, name: '', email: '', role: '', status: 'Activo' });
     }
     setErrors({});
     setIsDetailOpen(false);
     setIsFormOpen(true);
   };
 
+  /** Al elegir a la persona, el rol se limpia (los roles que se ofrecen dependen de dónde trabaja). */
+  const chooseStaff = (id: string) => {
+    setFormData(prev => ({ ...prev, staffId: id, role: '' }));
+    setErrors({});
+    setServerError(null);
+  };
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    // Con ficha de personal, nombre, documento y teléfono salen de ella
-    if (!formData.staffId) {
-      if (!formData.firstName.trim()) newErrors.firstName = 'El nombre es obligatorio';
-      if (!formData.lastName.trim()) newErrors.lastName = 'El apellido es obligatorio';
-      if (!formData.document.trim()) newErrors.document = 'El documento es obligatorio';
-    }
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'El correo es obligatorio';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'El correo no es válido';
+    if (selectedUser) {
+      if (formData.technical && !formData.name.trim()) newErrors.name = 'El nombre es obligatorio';
+      if (!formData.role) newErrors.role = 'El rol es obligatorio';
     } else {
-      const isDuplicate = users.some(u => u.email.toLowerCase() === formData.email.toLowerCase() && u.id !== selectedUser);
-      if (isDuplicate) newErrors.email = 'Este correo ya está registrado';
+      if (!formData.technical && !formData.staffId) newErrors.staffId = 'Elija a la persona de Personal a la que pertenece la cuenta';
+      if (formData.technical && !formData.name.trim()) newErrors.name = 'El nombre es obligatorio';
+      if (!formData.email.trim()) newErrors.email = 'El correo es obligatorio';
+      if (!formData.role) newErrors.role = 'El rol es obligatorio';
+      if (Object.keys(newErrors).length === 0) {
+        const check = accountCreateCheck({ staffId: formData.technical ? undefined : formData.staffId, name: formData.name, email: formData.email, role: formData.role }, rules);
+        if (check.error) {
+          if (/correo/i.test(check.error)) newErrors.email = check.error;
+          else if (/rol/i.test(check.error)) newErrors.role = check.error;
+          else newErrors.staffId = check.error;
+        }
+      }
     }
-
-    if (!formData.role) newErrors.role = 'El rol principal es obligatorio';
-    if (!formData.mainBranch) newErrors.mainBranch = 'La sede principal es obligatoria';
-    
-    if (formData.pin) {
-      const pinProblem = pinError(formData.pin);
-      if (pinProblem) newErrors.pin = pinProblem;
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
-    if (validateForm()) {
-      const member = formData.staffId ? staff.find(s => s.id === formData.staffId) : undefined;
-      const newUserData = {
-        staffId: formData.staffId || undefined,
-        name: member ? staffDisplayName(member) : `${formData.firstName} ${formData.lastName}`,
-        email: formData.email,
-        role: formData.role,
-        branch: formData.mainBranch,
-        status: formData.status as 'Activo' | 'Inactivo',
-        document: member ? member.docNumber : formData.document,
-        phone: member ? member.phone : formData.phone,
-        additionalBranches: formData.additionalBranches,
-        lastAccess: selectedUser ? (users.find(u => u.id === selectedUser)?.lastAccess || 'Nunca') : 'Nunca'
-      };
-
-      const result = selectedUser
-        ? updateUser(selectedUser, { ...newUserData, pin: formData.pin || undefined })
-        : addUser({ ...newUserData, id: nextSequentialId('USR', users.map(x => x.id)), pin: formData.pin || undefined });
-      if (!result.ok) { setServerError(result.error ?? 'No se pudo guardar el usuario.'); return; }
-      setIsFormOpen(false);
-    }
+  const handleSave = async () => {
+    if (saving || !validateForm()) return;
+    const form = {
+      staffId: formData.technical ? undefined : formData.staffId,
+      name: formData.technical ? formData.name : undefined,
+      email: formData.email,
+      role: formData.role,
+      status: formData.status as 'Activo' | 'Inactivo',
+    };
+    setSaving(true);
+    const result = selectedUser ? await updateUser(selectedUser, form) : await addUser(form);
+    setSaving(false);
+    if (!result.ok) { setServerError(result.error ?? 'No se pudo guardar el usuario.'); return; }
+    setAccessNote(selectedUser ? null : { ok: true, text: `Se envió la invitación a ${formData.email.trim().toLowerCase()}: la persona abre el enlace del correo y fija su contraseña.` });
+    setIsFormOpen(false);
   };
 
-  const confirmDeactivate = () => {
+  const confirmDeactivate = async () => {
     if (!selectedUser) return;
-    const result = updateUser(selectedUser, { status: 'Inactivo' });
+    const result = await updateUser(selectedUser, { status: 'Inactivo' });
     if (!result.ok) { setServerError(result.error ?? 'No se pudo desactivar.'); return; }
     setServerError(null);
     setIsDeactivateModalOpen(false);
     setSelectedUser(null);
   };
 
-  const handleActivate = (id: string) => {
-    const result = updateUser(id, { status: 'Activo' });
+  const handleActivate = async (id: string) => {
+    const result = await updateUser(id, { status: 'Activo' });
     setActivationNote(result.ok ? null : result.error ?? 'No se pudo activar.');
   };
 
-  // ?personal=ID abre la cuenta nueva de ese trabajador; ?usuario=ID abre el perfil de esa cuenta
+  // ?usuario=ID abre el perfil de esa cuenta
   useEffect(() => {
-    const personal = params.get('personal');
     const usuario = params.get('usuario');
-    if (!personal && !usuario) return;
-    if (personal) handleOpenForm(undefined, personal);
-    else if (usuario) handleOpenDetail(usuario);
+    if (!usuario) return;
+    handleOpenDetail(usuario);
     setParams({}, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
-  const handleAdditionalBranchToggle = (branch: string) => {
-    setFormData(prev => ({
-      ...prev,
-      additionalBranches: prev.additionalBranches.includes(branch)
-        ? prev.additionalBranches.filter(b => b !== branch)
-        : [...prev.additionalBranches, branch]
-    }));
-  };
+  // ?personal=ID (desde Personas → Personal → «Crear usuario de acceso») abre el formulario con esa persona elegida
+  useEffect(() => {
+    const personal = params.get('personal');
+    if (!personal) return;
+    if (can('org-usuarios:create')) handleOpenForm(undefined, personal);
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params]);
 
   return (
     <div className="flex flex-col h-full">
@@ -262,7 +208,14 @@ export function Users() {
         </div>
       </div>
 
-      <AccessStorageBar />
+      <OrgDbNotice quiet />
+      <StaffDbNotice />
+
+      {accessNote && (
+        <div className={`mb-4 rounded-xl border p-3 text-sm ${accessNote.ok ? 'bg-success-tint border-success-text/20 text-success-text' : 'bg-danger-tint border-danger-text/20 text-danger-text'}`} role={accessNote.ok ? 'status' : 'alert'}>
+          {accessNote.text}
+        </div>
+      )}
 
       {activationNote && (
         <div className="mb-4 bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
@@ -305,6 +258,9 @@ export function Users() {
                 {branches.map(b => (
                   <option key={b.id} value={b.name}>{b.name}</option>
                 ))}
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.name}>{w.name}</option>
+                ))}
               </select>
               <select 
                 value={statusFilter}
@@ -343,7 +299,6 @@ export function Users() {
                       </div>
                       <div>
                         <span className="font-medium text-text-primary">{row.name}</span>
-                        {row.staffId && <div className="text-[10px] text-text-muted uppercase tracking-wider">Personal vinculado</div>}
                       </div>
                     </div>
                   </td>
@@ -354,7 +309,14 @@ export function Users() {
                       {row.role}
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-text-secondary">{row.branch}</td>
+                  <td className="px-6 py-3 text-text-secondary">
+                    {accountPlaceLabel(row, warehouses)}
+                    {(() => {
+                      const role = roles.find(r => r.name === row.role);
+                      const problem = row.staffId && role && !role.locked ? roleFitError(role, row.staffId, assignments, permissions) : null;
+                      return problem ? <div className="text-[10px] text-warning-text mt-1 max-w-[220px] flex gap-1"><AlertTriangle size={11} className="shrink-0 mt-px" />Rol y lugar de trabajo no coinciden</div> : null;
+                    })()}
+                  </td>
                   <td className="px-6 py-3 text-text-secondary">{row.lastAccess}</td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
@@ -365,7 +327,7 @@ export function Users() {
                       items={[
                         { label: 'Ver perfil', onClick: () => handleOpenDetail(row.id) },
                         { label: 'Editar usuario', hidden: !can('org-usuarios:edit'), onClick: () => handleOpenForm(row.id) },
-                        { label: 'Restablecer PIN', hidden: !can('org-usuarios:reset_access'), onClick: () => handleResetPassword(row.id) },
+                        { label: 'Reenviar acceso', hidden: !can('org-usuarios:reset_access') || row.status !== 'Activo', onClick: () => void handleResendAccess(row.id) },
                         row.status === 'Activo'
                           ? { label: 'Desactivar', hidden: !can('org-usuarios:deactivate'), onClick: () => handleDeactivate(row.id), danger: true }
                           : { label: 'Activar', hidden: !can('org-usuarios:edit'), onClick: () => handleActivate(row.id) },
@@ -441,18 +403,6 @@ export function Users() {
             </div>
           </div>
 
-          {(() => {
-            const account = users.find(x => x.id === selectedUser);
-            const member = account?.staffId ? staff.find(s => s.id === account.staffId) : undefined;
-            return member ? (
-              <div className="bg-surface-muted p-3 rounded-xl border border-border-soft text-sm">
-                <span className="text-xs text-text-muted uppercase tracking-wider">Personal vinculado</span>
-                <p className="font-medium text-text-primary mt-1">{staffDisplayName(member)} · {member.code} · {member.status}</p>
-                <p className="text-xs text-text-muted mt-0.5">Nombre, documento, teléfono y sedes salen de su ficha y de sus asignaciones (Personas).</p>
-              </div>
-            ) : <p className="text-xs text-text-muted">Cuenta sin ficha de personal (usuario externo).</p>;
-          })()}
-
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Rol Principal</span>
@@ -463,7 +413,7 @@ export function Users() {
             </div>
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Sedes</span>
-              <p className="text-sm font-medium text-text-primary">{[users.find(u => u.id === selectedUser)?.branch, ...(users.find(u => u.id === selectedUser)?.additionalBranches ?? [])].filter(Boolean).join(', ')}</p>
+              <p className="text-sm font-medium text-text-primary">{[users.find(u => u.id === selectedUser)?.branch, ...(users.find(u => u.id === selectedUser)?.additionalBranches ?? []), ...(users.find(u => u.id === selectedUser)?.warehouses ?? []).map(id => warehouses.find(w => w.id === id)?.name ?? id)].filter(Boolean).join(', ')}</p>
             </div>
             <div className="space-y-1">
               <span className="text-xs text-text-muted uppercase tracking-wider">Último Acceso</span>
@@ -494,16 +444,16 @@ export function Users() {
       </Modal>
 
       {/* Form Modal */}
-      <Modal 
-        isOpen={isFormOpen} 
-        onClose={() => setIsFormOpen(false)} 
-        title={selectedUser ? 'Editar Usuario' : 'Nuevo Usuario'}
+      <Modal
+        isOpen={isFormOpen}
+        onClose={() => setIsFormOpen(false)}
+        title={selectedUser ? 'Editar Usuario' : formData.technical ? 'Nueva cuenta técnica' : 'Nuevo Usuario'}
         size="xl"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSave}>
-              {selectedUser ? 'Guardar Cambios' : 'Crear Usuario'}
+            <Button variant="primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Guardando…' : selectedUser ? 'Guardar Cambios' : 'Crear Usuario y enviar invitación'}
             </Button>
           </div>
         }
@@ -515,245 +465,146 @@ export function Users() {
               <p>{serverError}</p>
             </div>
           )}
-          {/* Bloque 1: Identidad */}
-          <div>
-            <h4 className="text-sm font-bold text-text-primary mb-3">1. Identidad</h4>
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-primary">Personal vinculado</label>
-                <select
-                  value={formData.staffId}
-                  disabled={!!selectedUser && !!users.find(x => x.id === selectedUser)?.staffId}
-                  onChange={(e) => {
-                    const member = staff.find(s => s.id === e.target.value);
-                    if (!member) { setFormData({ ...formData, staffId: '' }); return; }
-                    const d = defaultsFromStaff(member, assignments, users);
-                    const [firstName, ...rest] = d.name.split(' ');
-                    setFormData({ ...formData, staffId: member.id, firstName, lastName: rest.join(' '), document: d.document, phone: d.phone, role: formData.role || d.role, mainBranch: d.branch, additionalBranches: d.additionalBranches });
-                    setServerError(null);
-                  }}
-                  className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent disabled:bg-surface-muted"
-                >
-                  <option value="">Sin ficha (usuario externo)</option>
-                  {staff
-                    .filter(s => s.id === formData.staffId || accessCheck(s, assignments, users).ok)
-                    .map(s => <option key={s.id} value={s.id}>{staffDisplayName(s)} · {s.code}</option>)}
-                </select>
-                <p className="text-xs text-text-muted">
-                  {formData.staffId
-                    ? 'Nombre, documento y teléfono salen de su ficha (se editan en Personas → Personal) y las sedes, de sus asignaciones. Si el trabajador se inactiva, esta cuenta se desactiva sola.'
-                    : 'Solo aparece el personal activo, con una asignación con acceso y sin cuenta. Elija «sin ficha» para administradores externos.'}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Nombres <span className="text-error">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formData.firstName}
-                    disabled={!!formData.staffId}
-                    onChange={(e) => setFormData({...formData, firstName: e.target.value})}
-                    className={`w-full h-10 bg-surface border ${errors.firstName ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
-                    placeholder="Ej. Juan" 
-                  />
-                  {errors.firstName && <p className="text-xs text-error">{errors.firstName}</p>}
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Apellidos <span className="text-error">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formData.lastName}
-                    disabled={!!formData.staffId}
-                    onChange={(e) => setFormData({...formData, lastName: e.target.value})}
-                    className={`w-full h-10 bg-surface border ${errors.lastName ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
-                    placeholder="Ej. Pérez" 
-                  />
-                  {errors.lastName && <p className="text-xs text-error">{errors.lastName}</p>}
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">DNI / Documento <span className="text-error">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formData.document}
-                    disabled={!!formData.staffId}
-                    onChange={(e) => setFormData({...formData, document: e.target.value})}
-                    className={`w-full h-10 bg-surface border ${errors.document ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
-                    placeholder="Número de documento" 
-                  />
-                  {errors.document && <p className="text-xs text-error">{errors.document}</p>}
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Teléfono</label>
-                  <input 
-                    type="tel" 
-                    value={formData.phone}
-                    disabled={!!formData.staffId}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
-                    placeholder="+51 999 999 999" 
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-primary">Correo Electrónico <span className="text-error">*</span></label>
-                <input 
-                  type="email" 
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  className={`w-full h-10 bg-surface border ${errors.email ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} 
-                  placeholder="correo@institucion.edu.pe" 
-                />
-                {errors.email && <p className="text-xs text-error">{errors.email}</p>}
+          {/* Bloque 1: Persona (los datos personales salen de Personal; aquí no se escriben otra vez) */}
+          <div>
+            <h4 className="text-sm font-bold text-text-primary mb-3">1. {formData.technical ? 'Cuenta técnica' : 'Persona'}</h4>
+            {formData.technical ? (
+              <div className="space-y-3">
+                <div className="flex gap-2 text-xs text-info-text bg-info-tint rounded-xl p-3">
+                  <Info size={14} className="shrink-0 mt-0.5" />
+                  <p>Una cuenta técnica no pertenece a ninguna persona de Personal (por ejemplo, la de soporte). Solo la crea un Superusuario y solo con un rol del sistema.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-text-primary">Nombre de la cuenta <span className="text-error">*</span></label>
+                  <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    className={`w-full h-10 bg-surface border ${errors.name ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`} placeholder="Ej. Soporte técnico" />
+                  {errors.name && <p className="text-xs text-error">{errors.name}</p>}
+                </div>
+                {!selectedUser && <button type="button" className="text-xs text-text-muted underline hover:text-text-primary" onClick={() => setFormData({ staffId: '', technical: false, name: '', email: formData.email, role: '', status: 'Activo' })}>Mejor crear la cuenta de una persona de Personal</button>}
               </div>
-            </div>
+            ) : (
+              <div className="space-y-3">
+                {!selectedUser && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-text-primary">Persona de Personal <span className="text-error">*</span></label>
+                    <select value={formData.staffId} onChange={e => chooseStaff(e.target.value)}
+                      className={`w-full h-10 bg-surface border ${errors.staffId ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}>
+                      <option value="">{eligible.length > 0 ? 'Seleccionar persona...' : 'No hay personas disponibles'}</option>
+                      {eligible.map(s => <option key={s.id} value={s.id}>{s.names} {s.lastNameP} {s.lastNameM} · {s.docNumber}</option>)}
+                    </select>
+                    {errors.staffId && <p className="text-xs text-error">{errors.staffId}</p>}
+                    <p className="text-xs text-text-muted">
+                      Solo aparecen personas activas, sin cuenta y con una asignación activa con acceso al sistema.
+                      {waiting.length > 0 ? ` ${waiting.length} más no pueden recibir cuenta todavía: les falta una asignación con acceso (Personas → Asignaciones).` : ''}
+                    </p>
+                    {isSuperuser && <button type="button" className="text-xs text-text-muted underline hover:text-text-primary" onClick={() => setFormData({ staffId: '', technical: true, name: '', email: formData.email, role: '', status: 'Activo' })}>Crear una cuenta técnica del sistema (sin persona)</button>}
+                  </div>
+                )}
+                {(person ?? (editingUser?.staffId ? staff.find(s => s.id === editingUser.staffId) : undefined)) && (() => {
+                  const p = (person ?? staff.find(s => s.id === editingUser?.staffId))!;
+                  const info = personSummary(p, assignments, places);
+                  return (
+                    <div className="rounded-xl border border-border-soft bg-surface-muted/40 p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-text-primary"><UserRound size={16} className="text-text-muted" />{info.name}</div>
+                        <button type="button" className="text-xs text-primary-accent underline" onClick={() => navigate(`/personas/personal?ficha=${p.id}`)}>Ver ficha</button>
+                      </div>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        <div><dt className="text-text-muted">Documento</dt><dd className="text-text-primary">{info.document}</dd></div>
+                        <div><dt className="text-text-muted">Celular</dt><dd className="text-text-primary">{info.phone}</dd></div>
+                        <div><dt className="text-text-muted">Correo personal</dt><dd className="text-text-primary">{info.personalEmail || '—'}</dd></div>
+                        <div><dt className="text-text-muted">Verá (según sus asignaciones)</dt><dd className="text-text-primary">{info.placesText}</dd></div>
+                      </dl>
+                      <p className="text-[11px] text-text-muted">Estos datos salen de Personas → Personal y Asignaciones: se corrigen allá y la cuenta se actualiza sola.</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
           </div>
 
-          {/* Bloque 2: Acceso y asignación */}
+          {/* Bloque 2: Acceso */}
           <div className="border-t border-border-soft pt-4">
-            <h4 className="text-sm font-bold text-text-primary mb-3">2. Acceso y Asignación</h4>
+            <h4 className="text-sm font-bold text-text-primary mb-3">2. Acceso</h4>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Rol Principal <span className="text-error">*</span></label>
-                  <select
-                    value={formData.role}
-                    disabled={!!selectedUser && !can('org-usuarios:assign_role')}
-                    onChange={(e) => setFormData({...formData, role: e.target.value})}
-                    className={`w-full h-10 bg-surface border ${errors.role ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
-                  >
-                    <option value="">Seleccionar rol...</option>
-                    {/* Solo se ofrecen los roles que se pueden dar: activos, y el del sistema solo si quien asigna es Superusuario */}
-                    {roles.filter(r => r.name === formData.role || (r.status === 'Activo' && (!r.locked || currentUser.role === SUPERUSER))).map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
-                  </select>
-                  {errors.role && <p className="text-xs text-error">{errors.role}</p>}
-                  {(() => {
-                    const chosen = roles.find(r => r.name === formData.role);
-                    if (!chosen) return null;
-                    const seatBranch = formData.mainBranch && formData.mainBranch !== 'Todas' ? formData.mainBranch : '';
-                    const used = seatBranch ? seatsUsed(chosen.name, users, seatBranch, selectedUser ?? undefined) : 0;
-                    return (
-                      <p className="text-[11px] text-text-muted">
-                        {chosen.desc}
-                        {chosen.branchUserLimit && seatBranch ? ` · En ${seatBranch}: ${used} de ${chosen.branchUserLimit} cuentas activas con este rol.` : chosen.branchUserLimit ? ` · Máximo ${chosen.branchUserLimit} cuentas activas por sede.` : ''}
-                      </p>
-                    );
-                  })()}
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-text-primary">Sede Principal <span className="text-error">*</span></label>
-                  <select
-                    value={formData.mainBranch}
-                    disabled={!!selectedUser && !can('org-usuarios:assign_branch')}
-                    onChange={(e) => setFormData({...formData, mainBranch: e.target.value})}
-                    className={`w-full h-10 bg-surface border ${errors.mainBranch ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
-                  >
-                    <option value="">Seleccionar sede...</option>
-                    {!formData.staffId && <option value="Todas">Todas</option>}
-                    {(formData.staffId ? branches.filter(b => accessAssignments(formData.staffId, assignments).some(a => a.branch === b.name)) : branches).map(b => (
-                      <option key={b.id} value={b.name}>{b.name}</option>
-                    ))}
-                  </select>
-                  {errors.mainBranch && <p className="text-xs text-error">{errors.mainBranch}</p>}
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-primary">Correo de ingreso (institucional) <span className="text-error">*</span></label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  disabled={!!selectedUser}
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  className={`w-full h-10 bg-surface border ${errors.email ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
+                  placeholder="nombre@ensilperu.com"
+                />
+                {errors.email && <p className="text-xs text-error">{errors.email}</p>}
+                {!errors.email && liveCheck?.warning && <p className="text-xs text-warning-text flex gap-1"><AlertTriangle size={12} className="shrink-0 mt-px" />{liveCheck.warning}</p>}
+                <p className="text-xs text-text-muted">{selectedUser ? 'El correo de una cuenta no se cambia: si es otro, se desactiva esta cuenta y se crea una nueva.' : 'A este correo llega la invitación para fijar la contraseña. Debe ser el de trabajo, no el personal de la ficha.'}</p>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-primary">Sedes Adicionales (Opcional)</label>
-                <div className="flex flex-wrap gap-2 p-3 border border-border-soft rounded-lg bg-surface-muted/30">
-                  {(formData.staffId ? branches.filter(b => accessAssignments(formData.staffId, assignments).some(a => a.branch === b.name)) : branches).filter(b => b.name !== formData.mainBranch).map(branch => (
-                    <label key={branch.id} className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.additionalBranches.includes(branch.name)}
-                        disabled={!!selectedUser && !can('org-usuarios:assign_branch')}
-                        onChange={() => handleAdditionalBranchToggle(branch.name)}
-                        className="rounded border-border-strong text-primary-accent focus:ring-primary-accent" 
-                      />
-                      {branch.name}
-                    </label>
-                  ))}
-                </div>
+                <label className="text-sm font-medium text-text-primary">Rol <span className="text-error">*</span></label>
+                <select
+                  value={formData.role}
+                  disabled={(!!selectedUser && !can('org-usuarios:assign_role')) || (!formData.technical && !formData.staffId)}
+                  onChange={(e) => setFormData({...formData, role: e.target.value})}
+                  className={`w-full h-10 bg-surface border ${errors.role ? 'border-error' : 'border-border-soft'} rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent`}
+                >
+                  <option value="">{!formData.technical && !formData.staffId ? 'Primero elija a la persona' : 'Seleccionar rol...'}</option>
+                  {roleChoices.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                </select>
+                {errors.role && <p className="text-xs text-error">{errors.role}</p>}
+                {(() => {
+                  const chosen = roles.find(r => r.name === formData.role);
+                  const hint = formData.staffId && !formData.technical
+                    ? (worksInWarehouse(formData.staffId, assignments)
+                      ? 'Trabaja en el almacén: se ofrecen los roles que mueven el almacén.'
+                      : 'Trabaja solo en sedes: se ofrecen los roles que no mueven el almacén.')
+                    : '';
+                  const seatBranch = formData.staffId ? accountPlacesOf(formData.staffId, assignments, places).branch : '';
+                  const used = chosen && seatBranch ? seatsUsed(chosen.name, users, seatBranch, selectedUser ?? undefined) : 0;
+                  return (
+                    <p className="text-[11px] text-text-muted">
+                      {hint}{hint && chosen ? ' · ' : ''}
+                      {chosen?.desc}
+                      {chosen?.branchUserLimit && seatBranch ? ` · En ${seatBranch}: ${used} de ${chosen.branchUserLimit} cuentas activas con este rol.` : chosen?.branchUserLimit ? ` · Máximo ${chosen.branchUserLimit} cuentas activas por sede.` : ''}
+                    </p>
+                  );
+                })()}
               </div>
+              <p className="text-xs text-text-muted">Solo quien trabaja en el almacén puede despachar, ingresar compras o ajustar su stock. Ver todas las sedes permite ver el almacén, no moverlo.</p>
             </div>
           </div>
 
           {/* Bloque 3: Seguridad */}
           <div className="border-t border-border-soft pt-4">
             <h4 className="text-sm font-bold text-text-primary mb-3">3. Seguridad</h4>
-            <div>
-              <label className="block text-sm font-medium text-text-primary mb-1">PIN de acceso rápido {selectedUser ? '(opcional)' : ''}</label>
-              <input
-                type="password"
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={6}
-                placeholder={selectedUser ? 'Dejar en blanco para no cambiarlo' : '4 a 6 números'}
-                value={formData.pin}
-                onChange={(e) => { setFormData({ ...formData, pin: e.target.value.replace(/\D/g, '') }); setErrors({ ...errors, pin: '' }); }}
-                className={`w-full h-9 bg-surface border ${errors.pin ? 'border-error' : 'border-border-soft'} rounded-md px-3 text-sm focus:outline-none focus:border-primary-accent`}
-              />
-              {errors.pin && <p className="text-xs text-error mt-1">{errors.pin}</p>}
-              <p className="text-xs text-text-secondary mt-1">
-                Con el PIN la persona entra a su cuenta al cambiar de usuario. Sin PIN la cuenta no puede entrar; cada persona puede cambiar el suyo desde el menú de su cuenta.
-              </p>
+            <p className="text-sm text-text-secondary">
+              {selectedUser
+                ? 'La contraseña es de cada persona. Si la olvidó o no recibió su invitación, use «Reenviar acceso» en la lista.'
+                : 'No se escribe ninguna contraseña aquí: al crear la cuenta, la persona recibe un correo con un enlace para fijar la suya.'}
+            </p>
+          </div>
+
+          {/* Bloque 4: Estado (solo al editar: una cuenta nueva nace activa) */}
+          {selectedUser && (
+            <div className="border-t border-border-soft pt-4">
+              <h4 className="text-sm font-bold text-text-primary mb-3">4. Estado de la Cuenta</h4>
+              <div className="space-y-1.5">
+                <select
+                  value={formData.status}
+                  onChange={(e) => setFormData({...formData, status: e.target.value})}
+                  className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
+                >
+                  <option value="Activo">Activo - El usuario puede acceder al sistema</option>
+                  <option value="Inactivo">Inactivo - El usuario no tiene acceso</option>
+                </select>
+                <p className="text-xs text-text-muted">Al inactivar a la persona en Personal, su cuenta se desactiva sola; reactivarla es una decisión aparte, aquí.</p>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Bloque 4: Estado */}
-          <div className="border-t border-border-soft pt-4">
-            <h4 className="text-sm font-bold text-text-primary mb-3">4. Estado de la Cuenta</h4>
-            <div className="space-y-1.5">
-              <select 
-                value={formData.status}
-                onChange={(e) => setFormData({...formData, status: e.target.value})}
-                className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
-              >
-                <option value="Activo">Activo - El usuario puede acceder al sistema</option>
-                <option value="Inactivo">Inactivo - El usuario no tiene acceso</option>
-              </select>
-            </div>
-          </div>
-
-        </div>
-      </Modal>
-
-      {/* Reset PIN Modal */}
-      <Modal
-        isOpen={isResetPasswordModalOpen}
-        onClose={() => setIsResetPasswordModalOpen(false)}
-        title="Restablecer PIN"
-        footer={
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setIsResetPasswordModalOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={submitResetPin} disabled={resetPin.length < 4}>Guardar PIN</Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            Fija un PIN nuevo para esta cuenta (4 a 6 números). Entrégaselo a la persona: puede cambiarlo después desde el menú de su cuenta.
-          </p>
-          <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
-            <p className="text-sm font-medium text-text-primary">{users.find(u => u.id === selectedUser)?.name}</p>
-            <p className="text-xs text-text-muted">{users.find(u => u.id === selectedUser)?.email}</p>
-          </div>
-          <input
-            type="password"
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={6}
-            placeholder="PIN nuevo"
-            aria-label="PIN nuevo"
-            value={resetPin}
-            onChange={(e) => { setResetPin(e.target.value.replace(/\D/g, '')); setResetError(null); }}
-            className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent"
-          />
-          {resetError && <p className="text-sm text-danger-text" role="alert">{resetError}</p>}
         </div>
       </Modal>
 

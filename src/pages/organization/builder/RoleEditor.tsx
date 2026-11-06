@@ -20,7 +20,7 @@ interface Props { initialRoleId?: string }
 
 /** Panel B · Editor de rol: se marcan funciones y el sistema completa lo que necesitan, avisa lo que conviene separar y muestra a quién llegan. */
 export function RoleEditor({ initialRoleId }: Props) {
-  const { roles, users, branches, permissions: allPermissions, savePermissions, can } = useData();
+  const { roles, users, branches, stockLocations, permissions: allPermissions, savePermissions, can } = useData();
   const [selectedRole, setSelectedRole] = useState<string>(initialRoleId || roles[0]?.id || '');
   const [searchTerm, setSearchTerm] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ 'mod-operacion': true });
@@ -53,8 +53,8 @@ export function RoleEditor({ initialRoleId }: Props) {
     });
     const roleBranchNames = new Set(users.filter(u => u.role === role.name && u.status === 'Activo').flatMap(u => [u.branch, ...(u.additionalBranches ?? [])]));
     const roleBranchIds = branches.filter(b => roleBranchNames.has(b.name)).map(b => b.id);
-    return counterpartStatus([...draft], holders, branches, roleBranchIds);
-  }, [role, users, roles, branches, allPermissions, draft]);
+    return counterpartStatus([...draft], holders, stockLocations, roleBranchIds);
+  }, [role, users, roles, branches, stockLocations, allPermissions, draft]);
   const menu = useMemo(() => menuPreview(draft), [draft]);
 
   const toggle = (id: string) => {
@@ -88,9 +88,12 @@ export function RoleEditor({ initialRoleId }: Props) {
     setNotice({ kind: 'info', text: `Se cargaron las funciones de la plantilla «${template.name}». Revise y pulse «Guardar» para aplicarlas.` });
   };
 
-  const handleSave = () => {
-    if (!role) return;
-    const result = savePermissions(role.id, [...draft], reasons);
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    if (!role || saving) return;
+    setSaving(true);
+    const result = await savePermissions(role.id, [...draft], reasons);
+    setSaving(false);
     setNotice(result.ok ? { kind: 'ok', text: 'Funciones guardadas.' } : { kind: 'error', text: result.error ?? 'No se pudo guardar.' });
   };
 
@@ -134,7 +137,7 @@ export function RoleEditor({ initialRoleId }: Props) {
           {!readOnly && (
             <>
               <Button variant="secondary" onClick={handleDiscard} disabled={!dirty}>Descartar cambios</Button>
-              <Button variant="primary" className="flex items-center gap-2" onClick={handleSave} disabled={!dirty || unjustified.length > 0}>
+              <Button variant="primary" className="flex items-center gap-2" onClick={handleSave} disabled={!dirty || unjustified.length > 0 || saving}>
                 <Save size={16} />
                 Guardar
               </Button>

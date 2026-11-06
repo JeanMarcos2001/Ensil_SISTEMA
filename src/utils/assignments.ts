@@ -1,14 +1,19 @@
 /**
  * Asignaciones del personal (funciones puras).
  *
- * Una asignación vincula a un trabajador con una sede, un área y un cargo. De ellas salen los responsables de la entrevista
+ * Una asignación vincula a un trabajador con un lugar de trabajo y un área. De ellas salen los responsables de la entrevista
  * y de las asesorías (área Psicopedagogía) y los verificadores de la sede, así que crearlas, editarlas y cerrarlas tiene
- * efecto en esas listas. Reglas:
+ * efecto en esas listas. **El cargo no se escribe aquí: sale del contrato** (`positionOf`), porque es lo pactado con la persona y no
+ * depende de dónde trabaje. Reglas:
  *  - solo el personal activo recibe asignaciones; un trabajador no repite sede + área mientras la anterior siga activa;
  *  - cada trabajador tiene UNA asignación principal; la primera lo es siempre y, si se marca otra, la anterior pasa a secundaria;
  *  - una asignación no se borra: se CIERRA con fecha y motivo (queda en el historial) y, si era la principal, la activa más
  *    antigua pasa a ser la principal;
- *  - no se cierra la última asignación de Psicopedagogía de quien tiene asesorías futuras: primero se reasignan.
+ *  - no se cierra la última asignación de Psicopedagogía de quien tiene asesorías futuras: primero se reasignan;
+ *  - el LUGAR de una asignación es UNA sede o el almacén central (nunca las dos): en el almacén solo se trabaja con el rol del sistema
+ *    «Almacén» (o «Sin acceso», p. ej. limpieza) y «Almacén» no existe en una sede. De las asignaciones con acceso salen las sedes y el
+ *    almacén de la cuenta de la persona, así que esta regla mantiene coherente su rol con su lugar de trabajo;
+ *  - el almacén central es un lugar de logística: allí solo se trabaja en el área «Logística» (una sede admite todas las áreas).
  */
 import type { Assignment, Branch, Schedule, Staff } from '../context/DataContext';
 import { INTERVIEWER_AREA } from './enrollment';
@@ -17,8 +22,33 @@ import type { FlatActivity } from './schedule';
 import { nextSequentialId } from './ids';
 
 export const AREAS = ['Administración', 'Psicopedagogía', 'Logística', 'Ventas'];
-export const SYSTEM_ROLES = ['Administración', 'Psicopedagogía', 'Ventas', 'Sin acceso'];
-export const MIN_TEXT = 3;
+export const SYSTEM_ROLES = ['Administración', 'Psicopedagogía', 'Ventas', 'Almacén', 'Sin acceso'];
+/** Rol del sistema de quien trabaja en el almacén central (el único, además de «Sin acceso», que admite). */
+export const WAREHOUSE_SYSTEM_ROLE = 'Almacén';
+
+/** Un lugar de trabajo: una sede o el almacén central. Los nombres no se repiten entre sedes y almacenes (el formulario guarda el nombre). */
+export interface Place { id?: string; name: string; kind?: 'sede' | 'almacen'; status?: string }
+
+/** Error de combinar un rol del sistema con un lugar (vacío = coherente). Sin saber el tipo de lugar no se opina. */
+export function placeRoleError(kind: Place['kind'], systemRole: string): string | undefined {
+  if (kind === 'almacen' && systemRole && systemRole !== WAREHOUSE_SYSTEM_ROLE && systemRole !== 'Sin acceso') {
+    return 'En el almacén solo se trabaja con el rol del sistema «Almacén» (o «Sin acceso»).';
+  }
+  if (kind === 'sede' && systemRole === WAREHOUSE_SYSTEM_ROLE) return 'El rol del sistema «Almacén» es solo para el almacén central, no para una sede.';
+  return undefined;
+}
+/** Área del almacén central: el único lugar con un área propia. */
+export const WAREHOUSE_AREA = 'Logística';
+
+/** Las áreas que admite un lugar: el almacén central solo «Logística»; una sede (o un lugar aún sin elegir) todas. */
+export const areasForPlace = (kind: Place['kind']): string[] => (kind === 'almacen' ? [WAREHOUSE_AREA] : AREAS);
+
+/** Error de combinar un área con un lugar (vacío = coherente). Sin saber el tipo de lugar no se opina. */
+export function placeAreaError(kind: Place['kind'], area: string): string | undefined {
+  if (kind === 'almacen' && area && area !== WAREHOUSE_AREA) return `En el almacén central solo se trabaja en el área «${WAREHOUSE_AREA}».`;
+  return undefined;
+}
+
 export const MIN_REASON = 5;
 export const ACTIVE = 'Activa';
 export const CLOSED = 'Cerrada';
@@ -29,7 +59,6 @@ export interface AssignmentForm {
   staffId: string;
   branch: string;
   area: string;
-  role: string;
   systemRole: string;
   startDate: string;
   endDate: string;
@@ -40,11 +69,14 @@ export interface AssignmentForm {
 export type AssignmentErrors = Partial<Record<keyof AssignmentForm, string>>;
 
 export const emptyAssignmentForm = (startDate = ''): AssignmentForm => ({
-  staffId: '', branch: '', area: '', role: '', systemRole: '', startDate, endDate: '', isMain: false, observations: '',
+  staffId: '', branch: '', area: '', systemRole: '', startDate, endDate: '', isMain: false, observations: '',
 });
 
+/** ¿La asignación es de ese lugar? Por id cuando lo tiene (guardada en la base) y si no por el nombre (datos de ejemplo). */
+const isPlace = (a: Pick<Assignment, 'branch' | 'placeId'>, p: Place) => (a.placeId && p.id ? a.placeId === p.id : norm(a.branch) === norm(p.name));
+
 export const assignmentToForm = (a: Assignment): AssignmentForm => ({
-  staffId: a.staffId, branch: a.branch, area: a.area, role: a.role, systemRole: a.systemRole ?? '', startDate: a.startDate,
+  staffId: a.staffId, branch: a.branch, area: a.area, systemRole: a.systemRole ?? '', startDate: a.startDate,
   endDate: a.endDate ?? '', isMain: a.isMain, observations: a.observations ?? '',
 });
 
@@ -55,7 +87,7 @@ export function validateAssignmentForm(
   f: AssignmentForm,
   assignments: Assignment[],
   staff: Staff[],
-  branches: Pick<Branch, 'name'>[],
+  branches: Place[],
   today: string,
   editingId?: string
 ): AssignmentErrors {
@@ -63,18 +95,26 @@ export function validateAssignmentForm(
   const member = staff.find(s => s.id === f.staffId);
   if (!member) e.staffId = 'Seleccione al trabajador.';
   else if (member.status !== 'Activo' && !editingId) e.staffId = 'El trabajador está inactivo: reactívelo antes de asignarlo.';
-  if (!branches.some(b => b.name === f.branch)) e.branch = 'Seleccione la sede.';
+  const place = branches.find(b => b.name === f.branch);
+  if (!place) e.branch = 'Seleccione la sede o el almacén.';
+  else if (!editingId && place.status && place.status !== 'Activo') e.branch = 'Ese lugar está inactivo: elija otro.';
   if (!AREAS.includes(f.area)) e.area = 'Seleccione el área.';
-  if (f.role.trim().length < MIN_TEXT) e.role = 'Indique el cargo (ej.: Psicólogo Senior).';
-  else if (f.role.trim().length > 60) e.role = 'El cargo es demasiado largo (máximo 60 caracteres).';
+  else {
+    const areaMismatch = placeAreaError(place?.kind, f.area);
+    if (areaMismatch) e.area = areaMismatch;
+  }
   if (!SYSTEM_ROLES.includes(f.systemRole)) e.systemRole = 'Seleccione el rol del sistema.';
+  else {
+    const mismatch = placeRoleError(place?.kind, f.systemRole);
+    if (mismatch) e.systemRole = mismatch;
+  }
   if (!f.startDate) e.startDate = 'La fecha de inicio es obligatoria.';
   if (f.endDate) {
     if (f.startDate && f.endDate <= f.startDate) e.endDate = 'La fecha de fin debe ser posterior a la de inicio.';
     else if (f.endDate < today) e.endDate = 'La fecha de fin ya pasó: para terminar una asignación use «Cerrar asignación».';
   }
-  if (member && f.branch && f.area && assignments.some(a => a.id !== editingId && a.staffId === f.staffId && isActive(a) && a.branch === f.branch && norm(a.area) === norm(f.area))) {
-    e.area = 'Este trabajador ya tiene una asignación activa en esa sede y área.';
+  if (member && place && f.area && assignments.some(a => a.id !== editingId && a.staffId === f.staffId && isActive(a) && isPlace(a, place) && norm(a.area) === norm(f.area))) {
+    e.area = 'Este trabajador ya tiene una asignación activa en ese lugar y área.';
   }
   // La principal no se desmarca: para cambiarla se marca otra
   if (editingId && !f.isMain) {
@@ -102,7 +142,6 @@ export function buildAssignment(f: AssignmentForm, id: string, assignments: Assi
     staffId: f.staffId,
     branch: f.branch,
     area: f.area,
-    role: f.role.trim(),
     systemRole: f.systemRole,
     startDate: f.startDate,
     endDate: f.endDate || undefined,

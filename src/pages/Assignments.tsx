@@ -15,9 +15,13 @@ import { AssignmentFormModal } from './people/AssignmentFormModal';
 import { AREAS, closeImpact, isActive } from '../utils/assignments';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { allActivities, todayLocalISO } from '../utils/schedule';
+import { StaffDbNotice } from '../components/people/StaffDbNotice';
+import { accountPlaceWarning } from '../utils/staffDb';
+import { userOfStaff } from '../utils/staffAccess';
+import { closeAssignmentIn } from '../utils/assignments';
 
 export function AssignmentsPage() {
-  const { assignments, staff, branches, schedules, monthlySchedules, closeAssignment, can } = useData();
+  const { orgAssignments: assignments, orgStaff: staff, orgPlaces: places, schedules, monthlySchedules, users, roles, permissions, closeAssignment, can } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';
@@ -73,12 +77,18 @@ export function AssignmentsPage() {
     () => (toClose ? closeImpact(toClose, assignments, staff.find(s => s.id === toClose.staffId), schedules, today, allActivities(monthlySchedules)) : undefined),
     [toClose, assignments, staff, schedules, today]
   );
+  // Si quien pierde esta asignación tiene cuenta, se avisa si su rol y su lugar de trabajo dejarían de corresponderse
+  const closeWarning = useMemo(() => {
+    if (!toClose) return undefined;
+    const after = closeAssignmentIn(assignments, toClose.id, today, 'x', 'x').assignments;
+    return accountPlaceWarning(userOfStaff(toClose.staffId, users), after, roles, permissions);
+  }, [toClose, assignments, users, roles, permissions, today]);
 
   const handleExport = () => {
     downloadCsv(
       csvFileName('Asignaciones', today),
-      ['Trabajador', 'Sede', 'Área', 'Cargo', 'Rol del sistema', 'Principal', 'Estado', 'Inicio', 'Fin', 'Motivo de cierre'],
-      filteredAssignments.map(a => [getStaffName(a.staffId), a.branch, a.area, a.role, a.systemRole ?? '', a.isMain ? 'Sí' : 'No', a.status, a.startDate, a.endDate ?? '', a.closeReason ?? ''])
+      ['Trabajador', 'Lugar', 'Área', 'Rol del sistema', 'Principal', 'Estado', 'Inicio', 'Fin', 'Motivo de cierre'],
+      filteredAssignments.map(a => [getStaffName(a.staffId), a.branch, a.area, a.systemRole ?? '', a.isMain ? 'Sí' : 'No', a.status, a.startDate, a.endDate ?? '', a.closeReason ?? ''])
     );
   };
 
@@ -88,7 +98,7 @@ export function AssignmentsPage() {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Asignaciones</h2>
-          <p className="text-sm text-text-secondary">Vínculo entre trabajador, sede, área y cargo</p>
+          <p className="text-sm text-text-secondary">Dónde y en qué área trabaja cada persona (su cargo sale de su contrato)</p>
         </div>
         <div className="flex items-center gap-3">
           <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredAssignments.length === 0}>
@@ -103,6 +113,8 @@ export function AssignmentsPage() {
           )}
         </div>
       </div>
+
+      <StaffDbNotice />
 
       {/* Filters */}
       <Card className="mb-6 p-4">
@@ -123,8 +135,8 @@ export function AssignmentsPage() {
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[140px]"
             >
-              <option value="">Todas las sedes</option>
-              {branches.map(b => (
+              <option value="">Todos los lugares</option>
+              {places.map(b => (
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}
             </select>
@@ -163,9 +175,9 @@ export function AssignmentsPage() {
             <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-4 font-medium">Trabajador</th>
-                <th className="px-6 py-4 font-medium">Sede</th>
+                <th className="px-6 py-4 font-medium">Lugar</th>
                 <th className="px-6 py-4 font-medium">Área</th>
-                <th className="px-6 py-4 font-medium">Cargo</th>
+                <th className="px-6 py-4 font-medium">Rol del sistema</th>
                 <th className="px-6 py-4 font-medium">Principal</th>
                 <th className="px-6 py-4 font-medium">Estado</th>
                 <th className="px-6 py-4 font-medium text-right">Acciones</th>
@@ -177,7 +189,7 @@ export function AssignmentsPage() {
                   <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{getStaffName(asg.staffId)}</td>
                   <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.branch}</td>
                   <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.area}</td>
-                  <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.role}</td>
+                  <td className="px-6 py-4 text-text-primary whitespace-nowrap">{asg.systemRole || '—'}</td>
                   <td className="px-6 py-4">
                     {asg.isMain ? <Badge variant="primary">Sí</Badge> : <Badge variant="secondary">No</Badge>}
                   </td>
@@ -272,10 +284,10 @@ export function AssignmentsPage() {
                   <p className="text-sm font-medium text-text-primary mt-1">{selectedAssignment.area}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-text-muted uppercase tracking-wider">Cargo / Rol</label>
+                  <label className="text-xs text-text-muted uppercase tracking-wider">Rol del sistema</label>
                   <div className="flex items-center gap-2 mt-1">
                     <UserCheck size={16} className="text-primary-accent" />
-                    <p className="text-sm font-medium text-text-primary">{selectedAssignment.role}</p>
+                    <p className="text-sm font-medium text-text-primary">{selectedAssignment.systemRole || '—'}</p>
                   </div>
                 </div>
                 <div>
@@ -336,23 +348,25 @@ export function AssignmentsPage() {
         dateMax={today}
         dateDefault={today}
         blocked={impact?.blocked ? `Es su última asignación de Psicopedagogía y tiene ${impact.futureSessions.length} asesoría(s) y ${impact.futureActivities.length} actividad(es) futura(s) a su nombre. Reasígnelas en Psicopedagogía → Programación (y Actividades especiales) y vuelva a intentarlo.` : null}
-        onSubmit={({ reason, detail, date }) => {
+        onSubmit={async ({ reason, detail, date }) => {
           if (!toClose) return;
           if (!reason) return 'Seleccione el motivo del cierre.';
-          const r = closeAssignment(toClose.id, date, `${reason} — ${detail.trim()}`);
+          const r = await closeAssignment(toClose.id, date, `${reason} — ${detail.trim()}`);
           return r.ok ? null : r.error ?? 'No se pudo cerrar la asignación.';
         }}
       >
         {toClose && impact && (
           <div className="space-y-3 text-sm">
             <p className="text-text-secondary">
-              Se cerrará la asignación de <span className="font-medium text-text-primary">{getStaffName(toClose.staffId)}</span> como {toClose.role} en {toClose.branch} ({toClose.area}). No se borra: queda en el historial.
+              Se cerrará la asignación de <span className="font-medium text-text-primary">{getStaffName(toClose.staffId)}</span> en {toClose.branch} ({toClose.area}). No se borra: queda en el historial.
             </p>
             <ul className="space-y-1 text-text-secondary list-disc pl-5">
-              {impact.promoted && <li>«{impact.promoted.role} · {impact.promoted.branch}» pasará a ser su asignación principal.</li>}
+              {impact.promoted && <li>«{impact.promoted.area} · {impact.promoted.branch}» pasará a ser su asignación principal.</li>}
               {impact.noneLeft && <li>Quedará sin ninguna asignación activa: no aparecerá en las listas de responsables.</li>}
               {impact.leavesInterviewers && <li>Dejará de aparecer como responsable de entrevistas y asesorías.</li>}
               {!impact.promoted && !impact.noneLeft && !impact.leavesInterviewers && <li>No cambia su asignación principal ni sus otras asignaciones.</li>}
+              {userOfStaff(toClose.staffId, users) && <li>Su cuenta de usuario se actualiza sola: las sedes y el almacén que ve salen de sus asignaciones activas con acceso.</li>}
+              {closeWarning && <li className="text-warning-text">{closeWarning} Se cierra igual, pero corrija su rol en Organización → Usuarios.</li>}
             </ul>
           </div>
         )}

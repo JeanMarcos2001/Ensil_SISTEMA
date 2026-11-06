@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@supabase/server": "^1.9.2",
     "@supabase/supabase-js": "^2.101.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
@@ -33,6 +34,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.21",
+    "supabase": "^3.0.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

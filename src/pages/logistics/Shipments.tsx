@@ -20,6 +20,8 @@ export function Shipments() {
     stockItems, 
     items, 
     branches,
+    warehouses,
+    stockLocations,
     addShipment,
     updateShipmentStatus,
     updateShipment,
@@ -141,8 +143,8 @@ export function Shipments() {
     setBoxes(boxes.map(b => b.id === boxId ? { ...b, observation } : b));
   };
 
-  // Los envíos salen siempre del almacén central de la empresa (se define en Organización → Filiales)
-  const warehouse = centralWarehouse(branches);
+  // Los envíos salen siempre del almacén central de la empresa (se define en Organización → Almacenes)
+  const warehouse = centralWarehouse(warehouses);
   const originId = warehouse?.id ?? '';
 
   const validateForm = () => {
@@ -311,7 +313,7 @@ export function Shipments() {
     setFormError(null);
   };
 
-  const destinationBranch = branches.find(b => b.id === destinationId);
+  const destinationBranch = stockLocations.find(b => b.id === destinationId);
   const dispatchAvailability = destinationBranch ? availabilityOf('log-envios:dispatch', { branchId: destinationBranch.id, branchName: destinationBranch.name }) : null;
   const canSaveDraft = can(selectedShipment ? 'log-envios:edit' : 'log-envios:create');
 
@@ -488,7 +490,7 @@ export function Shipments() {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Envíos</h2>
-          <p className="text-sm text-text-secondary">Gestión de envíos desde Sede Central hacia filiales</p>
+          <p className="text-sm text-text-secondary">Gestión de envíos desde el almacén central hacia las filiales</p>
         </div>
         <div className="flex items-center gap-3">
           {can('log-envios:create') && (
@@ -562,7 +564,7 @@ export function Shipments() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {filteredShipments.map((shipment) => {
-                const destination = branches.find(b => b.id === shipment.destinationId)?.name || shipment.destinationId;
+                const destination = stockLocations.find(b => b.id === shipment.destinationId)?.name || shipment.destinationId;
                 const method = shippingMethods.find(m => m.id === shipment.shippingMethodId)?.name || shipment.shippingMethodId;
                 const totalItems = shipment.items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -714,7 +716,7 @@ export function Shipments() {
                   <input 
                     type="text" 
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={branches.find(b => b.id === originId)?.name || 'Central'}
+                    value={stockLocations.find(b => b.id === originId)?.name || 'Central'}
                     disabled
                   />
                 </div>
@@ -926,7 +928,7 @@ export function Shipments() {
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Destino:</span>
-              <span className="font-medium text-text-primary">{branches.find(b => b.id === destinationId)?.name}</span>
+              <span className="font-medium text-text-primary">{stockLocations.find(b => b.id === destinationId)?.name}</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Método de Envío:</span>
@@ -1005,11 +1007,11 @@ export function Shipments() {
                 <div className="space-y-2">
                   <div>
                     <span className="text-xs text-text-muted block">Origen</span>
-                    <span className="text-sm font-medium text-text-primary">{branches.find(b => b.id === selectedShipment.originId)?.name ?? 'Almacén central'} (almacén central)</span>
+                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedShipment.originId)?.name ?? 'Almacén central'} (almacén central)</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">Destino</span>
-                    <span className="text-sm font-medium text-text-primary">{branches.find(b => b.id === selectedShipment.destinationId)?.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedShipment.destinationId)?.name}</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">ETA</span>

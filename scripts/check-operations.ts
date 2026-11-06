@@ -38,17 +38,17 @@ const branches: Branch[] = [
   { id: 'FIL-CHI', name: 'Chiclayo', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '', phoneFixed: '', phoneMobile: '' } as Branch,
 ];
 const asg = (id: string, over: Partial<Assignment> = {}): Assignment => ({
-  id, staffId: '1', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicóloga', systemRole: 'Psicopedagogía', startDate: '2026-01-01', isMain: true, status: 'Activa', ...over,
+  id, staffId: '1', branch: 'Piura', area: 'Psicopedagogía', systemRole: 'Psicopedagogía', startDate: '2026-01-01', isMain: true, status: 'Activa', ...over,
 });
-const form = (over = {}) => ({ ...emptyAssignmentForm('2026-10-01'), staffId: '2', branch: 'Chiclayo', area: 'Logística', role: 'Encargado', systemRole: 'Administración', ...over });
+const form = (over = {}) => ({ ...emptyAssignmentForm('2026-10-01'), staffId: '2', branch: 'Chiclayo', area: 'Logística', systemRole: 'Administración', ...over });
 
 // ================================================================ Asignaciones
 const base = [asg('ASG-001'), asg('ASG-002', { staffId: '2', branch: 'Chiclayo', area: 'Administración', isMain: true })];
 check('Asignación válida', Object.keys(validateAssignmentForm(form(), base, members, branches, TODAY)).length === 0);
 check('Trabajador inactivo no recibe asignaciones', !!validateAssignmentForm(form({ staffId: '3' }), base, members, branches, TODAY).staffId);
-check('Sede, área, cargo, rol y fecha obligatorios', (() => {
-  const e = validateAssignmentForm(form({ branch: '', area: '', role: 'x', systemRole: '', startDate: '' }), base, members, branches, TODAY);
-  return !!e.branch && !!e.area && !!e.role && !!e.systemRole && !!e.startDate;
+check('Lugar, área, rol del sistema y fecha obligatorios', (() => {
+  const e = validateAssignmentForm(form({ branch: '', area: '', systemRole: '', startDate: '' }), base, members, branches, TODAY);
+  return !!e.branch && !!e.area && !!e.systemRole && !!e.startDate;
 })());
 check('Fin posterior al inicio y no pasado', !!validateAssignmentForm(form({ endDate: '2026-09-01' }), base, members, branches, TODAY).endDate && !!validateAssignmentForm(form({ startDate: '2026-01-01', endDate: '2026-06-01' }), base, members, branches, TODAY).endDate && !validateAssignmentForm(form({ endDate: '2027-01-01' }), base, members, branches, TODAY).endDate);
 check('No repite sede + área activas', !!validateAssignmentForm(form({ staffId: '1', branch: 'Piura', area: 'Psicopedagogía' }), base, members, branches, TODAY).area);
@@ -63,8 +63,8 @@ check('La principal no se desmarca si hay otras activas', (() => {
   return !!validateAssignmentForm({ ...form({ staffId: '1', branch: 'Piura', area: 'Psicopedagogía' }), isMain: false }, two, members, branches, TODAY, 'ASG-001').isMain;
 })());
 check('Editar conserva id y estado', (() => {
-  const r = saveAssignment(base, form({ staffId: '1', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicóloga Senior', isMain: true }), 'ASG-001');
-  return r.saved.id === 'ASG-001' && r.saved.role === 'Psicóloga Senior' && r.assignments.length === 2 && r.saved.status === 'Activa';
+  const r = saveAssignment(base, form({ staffId: '1', branch: 'Piura', area: 'Psicopedagogía', observations: 'Cambio de turno', isMain: true }), 'ASG-001');
+  return r.saved.id === 'ASG-001' && r.saved.observations === 'Cambio de turno' && r.assignments.length === 2 && r.saved.status === 'Activa';
 })());
 
 const sessions: Schedule[] = [

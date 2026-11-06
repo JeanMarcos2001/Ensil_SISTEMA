@@ -78,7 +78,7 @@ export const ENTITIES: Record<string, string> = {
   item: 'Artículo', itemPrice: 'Precio de artículo', stock: 'Stock', kardex: 'Kardex', shipment: 'Envío', transfer: 'Transferencia', reception: 'Recepción', adjustment: 'Ajuste o merma',
   schedule: 'Asesoría', tracking: 'Seguimiento de la sesión', monthlySchedule: 'Cronograma mensual', activity: 'Actividad especial', psyReminder: 'Recordatorio de Psicopedagogía', capacity: 'Cupos',
   staff: 'Personal', contract: 'Contrato de trabajo', assignment: 'Asignación', payroll: 'Planilla', role: 'Rol', permission: 'Permisos del rol', user: 'Cuenta de usuario',
-  company: 'Empresa', branch: 'Filial', program: 'Programa', level: 'Nivel', paymentType: 'Tipo de pago', tariff: 'Tarifario', promotion: 'Promoción', recipe: 'Receta de materiales',
+  company: 'Empresa', branch: 'Filial', warehouse: 'Almacén', program: 'Programa', level: 'Nivel', paymentType: 'Tipo de pago', tariff: 'Tarifario', promotion: 'Promoción', recipe: 'Receta de materiales',
   leadSource: 'Origen de lead', contractTemplate: 'Plantilla de contrato', notification: 'Aviso', audit: 'Auditoría',
   courier: 'Courier', shippingMethod: 'Método de envío',
 };
@@ -443,7 +443,6 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'edit', label: 'Editar ficha de personal', kind: 'editar', requires: ['view'], writes: ['staff', 'user'], actions: ['updateStaff'] },
     { action: 'inactivate', label: 'Inactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user', 'assignment'], actions: ['inactivateStaff'], note: 'Su cuenta de usuario se desactiva sola.' },
     { action: 'reactivate', label: 'Reactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user'], actions: ['reactivateStaff'] },
-    { action: 'delete', label: 'Eliminar ficha de personal', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['staff'], actions: ['deleteStaff'] },
   ]),
   f('per-contratos', 'Contratos', 'mod-personas', [
     { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll'] },
@@ -510,6 +509,10 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     entity: 'branch', one: 'filial', many: 'filiales', menu: menu('organizacion', 'Filiales'), reads: ['company'],
     create: ['addBranch'], edit: ['updateBranch'], remove: ['deleteBranch'],
   })),
+  f('org-almacenes', 'Almacenes', 'mod-org', crud({
+    entity: 'warehouse', one: 'almacén', many: 'almacenes', menu: menu('organizacion', 'Almacenes'), reads: ['stock'],
+    create: ['addWarehouse'], edit: ['updateWarehouse'], noDelete: true,
+  })),
   f('org-roles', 'Roles y Permisos', 'mod-org', [
     { action: 'view', label: 'Ver roles', kind: 'ver', menu: menu('organizacion', 'Roles'), reads: ['role', 'permission', 'user'] },
     { action: 'create', label: 'Crear rol', kind: 'crear', requires: ['view'], writes: ['role'], actions: ['addRole'] },
@@ -519,13 +522,12 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('org-usuarios', 'Usuarios', 'mod-org', [
     { action: 'view', label: 'Ver usuarios', kind: 'ver', menu: menu('organizacion', 'Usuarios'), reads: ['user', 'role', 'staff', 'branch'] },
-    { action: 'create', label: 'Crear usuario', kind: 'crear', requires: ['view', 'per-personal:view'], writes: ['user'], actions: ['addUser'] },
+    { action: 'create', label: 'Crear usuario', kind: 'crear', requires: ['view', 'per-personal:view', 'per-asignaciones:view'], writes: ['user'], actions: ['addUser'] },
     { action: 'edit', label: 'Editar usuario', kind: 'editar', requires: ['view'], writes: ['user'], actions: ['updateUser'] },
     { action: 'deactivate', label: 'Desactivar usuario', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['updateUser'] },
-    { action: 'reset_access', label: 'Resetear acceso', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['updateUser'] },
+    { action: 'reset_access', label: 'Reenviar acceso', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['resendAccess'] },
     { action: 'assign_role', label: 'Asignar rol', kind: 'operar', requires: ['view', 'org-roles:view'], sensitive: 'control', reads: ['role'], writes: ['user'], actions: ['updateUser'] },
     { action: 'assign_branch', label: 'Asignar sedes', kind: 'operar', requires: ['view'], sensitive: 'control', reads: ['branch'], writes: ['user'], actions: ['updateUser'] },
-    { action: 'delete', label: 'Eliminar usuario', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['user'], actions: ['deleteUser'] },
   ]),
   f('org-alcance', 'Alcance por sede', 'mod-org', [
     { action: 'all_branches', label: 'Ver y operar todas las sedes', kind: 'ver', reads: ['branch'], note: 'Sin esta función, cada persona ve solo la sede de sus asignaciones activas.' },
@@ -607,10 +609,9 @@ export const NON_CAPABILITY_ACTIONS: Record<string, string> = {
   payrollLinesOf: 'Consulta (líneas de una planilla).',
   documentContextOf: 'Consulta (datos para armar un documento).',
   setIsEnrollmentWizardOpen: 'Estado de la interfaz (abrir el asistente de matrícula).',
+  reloadOrgDirectory: 'Consulta (vuelve a leer las empresas y filiales de la base de datos).',
+  reloadStaffDirectory: 'Consulta (vuelve a leer el personal y las asignaciones de la base de datos).',
   selectBranch: 'Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).',
-  switchUser: 'Sesión: cambio rápido de usuario con PIN (quien sabe el PIN de una cuenta entra a ella).',
-  lockSession: 'Sesión: bloquear (nadie trabaja hasta que una cuenta entre con su PIN).',
-  changeOwnPin: 'Sesión: cada persona cambia su propio PIN.',
 };
 
 /** Ítems de menú que aún no tienen función porque la pantalla no existe o no es una pantalla propia. */

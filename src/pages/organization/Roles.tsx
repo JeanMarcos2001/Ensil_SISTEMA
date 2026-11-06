@@ -10,7 +10,6 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { ROLE_TEMPLATES, templateById, templatePermissions } from '../../utils/roleTemplates';
 import { roleUsage, validateRoleInput } from '../../utils/roleBuilder';
-import { AccessStorageBar } from '../../components/people/AccessStorageBar';
 
 interface RolesProps {
   onNavigate?: (item: string, state?: any) => void;
@@ -97,31 +96,38 @@ export function Roles({ onNavigate }: RolesProps) {
     return !problem;
   };
 
+  const [saving, setSaving] = useState(false);
+
   /** Guarda el rol (las reglas viven en el contexto). Devuelve el id del rol guardado, o `null` si algo lo impide. */
-  const submit = (): string | null => {
+  const submit = async (): Promise<string | null> => {
+    if (saving) return null;
     if (!validateForm()) return null;
     const data = {
       name: formData.name, desc: formData.desc, status: formData.status as 'Activo' | 'Inactivo',
       observations: formData.observations, branchUserLimit: parsedLimit(), templateId: formData.templateId || undefined,
     };
     if (selectedRole) {
-      const r = updateRole(selectedRole, data);
+      setSaving(true);
+      const r = await updateRole(selectedRole, data);
+      setSaving(false);
       if (!r.ok) { setErrors({ form: r.error ?? 'No se pudo guardar el rol.' }); return null; }
       return selectedRole;
     }
     // Con plantilla, el rol nace con sus funciones (todo en una sola operación)
     const template = templateById(formData.templateId);
-    const r = addRole({ ...data, permissions: template && can('org-roles:config_perms') ? templatePermissions(template) : undefined, reasons: template?.risks });
+    setSaving(true);
+    const r = await addRole({ ...data, permissions: template && can('org-roles:config_perms') ? templatePermissions(template) : undefined, reasons: template?.risks });
+    setSaving(false);
     if (!r.ok) { setErrors({ form: r.error ?? 'No se pudo crear el rol.' }); return null; }
     return r.id ?? null;
   };
 
-  const handleSave = () => {
-    if (submit()) setIsFormOpen(false);
+  const handleSave = async () => {
+    if (await submit()) setIsFormOpen(false);
   };
 
-  const handleSaveAndConfigure = () => {
-    const id = submit();
+  const handleSaveAndConfigure = async () => {
+    const id = await submit();
     if (id) {
       setIsFormOpen(false);
       onNavigate?.('Permisos', { selectedRoleId: id });
@@ -134,9 +140,9 @@ export function Roles({ onNavigate }: RolesProps) {
     setIsDeleteModalOpen(true);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (selectedRole) {
-      const r = deleteRole(selectedRole);
+      const r = await deleteRole(selectedRole);
       if (!r.ok) { setDeleteError(r.error ?? 'No se pudo eliminar el rol.'); return; }
       setIsDeleteModalOpen(false);
       setSelectedRole(null);
@@ -198,7 +204,6 @@ export function Roles({ onNavigate }: RolesProps) {
         </div>
       </div>
 
-      <AccessStorageBar />
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -424,11 +429,11 @@ export function Roles({ onNavigate }: RolesProps) {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="secondary" onClick={handleSave}>
+            <Button variant="secondary" onClick={handleSave} disabled={saving}>
               Guardar Rol
             </Button>
             {can('org-roles:config_perms') && (
-              <Button variant="primary" onClick={handleSaveAndConfigure}>
+              <Button variant="primary" onClick={handleSaveAndConfigure} disabled={saving}>
                 Guardar y configurar permisos
               </Button>
             )}

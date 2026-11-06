@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
-import { createIdAllocator, nextNumericId, nextSequentialId } from '../utils/ids';
+import { createIdAllocator, ID_PREFIX, nextNumericId, nextSequentialId } from '../utils/ids';
 import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
 import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
-import { deactivationNote, staffDisplayName, syncPatch, validateLinkedUser } from '../utils/staffAccess';
+import { staffDisplayName } from '../utils/staffAccess';
 import { linesOf, runIdOf, validateAdjustment, validateClose, validateGenerate, validateReopen as validatePayrollReopen, type BuiltPayroll } from '../utils/payrollRun';
 import { periodLabel, periodOf, round2, type LineCalc } from '../utils/payrollEngine';
 import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
@@ -15,7 +15,9 @@ import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, valid
 import { applyReversalToPlan, reversalTargets, validateReversal, type ReversalInput } from '../utils/paymentReversal';
 import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEnrollmentEdit, type EnrollmentEditValues } from '../utils/enrollmentEdit';
 import { partsUSD } from '../utils/payments';
-import { closeAllOf, closeAssignmentIn, closeImpact, isActive as isActiveAssignment, saveAssignment as saveAssignmentIn, validateAssignmentClose, validateAssignmentForm, type AssignmentForm } from '../utils/assignments';
+import type { AssignmentForm, Place } from '../utils/assignments';
+import { useStaffDirectory, type StaffDirectoryStatus } from '../hooks/useStaffDirectory';
+import { placesOf } from '../utils/staffDb';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
 import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
 import { buildRenewal, markRenewed, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
@@ -40,22 +42,28 @@ import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
-import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPermissions, seedPrograms, seedRoles, seedStaff, seedUsers } from '../data/seedCatalog';
+import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers, seedWarehouses } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 import { availability, buildHolders, type Availability } from '../utils/capabilities';
 import { availabilityForViewer, denialMessage, guardActions, unmetClause, userChangeNeeds } from '../utils/guards';
-import { readStoredAccess, restoreAccess, writeStoredAccess } from '../utils/accessStore';
+import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
+import type { OpResult } from '../services/orgDirectory';
+import { supabase } from '../lib/supabase';
+import { loadAccessRoles, loadUsers, persistNewRole, persistPermissions, persistRoleDelete, persistRoleUpdate, type AccessData } from '../services/accessRoles';
+import { createSupabaseAccountsRepository } from '../services/accountsRepository';
+import { accountCreateCheck, accountEditCheck, type AccountRulesContext } from '../utils/accountRules';
+import { changeNeeds, editBody, inviteBody, type AccountForm } from '../utils/accounts';
+import { createSupabaseRolesRepository } from '../services/accessRolesRepository';
 import {
-  activeAccount, defaultViewBranch, hashPin, initialUserId, lastAccessLabel, lastSuperuserError, NO_BRANCH, parseSession, pinError, pinSetError, readStoredSession,
-  scopeOfUser, selfAccountError, tryChangePin, trySwitch, validView, viewBranchError, writeStoredSession, type PinAttempts, type SessionScope,
+  activeAccount, defaultViewBranch, lastSuperuserError, NO_BRANCH, NO_SCOPE, scopeOfUser, selfAccountError, validView, viewBranchError, warehouseOperationError, type SessionScope,
 } from '../utils/session';
 import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, seatLimitError, validateRoleInput, type AcceptedRisk } from '../utils/roleBuilder';
 import { markRead, noticesFor, visibility, type NoticeScope } from '../utils/notifications';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { duplicateRecipe as copyRecipe, recipeStatusError, validateRecipe } from '../utils/recipes';
-import { shipmentRouteError, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../utils/logisticsRoutes';
+import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
 import { availableStock, getCurrentPrice, itemSaleError, stockEntryError, stockMovesError, validateItem } from '../utils/inventory';
 
 // Types
@@ -544,6 +552,7 @@ export interface ItemPrice {
 export interface StockItem {
   id: string;
   itemId: string;
+  /** Ubicación de stock: el almacén central (`ALM-NNN`) o una sede (su código). */
   branchId: string;
   stock: number;
   minStock: number;
@@ -958,6 +967,8 @@ export interface Contract {
   id: string;
   staffId: string;
   type: string;
+  /** Cargo o puesto pactado (el que se ve en Personal y en los reportes: no se escribe en las asignaciones). */
+  position?: string;
   startDate: string;
   endDate?: string;
   status: ContractStatus;
@@ -1055,9 +1066,12 @@ export interface PayrollRun {
 export interface Assignment {
   id: string;
   staffId: string;
+  /** Nombre del lugar de trabajo (una sede o el almacén central). */
   branch: string;
+  /** Id del lugar y su tipo (asignaciones guardadas en la base; los datos de ejemplo solo traen el nombre). */
+  placeId?: string;
+  placeKind?: 'sede' | 'almacen';
   area: string;
-  role: string;
   systemRole?: string;
   startDate: string;
   endDate?: string;
@@ -1105,12 +1119,12 @@ export interface User {
   document?: string;
   phone?: string;
   additionalBranches?: string[];
+  /** Almacenes (ids `ALM-NNN`) en los que trabaja la cuenta, p. ej. el rol Almacén central. Sin sede ni almacén, la cuenta no ve datos de ninguno. */
+  warehouses?: string[];
   /** Ficha de personal a la que pertenece la cuenta (nombre, documento, teléfono y sedes salen de ella). */
   staffId?: string;
   /** Por qué y cuándo se desactivó la cuenta (p. ej. el trabajador se inactivó). */
   statusNote?: string;
-  /** Marca irreversible del PIN de acceso rápido (`utils/session.ts`); nunca el PIN. Sin ella la cuenta no puede entrar. */
-  pinHash?: string;
 }
 
 export interface Permission {
@@ -1121,9 +1135,9 @@ export interface Permission {
 export interface Branch {
   id: string; // Código
   name: string; // Nombre de filial
-  company: string; // Empresa
-  /** Almacén central de toda la empresa (uno solo): de él salen los envíos y en él termina todo lo que se devuelve. */
-  isWarehouse?: boolean;
+  company: string; // Empresa (nombre; en las filiales de la base se calcula a partir de `companyId`)
+  /** Id de la empresa (filiales guardadas en la base de datos). */
+  companyId?: string;
   status: 'Activo' | 'Inactivo';
   address: string; // Dirección
   reference?: string; // Referencia
@@ -1134,6 +1148,22 @@ export interface Branch {
   phoneMobile?: string;
   email?: string;
   responsibleId?: string; // ID del personal responsable
+  observations?: string;
+}
+
+/**
+ * Almacén central: aparte de las sedes (no tiene alumnos ni vende). Recibe compras, despacha a las sedes y recibe devoluciones; su stock
+ * es propio y nunca se mezcla con el de venta de una sede (ni siquiera el de la sede donde está físicamente).
+ */
+export interface Warehouse {
+  id: string; // ALM-NNN
+  name: string;
+  /** Empresa a la que pertenece (nombre; en los almacenes de la base se calcula a partir de `companyId`); puede quedar vacía hasta definirla. */
+  company?: string;
+  /** Id de la empresa (almacenes guardados en la base de datos). */
+  companyId?: string;
+  status: 'Activo' | 'Inactivo';
+  address?: string;
   observations?: string;
 }
 
@@ -1320,30 +1350,40 @@ interface DataContextType {
   deleteMonthlySchedule: (id: string) => void;
   capacityConfig: CapacityConfig;
   setCapacityConfig: (config: CapacityConfig) => void;
+  /** Personal de ejemplo (en memoria): lo siguen usando contratos, planilla, agenda y matrículas. Personas → Personal y Asignaciones usan `orgStaff` y `orgAssignments`. */
   staff: Staff[];
+  /** Personal y asignaciones guardados en la base de datos (Personas → Personal y Asignaciones; de ahí salen las cuentas de usuario). */
+  orgStaff: Staff[];
+  orgAssignments: Assignment[];
+  /** Sedes y almacén como lugares de trabajo (para las asignaciones). */
+  orgPlaces: Place[];
+  staffDirectory: { status: StaffDirectoryStatus; error: string };
+  reloadStaffDirectory: () => Promise<void>;
   contracts: Contract[];
   addContract: (contract: Omit<Contract, 'id'>) => Contract;
   updateContract: (id: string, data: Partial<Omit<Contract, 'id'>>) => void;
   assignments: Assignment[];
   /** Crea (o edita, con `editingId`) una asignación. La nueva principal desplaza a la anterior. */
-  saveAssignment: (form: AssignmentForm, editingId?: string) => StockResult;
+  saveAssignment: (form: AssignmentForm, editingId?: string) => Promise<StockResult>;
   /** Cierra una asignación con fecha y motivo (no se borra). */
-  closeAssignment: (id: string, date: string, reason: string) => StockResult;
+  closeAssignment: (id: string, date: string, reason: string) => Promise<StockResult>;
   /** Edita un contrato vigente con motivo; queda la constancia de lo que cambió. */
   editContract: (id: string, form: ContractForm, reason: string) => StockResult;
   /** Da de baja a un trabajador (cierra sus asignaciones). Exige contrato cerrado y sin asesorías futuras. */
-  inactivateStaff: (id: string, input: { reason: string; detail: string; date: string }) => StockResult;
-  reactivateStaff: (id: string, detail: string) => StockResult;
+  inactivateStaff: (id: string, input: { reason: string; detail: string; date: string }) => Promise<StockResult>;
+  reactivateStaff: (id: string, detail: string) => Promise<StockResult>;
   roles: Role[];
   /** Crea el rol; con `permissions` lo deja armado en una sola operación (todo o nada). `reasons` son los motivos de las combinaciones a separar. */
-  addRole: (input: NewRoleInput) => StockResult & { id?: string };
-  updateRole: (id: string, roleData: RolePatch) => StockResult;
-  deleteRole: (id: string) => StockResult;
+  addRole: (input: NewRoleInput) => Promise<OpResult & { id?: string }>;
+  updateRole: (id: string, roleData: RolePatch) => Promise<OpResult>;
+  deleteRole: (id: string) => Promise<OpResult>;
   users: User[];
-  /** Crea una cuenta; si viene de una ficha de personal (`staffId`) hereda sus datos y sedes (ver `utils/staffAccess.ts`). */
-  addUser: (user: User & { pin?: string }) => StockResult;
-  /** Cambia datos de una cuenta; `pin` fija un PIN nuevo (lo hace quien administra cuentas; el de un Superusuario, solo otro Superusuario). */
-  updateUser: (id: string, userData: Partial<User> & { pin?: string }) => StockResult;
+  /** Invita (crea) una cuenta: la guarda el servidor y manda la invitación por correo; la persona fija su contraseña desde el enlace. */
+  addUser: (form: AccountForm) => Promise<OpResult & { id?: string }>;
+  /** Cambia datos, rol, sedes, almacenes o estado de una cuenta (al servidor solo llega lo que cambia). El correo no se cambia. */
+  updateUser: (id: string, changes: Partial<AccountForm>) => Promise<OpResult>;
+  /** Reenvía la invitación (si la persona nunca entró) o el enlace para fijar la contraseña. */
+  resendAccess: (id: string) => Promise<OpResult>;
   payrollRuns: PayrollRun[];
   /** Líneas de una planilla: la foto si ya se cerró; en borrador, se recalculan con los contratos. */
   payrollLinesOf: (run: PayrollRun) => BuiltPayroll;
@@ -1357,14 +1397,23 @@ interface DataContextType {
   closeContract: (id: string, date: string, reason: string) => StockResult;
   /** Renueva un contrato con fecha de fin: el anterior queda «Renovado» y nace uno nuevo desde el día siguiente a su fin (con motivo). */
   renewContract: (id: string, input: RenewalInput) => StockResult;
-  deleteUser: (id: string) => StockResult;
   permissions: Permission[];
-  savePermissions: (roleId: string, newPermissions: string[], reasons?: Record<string, string>) => StockResult;
+  savePermissions: (roleId: string, newPermissions: string[], reasons?: Record<string, string>) => Promise<OpResult>;
+  /** Empresas de ejemplo (en memoria): las siguen usando las pantallas que aún no pasaron a la base. Organización → Empresas usa `orgCompanies`. */
   companies: Company[];
-  addCompany: (company: Company) => void;
-  updateCompany: (id: string, companyData: Partial<Company>) => void;
-  deleteCompany: (id: string) => void;
+  /** Empresas y filiales guardadas en la base de datos (Organización → Empresas y Filiales). */
+  orgCompanies: Company[];
+  orgBranches: Branch[];
+  orgWarehouses: Warehouse[];
+  orgDirectory: { status: OrgDirectoryStatus; error: string };
+  reloadOrgDirectory: () => Promise<void>;
+  addCompany: (company: Omit<Company, 'id'>) => Promise<OpResult<Company> & { id?: string }>;
+  updateCompany: (id: string, companyData: Partial<Company>) => Promise<OpResult<Company>>;
+  deleteCompany: (id: string) => Promise<OpResult>;
   branches: Branch[];
+  warehouses: Warehouse[];
+  /** El almacén y las sedes como ubicaciones de stock (para nombres y selectores de Logística). */
+  stockLocations: StockLocation[];
   leadSources: LeadSource[];
   programs: Program[];
   levels: Level[];
@@ -1387,9 +1436,9 @@ interface DataContextType {
   updateTransferStatus: (id: string, status: Transfer['status']) => StockResult;
   updateTransfer: (id: string, transfer: Partial<Transfer>) => StockResult;
   addTransfer: (transfer: Omit<Transfer, 'id'>) => StockResult;
-  addStaff: (staff: Omit<Staff, 'id'>) => Staff;
-  updateStaff: (id: string, staff: Partial<Staff>) => void;
-  deleteStaff: (id: string) => void;
+  /** El id `STF-NNN` y el código los asigna el sistema. */
+  addStaff: (staff: Omit<Staff, 'id' | 'code'>) => Promise<OpResult<Staff>>;
+  updateStaff: (id: string, staff: Partial<Staff>) => Promise<OpResult<Staff>>;
   /** Crea el alumno (correlativo ALU-000) y suma uno al contador de alumnos de sus titulares. */
   addStudent: (student: Omit<Student, 'id'>) => Student;
   updateStudent: (id: string, student: Partial<Student>) => void;
@@ -1481,9 +1530,11 @@ interface DataContextType {
   addPromotion: (promotion: Omit<Promotion, 'id'>) => void;
   updatePromotion: (id: string, promotion: Partial<Promotion>) => void;
   deletePromotion: (id: string) => void;
-  addBranch: (branch: Branch) => StockResult;
-  updateBranch: (id: string, branch: Partial<Branch>) => StockResult;
-  deleteBranch: (id: string) => StockResult;
+  addBranch: (branch: Omit<Branch, 'id'>) => Promise<OpResult<Branch> & { id?: string }>;
+  updateBranch: (id: string, branch: Partial<Branch>) => Promise<OpResult<Branch>>;
+  deleteBranch: (id: string) => Promise<OpResult>;
+  addWarehouse: (warehouse: Omit<Warehouse, 'id'>) => Promise<OpResult<Warehouse> & { id?: string }>;
+  updateWarehouse: (id: string, warehouse: Partial<Omit<Warehouse, 'id'>>) => Promise<OpResult<Warehouse>>;
   isEnrollmentWizardOpen: boolean;
   setIsEnrollmentWizardOpen: (isOpen: boolean) => void;
   shipments: Shipment[];
@@ -1504,23 +1555,13 @@ interface DataContextType {
   selectBranch: (id: string) => StockResult;
   /** Las sedes que alcanza la cuenta con la que se trabaja. */
   sessionScope: SessionScope;
-  /** Sin cuenta activa (bloqueada o cerrada): hay que entrar con un PIN. */
-  sessionLocked: boolean;
-  /** Entra a otra cuenta con su PIN (cambio rápido de usuario). */
-  switchUser: (userId: string, pin: string) => StockResult;
-  /** Bloquea la sesión: nadie trabaja hasta que una cuenta entre con su PIN. */
-  lockSession: () => void;
-  /** Cambia el PIN de la cuenta con la que se trabaja. */
-  changeOwnPin: (currentPin: string, nextPin: string) => StockResult;
-  /** Qué pasó con lo guardado en el navegador al arrancar (roles, permisos y cuentas). */
-  accessRestore: { restored: boolean; notes: string[] };
   currentUser: { id: string; name: string; role: string; branchId: string | 'all' };
   confirmReception: (data: {
     docId: string;
     docType: 'Envío' | 'Transferencia';
     receivedItems: { itemId: string; quantity: number; status: 'ok' | 'missing' | 'damaged' | 'extra'; observation?: string }[];
     generalObservation?: string;
-  }) => void;
+  }) => StockResult;
 }
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -1528,7 +1569,8 @@ export const DataContext = createContext<DataContextType | undefined>(undefined)
 /** Semilla de personas, matrículas, planes, pagos y caja (se arma una vez al abrir la página, con fechas relativas a hoy). */
 const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 
-export function DataProvider({ children }: { children: ReactNode }) {
+/** `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `accountId` = la cuenta con la que se ingresó. */
+export function DataProvider({ children, access, accountId }: { children: ReactNode; access: AccessData; accountId: string }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
@@ -1668,12 +1710,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { id: 'STK-008', itemId: 'ITM-MAT-01', branchId: 'FIL-CHI', stock: 15, minStock: 10 },
     { id: 'STK-009', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-CHI', stock: 8, minStock: 3 },
     { id: 'STK-010', itemId: 'ITM-HER-02', branchId: 'FIL-CHI', stock: 10, minStock: 5 },
-    // Almacén central (Los Olivos): de aquí salen los envíos a todas las filiales
-    { id: 'STK-011', itemId: 'ITM-LIB-K1', branchId: 'FIL-LOL', stock: 400, minStock: 100 },
-    { id: 'STK-012', itemId: 'ITM-MAT-01', branchId: 'FIL-LOL', stock: 250, minStock: 60 },
-    { id: 'STK-013', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-LOL', stock: 80, minStock: 20 },
-    { id: 'STK-014', itemId: 'ITM-HER-01', branchId: 'FIL-LOL', stock: 150, minStock: 30 },
-    { id: 'STK-015', itemId: 'ITM-HER-02', branchId: 'FIL-LOL', stock: 150, minStock: 30 },
+    // Almacén central (aparte de las sedes): de aquí salen los envíos a todas las filiales
+    { id: 'STK-011', itemId: 'ITM-LIB-K1', branchId: 'ALM-001', stock: 400, minStock: 100 },
+    { id: 'STK-012', itemId: 'ITM-MAT-01', branchId: 'ALM-001', stock: 250, minStock: 60 },
+    { id: 'STK-013', itemId: 'ITM-KIT-BIENV', branchId: 'ALM-001', stock: 80, minStock: 20 },
+    { id: 'STK-014', itemId: 'ITM-HER-01', branchId: 'ALM-001', stock: 150, minStock: 30 },
+    { id: 'STK-015', itemId: 'ITM-HER-02', branchId: 'ALM-001', stock: 150, minStock: 30 },
+    // Los Olivos es una sede como las demás: stock de venta propio
+    { id: 'STK-016', itemId: 'ITM-LIB-K1', branchId: 'FIL-LOL', stock: 60, minStock: 30 },
+    { id: 'STK-017', itemId: 'ITM-MAT-01', branchId: 'FIL-LOL', stock: 40, minStock: 20 },
+    { id: 'STK-018', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-LOL', stock: 12, minStock: 5 },
+    { id: 'STK-019', itemId: 'ITM-HER-01', branchId: 'FIL-LOL', stock: 25, minStock: 10 },
+    { id: 'STK-020', itemId: 'ITM-HER-02', branchId: 'FIL-LOL', stock: 25, minStock: 5 },
   ]);
 
   const [kardex, setKardex] = useState<KardexEntry[]>([
@@ -1691,7 +1739,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { 
       id: 'TRF-2024-001', 
       date: '2024-03-15', 
-      originId: 'FIL-LOL', 
+      originId: 'ALM-001', 
       destinationId: 'FIL-CHI', 
       status: 'En tránsito', 
       eta: '2024-03-20',
@@ -1708,7 +1756,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       id: 'TRF-2024-002', 
       date: '2024-03-14', 
       originId: 'FIL-CHI', 
-      destinationId: 'FIL-LOL', 
+      destinationId: 'ALM-001', 
       status: 'Borrador', 
       items: [
         { itemId: 'ITM-KIT-BIENV', quantity: 2 }
@@ -1720,7 +1768,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     { 
       id: 'TRF-2024-003', 
       date: '2024-03-10', 
-      originId: 'FIL-LOL', 
+      originId: 'ALM-001', 
       destinationId: 'FIL-CHI', 
       status: 'Recibida', 
       receptionDate: '2024-03-10',
@@ -1738,7 +1786,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     {
       id: 'ENV-2024-001',
       date: '2024-03-15',
-      originId: 'FIL-LOL', // Los Olivos (Almacén Central)
+      originId: 'ALM-001', // Almacén central
       destinationId: 'FIL-CHI', // Chiclayo
       status: 'En tránsito',
       boxes: [
@@ -2028,7 +2076,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     generalObservation?: string;
   }) => {
     const { docId, docType, receivedItems, generalObservation } = data;
-    
+
     // 1. Find the document
     let doc: Shipment | Transfer | undefined;
     if (docType === 'Envío') {
@@ -2037,7 +2085,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       doc = transfers.find(t => t.id === docId);
     }
 
-    if (!doc) return;
+    if (!doc) return { ok: false, error: 'No se encontró el documento a recepcionar.' };
+    // Recibir en el almacén (devoluciones) mueve su stock: solo lo confirma quien trabaja en él
+    const deniedReception = warehouseProblem(doc.destinationId);
+    if (deniedReception) return { ok: false, error: deniedReception };
 
     // 2. Determine final status
     const hasDifferences = receivedItems.some(ri => ri.status !== 'ok' || ri.quantity !== (doc?.items.find(i => i.itemId === ri.itemId)?.quantity || 0));
@@ -2093,10 +2144,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     // 5. Send Notification
     notify(hasDifferences ? 'reception_with_differences' : docType === 'Envío' ? 'shipment_received' : 'transfer_received', {
       title: hasDifferences ? 'Recepción con diferencias' : 'Recepción confirmada',
-      message: `El ${docType} ${docId} ha sido recibido en ${branches.find(b => b.id === doc?.destinationId)?.name}. Estado: ${finalStatus}`,
+      message: `El ${docType} ${docId} ha sido recibido en ${locationName(doc?.destinationId)}. Estado: ${finalStatus}`,
       type: hasDifferences ? 'warning' : 'success',
       scope: { originBranchId: doc.originId, destinationBranchId: doc.destinationId, subjectBranchId: doc.destinationId },
     });
+    return { ok: true };
   };
 
   const [staff, setStaff] = useState<Staff[]>(() => seedStaff());
@@ -2107,36 +2159,52 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => seedAssignments());
 
-  const [companies, setCompanies] = useState<Company[]>([
+  const [companies] = useState<Company[]>([
     { id: '1', ruc: '20123456789', name: 'Educación y Cultura S.A.C.', commercialName: 'ENSIL Central', status: 'Activo' },
     { id: '2', ruc: '20987654321', name: 'Instituto de Idiomas del Norte S.A.', commercialName: 'ENSIL Norte', status: 'Activo' },
   ]);
 
-  const [branches, setBranches] = useState<Branch[]>(() => seedBranches());
+  const [branches] = useState<Branch[]>(() => seedBranches());
+  // Empresas y Filiales de Organización viven en la base de datos; las de ejemplo de arriba siguen alimentando el resto del sistema.
+  const org = useOrgDirectory();
 
-  // Roles, permisos y cuentas se guardan en el navegador (paso 6, provisional hasta la base de datos): al arrancar se lee y depura lo guardado.
-  const [accessRestore] = useState(() => restoreAccess(
-    readStoredAccess(),
-    { roles: seedRoles(), permissions: seedPermissions(), users: seedUsers() },
-    { branchNames: seedBranches().map(b => b.name), staffIds: seedStaff().map(s => s.id) },
-  ));
+  const [warehouses] = useState<Warehouse[]>(() => seedWarehouses());
+  const locations = useMemo(() => stockLocations(branches, warehouses), [branches, warehouses]);
+  /** Nombre de una ubicación de stock (almacén o sede); si ya no existe, su id. */
+  const locationName = (id: string | undefined): string => locations.find(l => l.id === id)?.name ?? id ?? '';
 
-  const [roles, setRoles] = useState<Role[]>(() => accessRestore.snapshot.roles);
+  // Los roles, sus funciones y las cuentas llegan de la base (`access`): el navegador ya no guarda nada de esto.
+  const [roles, setRoles] = useState<Role[]>(() => access.roles);
 
-  const [users, setUsers] = useState<User[]>(() => accessRestore.snapshot.users);
+  const [users, setUsers] = useState<User[]>(() => access.users);
 
-  const [permissions, setPermissions] = useState<Permission[]>(() => accessRestore.snapshot.permissions);
+  const [permissions, setPermissions] = useState<Permission[]>(() => access.permissions);
 
-  useEffect(() => { writeStoredAccess({ roles, permissions, users }); }, [roles, permissions, users]);
+  const accountsRepo = useMemo(() => createSupabaseAccountsRepository(supabase), []);
+  /** Vuelve a leer las cuentas de la base (después de cada cambio: se muestra lo que de verdad quedó guardado). */
+  const resyncUsers = async () => {
+    const fresh = await loadUsers(accountsRepo, roles);
+    if (fresh.ok && fresh.value) setUsers(fresh.value);
+  };
+  // Personal y Asignaciones viven en la base: cargan cuando ya están las sedes y el almacén (el lugar de una asignación sale de ellos).
+  const places = useMemo(() => placesOf(org.branches, org.warehouses), [org.branches, org.warehouses]);
+  const staffDir = useStaffDirectory(places, org.status === 'ready', resyncUsers);
+  const rolesRepo = useMemo(() => createSupabaseRolesRepository(supabase), []);
+  /** Vuelve a leer los roles de la base (después de un cambio que quedó a medias, para mostrar lo que de verdad quedó). */
+  const resyncRoles = async () => {
+    const fresh = await loadAccessRoles(rolesRepo);
+    if (fresh.ok && fresh.value) { setRoles(fresh.value.roles); setPermissions(fresh.value.permissions); }
+  };
 
   // Sesión (paso 7): quién trabaja sale de las cuentas; la sede que ve, de lo que alcanza esa cuenta.
   const scopeFor = (account: User | null): SessionScope =>
-    account ? scopeOfUser(account, branches, canDo({ user: account, roles, permissions }, PERM.allBranches)) : { allBranches: false, branchIds: [] };
-  const [activeUserId, setActiveUserId] = useState<string | null>(() => initialUserId(parseSession(readStoredSession()), accessRestore.snapshot.users));
+    account ? scopeOfUser(account, branches, canDo({ user: account, roles, permissions }, PERM.allBranches), warehouses) : NO_SCOPE;
+  /** La cuenta con la que se ingresó: no cambia durante la sesión (cambiar de persona es cerrar sesión e ingresar con otra cuenta). */
+  const activeUserId: string = accountId;
   const sessionAccount = activeAccount(users, activeUserId);
-  const sessionScope = useMemo(() => scopeFor(sessionAccount), [sessionAccount, branches, roles, permissions]);
+  const sessionScope = useMemo(() => scopeFor(sessionAccount), [sessionAccount, branches, warehouses, roles, permissions]);
   const [viewBranchId, setViewBranchId] = useState<string>(() => {
-    const account = activeAccount(accessRestore.snapshot.users, activeUserId);
+    const account = activeAccount(access.users, activeUserId);
     return account ? defaultViewBranch(scopeFor(account), account, branches) : NO_BRANCH;
   });
   const currentBranchId = sessionAccount ? validView(sessionScope, viewBranchId, sessionAccount, branches) : NO_BRANCH;
@@ -2146,11 +2214,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       : { id: '', name: 'Sin sesión', role: '', branchId: NO_BRANCH }),
     [sessionAccount, sessionScope, branches]
   );
-  const [pinAttempts, setPinAttempts] = useState<PinAttempts>({});
-
-  useEffect(() => { writeStoredSession(activeUserId); }, [activeUserId]);
-  // Si la cuenta de la sesión deja de servir (se desactivó o se eliminó), la sesión queda bloqueada: reactivarla no la abre sola.
-  useEffect(() => { if (activeUserId && !sessionAccount) setActiveUserId(null); }, [activeUserId, sessionAccount]);
 
   const [leadSources, setLeadSources] = useState<LeadSource[]>([
     { id: '1', name: 'Facebook Ads', status: 'active' },
@@ -2380,6 +2443,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const stockRef = useRef<StockItem[]>(stockItems);
   stockRef.current = stockItems;
 
+  /**
+   * Mover stock del almacén pide estar asignado a él (o ser Superusuario): alcanzar todas las sedes permite VER el almacén, no despachar
+   * ni ajustar su stock. En una sede rige el alcance de siempre.
+   */
+  const warehouseProblem = (...locationIds: string[]): string | null => {
+    for (const id of locationIds) {
+      if (isWarehouseId(id)) { const p = warehouseOperationError(sessionScope, id); if (p) return p; }
+    }
+    return null;
+  };
+
   /** Primer artículo sin saldo suficiente en la sede, o `null` si hay para todos. */
   const findInsufficientStock = (branchId: string, lines: { itemId: string; quantity: number }[]): string | null => {
     const needed = new Map<string, number>();
@@ -2388,7 +2462,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const have = stockRef.current.find(x => x.branchId === branchId && x.itemId === itemId)?.stock ?? 0;
       if (have < qty) {
         const name = items.find(i => i.id === itemId)?.name || itemId;
-        return `Stock insuficiente de "${name}" en ${branches.find(b => b.id === branchId)?.name || branchId}: disponible ${have}, requerido ${qty}.`;
+        return `Stock insuficiente de "${name}" en ${locationName(branchId)}: disponible ${have}, requerido ${qty}.`;
       }
     }
     return null;
@@ -2412,7 +2486,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const entry: KardexEntry = {
       id: allocId('KDX', kardex.map(k => k.id)),
       date: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      branch: branches.find(b => b.id === branchId)?.name || branchId,
+      branch: locationName(branchId),
       material: items.find(i => i.id === itemId)?.name || itemId,
       type,
       qty,
@@ -2516,6 +2590,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const registerItemSale = (input: ItemSaleInput): StockResult => {
     if (!can(PERM.itemSale)) return { ok: false, error: 'Su rol no puede vender artículos en caja.' };
     if (!input.branchId || !input.itemId) return { ok: false, error: 'Por favor complete todos los campos obligatorios.' };
+    const notSold = locationSaleError(input.branchId);
+    if (notSold) return { ok: false, error: notSold };
     const item = items.find(i => i.id === input.itemId);
     if (!item || !item.isSold || item.status !== 'Activo') return { ok: false, error: 'El artículo no está habilitado para la venta.' };
     const unitPrice = getCurrentPrice(itemPrices, input.itemId, input.branchId)?.amount ?? 0;
@@ -2546,6 +2622,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!can(PERM.stockEntry)) return { ok: false, error: 'Su rol no puede registrar ingresos de stock.' };
     const invalid = stockEntryError(input);
     if (invalid) return { ok: false, error: invalid };
+    const denied = warehouseProblem(input.branchId);
+    if (denied) return { ok: false, error: denied };
     return updateStock(input.branchId, input.itemId, input.qty, 'Ingreso', input.reason?.trim() || 'Ingreso manual de stock', input.doc.trim());
   };
 
@@ -2586,6 +2664,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string): StockResult => {
     const stock = stockRef.current.find(s => s.id === stockId);
     if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
+    const denied = warehouseProblem(stock.branchId);
+    if (denied) return { ok: false, error: denied };
 
     const newAdjustment: Adjustment = {
       ...adjData,
@@ -2611,7 +2691,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const addTransfer = (transfer: Omit<Transfer, 'id'>): StockResult => {
     // Entre filiales todo pasa por el almacén central (utils/logisticsRoutes.ts)
-    const routeError = transferRouteError(transfer.originId, transfer.destinationId, branches);
+    const routeError = transferRouteError(transfer.originId, transfer.destinationId, locations);
     if (routeError) return { ok: false, error: routeError };
     const newTransfer = {
       ...transfer,
@@ -2626,7 +2706,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   /** Avisos de una transferencia: pedida (a quien aprueba) y aprobada o rechazada (a quien la pidió). */
   const announceTransfer = (t: Transfer, status: Transfer['status']) => {
-    const route = `${branches.find(b => b.id === t.originId)?.name ?? t.originId} → ${branches.find(b => b.id === t.destinationId)?.name ?? t.destinationId}`;
+    const route = `${locationName(t.originId)} → ${locationName(t.destinationId)}`;
     if (status === 'Solicitada') {
       notify('transfer_requested', { title: 'Transferencia solicitada', message: `${currentUser.name} solicitó la transferencia ${t.id} (${route}): ${t.reason}.`, type: 'warning', scope: { originBranchId: t.originId, destinationBranchId: t.destinationId } });
     } else if (status === 'Aprobada' || status === 'Rechazada') {
@@ -2649,6 +2729,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const updateTransferStatus = (transferId: string, newStatus: Transfer['status']): StockResult => {
     const transfer = transfersRef.current.find(t => t.id === transferId);
     if (!transfer) return { ok: false, error: 'Transferencia no encontrada.' };
+    const movesStock = (newStatus === 'En tránsito' && (transfer.status === 'Aprobada' || transfer.status === 'Solicitada'))
+      || (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción'));
+    const deniedMove = movesStock ? warehouseProblem(transfer.originId) : null;
+    if (deniedMove) return { ok: false, error: deniedMove };
 
     // Regla de stock: sale del origen al DESPACHAR (una sola vez); el destino suma al RECIBIR.
     if (newStatus === 'En tránsito' && (transfer.status === 'Aprobada' || transfer.status === 'Solicitada')) {
@@ -2660,7 +2744,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
       notify('transfer_dispatched', {
         title: 'Transferencia en tránsito',
-        message: `La transferencia ${transfer.id} desde ${branches.find(b => b.id === transfer.originId)?.name} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
+        message: `La transferencia ${transfer.id} desde ${locationName(transfer.originId)} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
         scope: { originBranchId: transfer.originId, destinationBranchId: transfer.destinationId },
       });
@@ -2683,7 +2767,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!current) return { ok: false, error: 'Transferencia no encontrada.' };
     const next = { ...current, ...updatedData };
     if (next.originId !== current.originId || next.destinationId !== current.destinationId) {
-      const routeError = transferRouteError(next.originId, next.destinationId, branches);
+      const routeError = transferRouteError(next.originId, next.destinationId, locations);
       if (routeError) return { ok: false, error: routeError };
     }
     commitTransfers(transfersRef.current.map(t => t.id === transferId ? next : t));
@@ -2840,12 +2924,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const addStaff = (staffData: Omit<Staff, 'id'>): Staff => {
-    const newStaff: Staff = { ...staffData, id: nextSequentialId('STF', staff.map(s => s.id)) };
-    setStaff(prev => [...prev, newStaff]);
-    return newStaff;
-  };
-
   const updateContract = (id: string, data: Partial<Omit<Contract, 'id'>>) => {
     setContracts(prev => prev.map(c => (c.id === id ? { ...c, ...data } : c)));
   };
@@ -2854,25 +2932,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const created: Contract = { ...data, id: nextSequentialId('CON', contracts.map(c => c.id)) };
     setContracts(prev => [...prev, created]);
     return created;
-  };
-
-  /** Mantiene las cuentas vinculadas de acuerdo con la ficha (nombre, documento, teléfono) y las asignaciones (sedes). */
-  const syncLinkedUsers = (nextStaff: Staff[], nextAssignments: Assignment[]) => {
-    setUsers(prev => prev.map(u => {
-      const member = u.staffId ? nextStaff.find(s => s.id === u.staffId) : undefined;
-      const patch = member ? syncPatch(u, member, nextAssignments) : null;
-      return patch ? { ...u, ...patch } : u;
-    }));
-  };
-
-  const updateStaff = (id: string, staffData: Partial<Staff>) => {
-    const next = staff.map(s => (s.id === id ? { ...s, ...staffData } : s));
-    setStaff(next);
-    syncLinkedUsers(next, assignments);
-  };
-
-  const deleteStaff = (id: string) => {
-    setStaff(prev => prev.filter(s => s.id !== id));
   };
 
   const addStudent = (studentData: Omit<Student, 'id'>): Student => {
@@ -3113,35 +3172,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  // ---- Personal: asignaciones, contratos y baja
-  const saveAssignment = (form: AssignmentForm, editingId?: string): StockResult => {
-    if (editingId) {
-      const current = assignments.find(a => a.id === editingId);
-      if (!current) return { ok: false, error: 'No se encontró la asignación.' };
-      if (!isActiveAssignment(current)) return { ok: false, error: 'La asignación está cerrada: no se edita. Cree una nueva.' };
-      if (current.staffId !== form.staffId) return { ok: false, error: 'No se puede cambiar el trabajador de una asignación.' };
-    }
-    const errors = validateAssignmentForm(form, assignments, staff, branches, todayLocalISO(), editingId);
-    const first = Object.values(errors)[0];
-    if (first) return { ok: false, error: first };
-    const nextAssignments = saveAssignmentIn(assignments, form, editingId).assignments;
-    setAssignments(nextAssignments);
-    syncLinkedUsers(staff, nextAssignments);
-    return { ok: true };
+  // ---- Personal y asignaciones (en la base de datos; las reglas puras están en utils/ y el orden en services/staffDirectory.ts)
+  const addStaff: DataContextType['addStaff'] = input => staffDir.addStaff(input);
+  const updateStaff: DataContextType['updateStaff'] = (id, data) => staffDir.updateStaff(id, data);
+
+  const saveAssignment: DataContextType['saveAssignment'] = (form, editingId) => staffDir.saveAssignment(form, todayLocalISO(), editingId);
+
+  const closeAssignment: DataContextType['closeAssignment'] = (id, date, reason) =>
+    staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules, activities: allActivities(monthlySchedules) });
+
+  const inactivateStaff: DataContextType['inactivateStaff'] = async (id, input) => {
+    const ctx = { contracts, assignments: [], schedules, activities: allActivities(monthlySchedules), today: todayLocalISO() };
+    const hasActiveAccount = users.some(u => u.staffId === id && u.status === 'Activo');
+    const res = await staffDir.inactivateStaff(id, input, currentUser.name, ctx, hasActiveAccount);
+    return { ok: res.ok, error: res.error };
   };
 
-  const closeAssignment = (id: string, date: string, reason: string): StockResult => {
-    const target = assignments.find(a => a.id === id);
-    if (!target) return { ok: false, error: 'No se encontró la asignación.' };
-    const today = todayLocalISO();
-    const problems = validateAssignmentClose(target, date, reason, today);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const impact = closeImpact(target, assignments, staff.find(s => s.id === target.staffId), schedules, today, allActivities(monthlySchedules));
-    if (impact.blocked) return { ok: false, error: `Es su última asignación de Psicopedagogía y tiene ${impact.futureSessions.length} asesoría(s) y ${impact.futureActivities.length} actividad(es) futura(s): reasígnelas primero.` };
-    const nextAssignments = closeAssignmentIn(assignments, id, date, reason, currentUser.name).assignments;
-    setAssignments(nextAssignments);
-    syncLinkedUsers(staff, nextAssignments);
-    return { ok: true };
+  const reactivateStaff: DataContextType['reactivateStaff'] = async (id, detail) => {
+    const res = await staffDir.reactivateStaff(id, detail, todayLocalISO());
+    return { ok: res.ok, error: res.error };
   };
 
   // ---- Contratos y planilla
@@ -3258,29 +3307,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setContracts(prev => prev.map(c => (c.id === id
       ? { ...c, ...patch, revisions: [{ at: new Date().toISOString(), by: currentUser.name, reason: reason.trim(), changes }, ...(c.revisions ?? [])] }
       : c)));
-    return { ok: true };
-  };
-
-  const inactivateStaff = (id: string, input: { reason: string; detail: string; date: string }): StockResult => {
-    const member = staff.find(s => s.id === id);
-    if (!member) return { ok: false, error: 'No se encontró al trabajador.' };
-    const ctx = { contracts, assignments, schedules, activities: allActivities(monthlySchedules), today: todayLocalISO() };
-    const problems = validateInactivation(member, input.reason, input.detail, input.date, ctx);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const note = `${input.reason} — ${input.detail.trim()}`;
-    setStaff(prev => prev.map(s => (s.id === id ? { ...s, status: 'Inactivo', statusDate: input.date, statusReason: note } : s)));
-    setAssignments(prev => closeAllOf(prev, id, input.date, note, currentUser.name));
-    // Su cuenta de acceso se desactiva sola: un trabajador dado de baja no puede seguir entrando
-    setUsers(prev => prev.map(u => (u.staffId === id && u.status === 'Activo' ? { ...u, status: 'Inactivo', statusNote: deactivationNote(input.date, note) } : u)));
-    return { ok: true };
-  };
-
-  const reactivateStaff = (id: string, detail: string): StockResult => {
-    const member = staff.find(s => s.id === id);
-    if (!member) return { ok: false, error: 'No se encontró al trabajador.' };
-    const problems = validateReactivation(member, detail);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setStaff(prev => prev.map(s => (s.id === id ? { ...s, status: 'Activo', statusDate: todayLocalISO(), statusReason: `Reactivado — ${detail.trim()}` } : s)));
     return { ok: true };
   };
 
@@ -3720,38 +3746,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setPromotions(prev => prev.filter(p => p.id !== id));
   };
 
-  const addBranch = (branch: Branch): StockResult => {
-    const problem = warehouseDefinitionError([...branches, branch]);
-    if (problem) return { ok: false, error: problem };
-    setBranches(prev => [...prev, branch]);
-    return { ok: true };
-  };
-
-  const updateBranch = (id: string, branchData: Partial<Branch>): StockResult => {
-    const current = branches.find(b => b.id === id);
-    if (!current) return { ok: false, error: 'No se encontró la filial.' };
-    const next = branches.map(b => b.id === id ? { ...b, ...branchData } : b);
-    const problem = warehouseDefinitionError(next) ?? (branchData.status ? warehouseInactivationError({ ...current, ...branchData, status: current.status }, branchData.status) : null);
-    if (problem) return { ok: false, error: problem };
-    setBranches(next);
-    if (branchData.name !== undefined) {
-      relabelFrom({ branches: next, programs, levels });
-      // Las asignaciones y las cuentas de personal guardan la sede por nombre: se corrigen igual
-      const before = branches.find(b => b.id === id)?.name;
-      if (before && before !== branchData.name) {
-        setAssignments(prev => prev.map(a => (a.branch === before ? { ...a, branch: branchData.name as string } : a)));
-        setUsers(prev => prev.map(u => (u.branch === before ? { ...u, branch: branchData.name as string } : u)));
-      }
-    }
-    return { ok: true };
-  };
-
-  const deleteBranch = (id: string): StockResult => {
-    if (branches.find(b => b.id === id)?.isWarehouse) return { ok: false, error: 'No se puede eliminar el almacén central: primero marque otra filial como almacén.' };
-    setBranches(prev => prev.filter(b => b.id !== id));
-    return { ok: true };
-  };
-
   const shipmentsRef = useRef<Shipment[]>(shipments);
   shipmentsRef.current = shipments;
   const commitShipments = (next: Shipment[]) => {
@@ -3764,6 +3758,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
   /** Efectos de cambio de estado de un envío (misma regla que Transferencias: sale del origen al despachar). */
   const checkShipmentDispatch = (prev: Shipment | undefined, next: Shipment): string | null => {
     const dispatching = IN_TRANSIT_STATUSES.includes(next.status) && (!prev || prev.status === 'Borrador');
+    const cancelling = !!prev && IN_TRANSIT_STATUSES.includes(prev.status) && next.status === 'Cancelado';
+    // El stock del almacén solo lo mueve quien trabaja en él (despachar y cancelar un envío en tránsito lo mueven)
+    const denied = dispatching || cancelling ? warehouseProblem(next.originId) : null;
+    if (denied) return denied;
     return dispatching ? findInsufficientStock(next.originId, next.items) : null;
   };
 
@@ -3777,7 +3775,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       });
       notify('shipment_dispatched', {
         title: 'Envío en tránsito',
-        message: `El envío ${next.id} desde ${branches.find(b => b.id === next.originId)?.name || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
+        message: `El envío ${next.id} desde ${locationName(next.originId) || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
         type: 'info',
         scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
       });
@@ -3789,7 +3787,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       });
       notify('shipment_cancelled', {
         title: 'Envío cancelado',
-        message: `El envío ${next.id} hacia ${branches.find(b => b.id === next.destinationId)?.name || 'la filial'} fue cancelado. El stock volvió al almacén de origen.`,
+        message: `El envío ${next.id} hacia ${locationName(next.destinationId) || 'la filial'} fue cancelado. El stock volvió al almacén de origen.`,
         type: 'warning',
         scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
       });
@@ -3797,7 +3795,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const addShipment = (shipment: Omit<Shipment, 'id'>): StockResult & { id?: string } => {
-    const routeError = shipmentRouteError(shipment.originId, shipment.destinationId, branches);
+    const routeError = shipmentRouteError(shipment.originId, shipment.destinationId, locations);
     if (routeError) return { ok: false, error: routeError };
     const newId = `ENV-${new Date().getFullYear()}-${String(shipmentsRef.current.length + 1).padStart(3, '0')}`;
     const created: Shipment = { ...shipment, id: newId };
@@ -3828,7 +3826,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
     const next: Shipment = { ...prev, ...shipment };
     if (next.originId !== prev.originId || next.destinationId !== prev.destinationId) {
-      const routeError = shipmentRouteError(next.originId, next.destinationId, branches);
+      const routeError = shipmentRouteError(next.originId, next.destinationId, locations);
       if (routeError) return { ok: false, error: routeError };
     }
     const shortage = checkShipmentDispatch(prev, next);
@@ -3838,24 +3836,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const addCompany = (company: Company) => {
-    setCompanies(prev => [...prev, company]);
-  };
-
-  const updateCompany = (id: string, companyData: Partial<Company>) => {
-    setCompanies(prev => prev.map(c => c.id === id ? { ...c, ...companyData } : c));
-  };
-
-  const deleteCompany = (id: string) => {
-    setCompanies(prev => prev.filter(c => c.id !== id));
-  };
-
-  const addRole: DataContextType['addRole'] = input => {
+  const addRole: DataContextType['addRole'] = async input => {
     const invalid = validateRoleInput(input, roles);
     if (invalid) return { ok: false, error: invalid };
-    const id = nextSequentialId('ROL', roles.map(r => r.id));
-    const draft: Role = {
-      id, name: input.name.trim(), desc: input.desc?.trim() ?? '', status: input.status ?? 'Activo', templateId: input.templateId,
+    const draft: Omit<Role, 'id'> = {
+      name: input.name.trim(), desc: input.desc?.trim() ?? '', status: input.status ?? 'Activo', templateId: input.templateId,
       observations: input.observations?.trim() || undefined, branchUserLimit: input.branchUserLimit,
     };
     // Con funciones, el rol nace armado en una sola operación: si algo falla no queda un rol a medias
@@ -3866,17 +3851,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
       granted = plan.permissions;
       if (plan.acceptedRisks.length > 0) draft.acceptedRisks = plan.acceptedRisks;
     }
-    setRoles(prev => [...prev, draft]);
-    if (granted.length > 0) setPermissions(prev => [...prev, { roleId: id, permissions: granted }]);
+    const saved = await persistNewRole(rolesRepo, roles, draft, granted);
+    if (!saved.ok || !saved.value) {
+      if (saved.partial) await resyncRoles();
+      return { ok: false, error: saved.error };
+    }
+    const created = saved.value;
+    setRoles(prev => [...prev, created]);
+    if (granted.length > 0) setPermissions(prev => [...prev, { roleId: created.id, permissions: granted }]);
     notify('role_permissions_changed', {
       title: 'Rol creado',
-      message: `${currentUser.name} creó el rol «${draft.name}»${granted.length > 0 ? ` con ${granted.length} funciones` : ' sin funciones'}.`,
+      message: `${currentUser.name} creó el rol «${created.name}»${granted.length > 0 ? ` con ${granted.length} funciones` : ' sin funciones'}.`,
       type: 'info',
     });
-    return { ok: true, id };
+    return { ok: true, id: created.id };
   };
 
-  const updateRole: DataContextType['updateRole'] = (id, roleData) => {
+  const updateRole: DataContextType['updateRole'] = async (id, roleData) => {
     const role = roles.find(r => r.id === id);
     if (!role) return { ok: false, error: 'No se encontró el rol.' };
     const locked = roleLockedError(role);
@@ -3885,103 +3876,78 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const invalid = validateRoleInput(next, roles, id);
     if (invalid) return { ok: false, error: invalid };
     const name = next.name.trim();
-    setRoles(prev => prev.map(r => (r.id === id ? { ...next, name, desc: next.desc.trim() } : r)));
+    const saved = await persistRoleUpdate(rolesRepo, id, {
+      name, desc: next.desc.trim(), status: next.status, templateId: next.templateId, observations: next.observations, branchUserLimit: next.branchUserLimit,
+    });
+    if (!saved.ok || !saved.value) return { ok: false, error: saved.error };
+    // Lo que se guardó en la base (con el rol del sistema y los motivos tal como están allá) es lo que se muestra
+    const stored = saved.value;
+    setRoles(prev => prev.map(r => (r.id === id ? { ...r, ...stored } : r)));
     // El rol y la cuenta se enlazan por nombre: al renombrar el rol, sus cuentas lo siguen
     if (name !== role.name) setUsers(prev => prev.map(u => (u.role === role.name ? { ...u, role: name } : u)));
     return { ok: true };
   };
 
-  const deleteRole: DataContextType['deleteRole'] = id => {
+  const deleteRole: DataContextType['deleteRole'] = async id => {
     const role = roles.find(r => r.id === id);
     if (!role) return { ok: false, error: 'No se encontró el rol.' };
     const blocked = roleDeleteError(role, users);
     if (blocked) return { ok: false, error: blocked };
+    const removed = await persistRoleDelete(rolesRepo, id);
+    if (!removed.ok) return { ok: false, error: removed.error };
     setRoles(prev => prev.filter(r => r.id !== id));
     setPermissions(prev => prev.filter(p => p.roleId !== id));
     return { ok: true };
   };
 
-  const addUser: DataContextType['addUser'] = ({ pin, pinHash: _ignored, ...user }) => {
+  // ------------------------------------------------------------------ Cuentas: las escribe la Edge Function `usuarios`, no el navegador
+  /** Lo que las reglas de las cuentas miran: el personal y las asignaciones de la base, los usuarios, los roles y quién actúa. */
+  const accountRules = (): AccountRulesContext => ({
+    staff: staffDir.staff, assignments: staffDir.assignments, places, users, roles, permissions, actorIsSuperuser: currentUser.role === SUPERUSER,
+  });
+
+  const addUser: DataContextType['addUser'] = async form => {
     if (!can(PERM.userCreate)) return { ok: false, error: 'Su rol no puede crear usuarios.' };
-    if (pin) {
-      const pinProblem = pinError(pin) ?? pinSetError(currentUser.role === SUPERUSER, user);
-      if (pinProblem) return { ok: false, error: pinProblem };
-    }
-    const roleProblem = accountRoleError(user.role, roles, currentUser.role === SUPERUSER);
-    if (roleProblem) return { ok: false, error: roleProblem };
-    const seatProblem = seatLimitError(roles.find(r => r.name === user.role), users, user);
-    if (seatProblem) return { ok: false, error: seatProblem };
-    const problems = validateLinkedUser(user, staff, assignments, users);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    // Una cuenta de personal toma sus datos de la ficha
-    const member = user.staffId ? staff.find(s => s.id === user.staffId) : undefined;
-    const base: User = { ...(member ? { ...user, ...(syncPatch(user, member, assignments) ?? {}) } : user), pinHash: pin ? hashPin(user.id, pin) : undefined };
-    setUsers(prev => [...prev, base]);
-    return { ok: true };
+    // Una cuenta nace de una persona de Personal (o es técnica, solo si la crea un Superusuario): el servidor vuelve a revisar todo
+    const check = accountCreateCheck({ staffId: form.staffId, name: form.name, email: form.email, role: form.role }, accountRules());
+    if (check.error) return { ok: false, error: check.error };
+    const request = inviteBody(form, roles, window.location.origin);
+    if (!request.ok || !request.body) return { ok: false, error: request.error };
+    const res = await accountsRepo.call(request.body);
+    if (!res.ok) return { ok: false, error: res.error };
+    await resyncUsers();
+    return { ok: true, id: res.cuentaId };
   };
 
-  const updateUser: DataContextType['updateUser'] = (id, { pin, pinHash: _ignored, ...userData }) => {
+  const updateUser: DataContextType['updateUser'] = async (id, changes) => {
     const current = users.find(u => u.id === id);
     if (!current) return { ok: false, error: 'No se encontró el usuario.' };
-    const merged: User = { ...current, ...userData };
-    const roleChange = merged.role !== current.role ? merged.role : undefined;
-    const statusChange = merged.status !== current.status ? merged.status : undefined;
+    const form: AccountForm = { staffId: current.staffId, name: current.name, email: current.email, role: current.role, status: current.status, ...changes };
+    if (form.email.trim().toLowerCase() !== current.email.toLowerCase()) return { ok: false, error: 'El correo de una cuenta no se puede cambiar: desactívela y cree una cuenta nueva.' };
+    const roleChange = form.role !== current.role ? form.role : undefined;
+    const statusChange = form.status !== current.status ? form.status : undefined;
     const selfProblem = selfAccountError(activeUserId, id, { role: roleChange, status: statusChange });
     if (selfProblem) return { ok: false, error: selfProblem };
     const lastProblem = lastSuperuserError(users, id, { role: roleChange, status: statusChange });
     if (lastProblem) return { ok: false, error: lastProblem };
-    if (pin) {
-      const pinProblem = pinError(pin) ?? pinSetError(currentUser.role === SUPERUSER, current);
-      if (pinProblem) return { ok: false, error: pinProblem };
-      if (!can('org-usuarios:edit')) return { ok: false, error: denialMessage(['org-usuarios:edit']) };
-    }
-    const deactivating = current.status === 'Activo' && merged.status === 'Inactivo';
-    // Cada campo que de verdad cambia pide su función: desactivar, cambiar el rol, cambiar las sedes o corregir los datos
-    const unmet = unmetClause(userChangeNeeds(current, userData), can);
+    const problem = accountEditCheck(current, { role: form.role, status: form.status }, accountRules());
+    if (problem) return { ok: false, error: problem };
+    const request = editBody(current, form, roles);
+    if (!request.ok || !request.body) return { ok: false, error: request.error };
+    if (Object.keys(request.body.cambios).length === 0) return { ok: true };
+    // Cada campo que de verdad cambia pide su función: desactivar, activar, cambiar el rol o corregir el nombre de una cuenta técnica
+    const unmet = unmetClause(changeNeeds(request.body.cambios), can);
     if (unmet) return { ok: false, error: denialMessage(unmet) };
-    const roleProblem = accountRoleError(merged.role, roles, currentUser.role === SUPERUSER, current);
-    if (roleProblem) return { ok: false, error: roleProblem };
-    const seatProblem = seatLimitError(roles.find(r => r.name === merged.role), users, merged, current);
-    if (seatProblem) return { ok: false, error: seatProblem };
-    const problems = validateLinkedUser(merged, staff, assignments, users, id);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const member = merged.staffId ? staff.find(s => s.id === merged.staffId) : undefined;
-    const synced = member ? { ...merged, ...(syncPatch(merged, member, assignments) ?? {}) } : merged;
-    const note = deactivating ? `Desactivado por ${currentUser.name} el ${todayLocalISO()}.` : merged.status === 'Activo' ? undefined : current.statusNote;
-    setUsers(prev => prev.map(u => (u.id === id ? { ...synced, statusNote: note, pinHash: pin ? hashPin(id, pin) : current.pinHash } : u)));
+    const res = await accountsRepo.call(request.body);
+    if (!res.ok) return { ok: false, error: res.error };
+    await resyncUsers();
     return { ok: true };
   };
 
-  const deleteUser: DataContextType['deleteUser'] = id => {
-    const selfProblem = selfAccountError(activeUserId, id, 'delete');
-    if (selfProblem) return { ok: false, error: selfProblem };
-    const lastProblem = lastSuperuserError(users, id, 'delete');
-    if (lastProblem) return { ok: false, error: lastProblem };
-    setUsers(prev => prev.filter(u => u.id !== id));
-    return { ok: true };
-  };
-
-  // ------------------------------------------------------------------ Sesión: cambio rápido de usuario con PIN
-  const switchUser: DataContextType['switchUser'] = (userId, pin) => {
-    const res = trySwitch(users, userId, pin, pinAttempts, Date.now());
-    setPinAttempts(res.attempts);
-    if (!res.ok || !res.user) return { ok: false, error: res.error };
-    const account = res.user;
-    setActiveUserId(account.id);
-    setViewBranchId(defaultViewBranch(scopeFor(account), account, branches));
-    setUsers(prev => prev.map(u => (u.id === account.id ? { ...u, lastAccess: lastAccessLabel(new Date()) } : u)));
-    return { ok: true };
-  };
-
-  const lockSession = () => setActiveUserId(null);
-
-  const changeOwnPin: DataContextType['changeOwnPin'] = (currentPin, nextPin) => {
-    if (!sessionAccount) return { ok: false, error: 'No hay una sesión abierta.' };
-    const res = tryChangePin(sessionAccount, currentPin, nextPin, pinAttempts, Date.now());
-    setPinAttempts(res.attempts);
-    if (!res.ok || !res.pinHash) return { ok: false, error: res.error };
-    setUsers(prev => prev.map(u => (u.id === sessionAccount.id ? { ...u, pinHash: res.pinHash } : u)));
-    return { ok: true };
+  const resendAccess: DataContextType['resendAccess'] = async id => {
+    if (!users.some(u => u.id === id)) return { ok: false, error: 'No se encontró el usuario.' };
+    const res = await accountsRepo.call({ accion: 'reenviar', cuentaId: id, redirectTo: window.location.origin });
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
   const selectBranch: DataContextType['selectBranch'] = id => {
@@ -3991,12 +3957,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   };
 
-  const savePermissions: DataContextType['savePermissions'] = (roleId, newPermissions, reasons = {}) => {
+  const savePermissions: DataContextType['savePermissions'] = async (roleId, newPermissions, reasons = {}) => {
     const role = roles.find(r => r.id === roleId);
     if (!role) return { ok: false, error: 'No se encontró el rol.' };
     // Un rol nunca queda con una función a medias (se suma lo que cada una necesita) y las combinaciones a separar piden motivo
     const plan = planPermissions(role, newPermissions, reasons, currentUser.name, todayLocalISO());
     if (!plan.ok) return { ok: false, error: plan.error };
+    const current = permissions.find(p => p.roleId === roleId)?.permissions ?? [];
+    const saved = await persistPermissions(rolesRepo, roleId, current, plan.permissions, plan.acceptedRisks);
+    if (!saved.ok) {
+      // Si llegó a cambiar algo, se vuelve a leer la base para mostrar lo que de verdad quedó
+      if (saved.partial) await resyncRoles();
+      return { ok: false, error: saved.error };
+    }
     setPermissions(prev => (prev.some(p => p.roleId === roleId)
       ? prev.map(p => (p.roleId === roleId ? { ...p, permissions: plan.permissions } : p))
       : [...prev, { roleId, permissions: plan.permissions }]));
@@ -4013,7 +3986,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const holders = useMemo(() => buildHolders({ users, roles, permissions, branches }), [users, roles, permissions, branches]);
   const myNotifications = useMemo(() => noticesFor(currentUser, notifications, holders), [currentUser, notifications, holders]);
   const myAlerts = useMemo(
-    () => deriveAlerts({ plans, enrollments, contracts, stockItems, items, branches, blockedSessions: blockedFirstSessions(enrollments, gateContext()) }, todayLocalISO())
+    () => deriveAlerts({ plans, enrollments, contracts, stockItems, items, branches: locations, blockedSessions: blockedFirstSessions(enrollments, gateContext()) }, todayLocalISO())
       .filter(a => visibility(currentUser, a, holders).visible),
     [plans, enrollments, contracts, stockItems, items, branches, schedules, recipes, holders, currentUser]
   );
@@ -4081,9 +4054,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       inactivateStaff,
       reactivateStaff,
       companies,
-      addCompany,
-      updateCompany,
-      deleteCompany,
+      orgCompanies: org.companies,
+      orgBranches: org.branches,
+      orgWarehouses: org.warehouses,
+      orgDirectory: { status: org.status, error: org.error },
+      reloadOrgDirectory: org.reload,
+      addCompany: org.addCompany,
+      updateCompany: org.updateCompany,
+      deleteCompany: org.deleteCompany,
       roles,
       addRole,
       updateRole,
@@ -4091,6 +4069,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       users,
       addUser,
       updateUser,
+      resendAccess,
       payrollRuns,
       payrollLinesOf,
       generatePayroll,
@@ -4101,10 +4080,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       reopenPayroll,
       closeContract,
       renewContract,
-      deleteUser,
       permissions,
       savePermissions,
       branches,
+      warehouses,
+      stockLocations: locations,
       leadSources,
       programs,
       levels,
@@ -4128,7 +4108,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addContract,
       updateContract,
       updateStaff,
-      deleteStaff,
+      orgStaff: staffDir.staff,
+      orgAssignments: staffDir.assignments,
+      orgPlaces: places,
+      staffDirectory: { status: staffDir.status, error: staffDir.error },
+      reloadStaffDirectory: staffDir.reload,
       addStudent,
       updateStudent,
       deleteStudent,
@@ -4187,9 +4171,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addPromotion,
       updatePromotion,
       deletePromotion,
-      addBranch,
-      updateBranch,
-      deleteBranch,
+      addBranch: org.addBranch,
+      updateBranch: org.updateBranch,
+      deleteBranch: org.deleteBranch,
+      addWarehouse: org.addWarehouse,
+      updateWarehouse: org.updateWarehouse,
       isEnrollmentWizardOpen,
       setIsEnrollmentWizardOpen,
       shipments,
@@ -4205,11 +4191,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       currentBranchId,
       selectBranch,
       sessionScope,
-      sessionLocked: !sessionAccount,
-      switchUser,
-      lockSession,
-      changeOwnPin,
-      accessRestore: { restored: accessRestore.restored, notes: accessRestore.notes },
       currentUser,
       confirmReception,
       updateEnrollmentVerification,

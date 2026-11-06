@@ -13,9 +13,12 @@ import {
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { Branch } from '../../context/DataContext';
+import { OrgDbNotice } from '../../components/organization/OrgDbNotice';
+import { branchFieldErrors } from '../../utils/orgDirectory';
 
 export function Branches() {
-  const { branches, staff, companies, addBranch, updateBranch, can } = useData();
+  const { orgBranches: branches, orgCompanies: companies, orgDirectory, addBranch, updateBranch, can } = useData();
+  const [saving, setSaving] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
@@ -44,9 +47,8 @@ export function Branches() {
   
   // Form State
   const [formData, setFormData] = useState<Partial<Branch>>({
-    id: '',
     name: '',
-    company: '',
+    companyId: '',
     status: 'Activo',
     address: '',
     reference: '',
@@ -56,7 +58,6 @@ export function Branches() {
     phoneFixed: '',
     phoneMobile: '',
     email: '',
-    responsibleId: '',
     observations: ''
   });
 
@@ -72,9 +73,8 @@ export function Branches() {
       setFormData({
         id: '',
         name: '',
-        company: '',
+        companyId: '',
         status: 'Activo',
-        isWarehouse: false,
         address: '',
         reference: '',
         department: '',
@@ -83,7 +83,6 @@ export function Branches() {
         phoneFixed: '',
         phoneMobile: '',
         email: '',
-        responsibleId: '',
         observations: ''
       });
     }
@@ -91,39 +90,26 @@ export function Branches() {
   }, [selectedBranch, isFormOpen]);
 
   const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.id) newErrors.id = 'El código es obligatorio';
-    if (!selectedBranch && branches.some(b => b.id === formData.id)) {
-      newErrors.id = 'Este código ya está en uso';
-    }
-    if (!formData.company) newErrors.company = 'Debe seleccionar una empresa';
-    if (!formData.name) newErrors.name = 'El nombre es obligatorio';
-    if (!formData.address) newErrors.address = 'La dirección es obligatoria';
-    if (!formData.department) newErrors.department = 'El departamento es obligatorio';
-    if (!formData.province) newErrors.province = 'La provincia es obligatoria';
-    if (!formData.district) newErrors.district = 'El distrito es obligatorio';
-    
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Formato de correo inválido';
-    }
-
+    const found = branchFieldErrors(formData, branches, companies, selectedBranch?.id);
+    const newErrors: Record<string, string> = { ...found };
+    if (found.companyId) { newErrors.company = found.companyId; delete newErrors.companyId; }
     if (selectedBranch && !reasonForChange) {
       newErrors.reasonForChange = 'Debe indicar el motivo del cambio para auditoría';
     }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (validateForm()) {
-      const result = selectedBranch ? updateBranch(selectedBranch.id, { ...formData }) : addBranch(formData as Branch);
-      if (!result.ok) {
-        setErrors({ isWarehouse: result.error ?? 'No se pudo guardar la filial.' });
-        return;
-      }
-      setIsFormOpen(false);
+  const handleSubmit = async () => {
+    if (saving || !validateForm()) return;
+    setSaving(true);
+    const result = selectedBranch ? await updateBranch(selectedBranch.id, { ...formData }) : await addBranch(formData as Omit<Branch, 'id'>);
+    setSaving(false);
+    if (!result.ok) {
+      setErrors({ form: result.error ?? 'No se pudo guardar la filial.' });
+      return;
     }
+    setIsFormOpen(false);
   };
 
   const handleOpenDetail = (branch: Branch) => {
@@ -142,9 +128,9 @@ export function Branches() {
     setIsDeactivateModalOpen(true);
   };
 
-  const confirmDeactivation = () => {
+  const confirmDeactivation = async () => {
     if (selectedBranch) {
-      const result = updateBranch(selectedBranch.id, { status: 'Inactivo' });
+      const result = await updateBranch(selectedBranch.id, { status: 'Inactivo' });
       if (!result.ok) {
         setDeactivateError(result.error ?? 'No se pudo inactivar la filial.');
         return;
@@ -156,12 +142,7 @@ export function Branches() {
 
   const companyOptions = [
     { value: '', label: 'Seleccionar empresa' },
-    ...companies.filter(c => c.status === 'Activo').map(c => ({ value: c.name, label: c.name }))
-  ];
-
-  const staffOptions = [
-    { value: '', label: 'Sin asignar' },
-    ...staff.map(s => ({ value: s.id, label: `${s.names} ${s.lastNameP}` }))
+    ...companies.filter(c => c.status === 'Activo').map(c => ({ value: c.id, label: c.name }))
   ];
 
   return (
@@ -173,12 +154,14 @@ export function Branches() {
           <p className="text-sm text-text-secondary">Gestión de sedes operativas y puntos de atención</p>
         </div>
         {can('org-filiales:create') && (
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+          <Button variant="primary" className="flex items-center gap-2" disabled={orgDirectory.status !== 'ready'} onClick={() => handleOpenForm()}>
             <Plus size={16} />
             Nueva Filial
           </Button>
         )}
       </div>
+
+      <OrgDbNotice />
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -230,7 +213,6 @@ export function Branches() {
                     <div className="flex flex-col">
                       <span className="font-medium text-text-primary flex items-center gap-2">
                         {branch.name}
-                        {branch.isWarehouse && <Badge variant="info">Almacén central</Badge>}
                       </span>
                       <span className="text-xs text-text-muted">{branch.address}</span>
                     </div>
@@ -258,6 +240,13 @@ export function Branches() {
                   </td>
                 </tr>
               ))}
+              {orgDirectory.status === 'ready' && filteredBranches.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-10 text-center text-sm text-text-muted">
+                    {branches.length === 0 ? 'Aún no hay filiales guardadas. Cree la primera con «Nueva Filial».' : 'Ninguna filial coincide con la búsqueda.'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -310,8 +299,8 @@ export function Branches() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSubmit}>
-              {selectedBranch ? 'Guardar Cambios' : 'Crear Filial'}
+            <Button variant="primary" onClick={handleSubmit} disabled={saving}>
+              {saving ? 'Guardando…' : selectedBranch ? 'Guardar Cambios' : 'Crear Filial'}
             </Button>
           </div>
         }
@@ -327,21 +316,15 @@ export function Branches() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-text-secondary">Código de Filial</label>
-                <Input 
-                  placeholder="Ej. FIL-001"
-                  value={formData.id}
-                  onChange={(e) => setFormData({ ...formData, id: e.target.value.toUpperCase() })}
-                  error={errors.id}
-                  disabled={!!selectedBranch}
-                />
-                {!selectedBranch && <p className="text-[10px] text-text-muted">Identificador único e inmutable.</p>}
+                <Input value={selectedBranch ? selectedBranch.id : ''} placeholder="Se asigna al guardar" disabled />
+                <p className="text-[10px] text-text-muted">Lo asigna el sistema (FIL-001, FIL-002…) y no cambia.</p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-text-secondary">Empresa</label>
                 <Select 
                   options={companyOptions}
-                  value={formData.company}
-                  onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                  value={formData.companyId}
+                  onChange={(e) => setFormData({ ...formData, companyId: e.target.value })}
                   error={errors.company}
                   disabled={!!selectedBranch}
                 />
@@ -358,21 +341,7 @@ export function Branches() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={!!formData.isWarehouse}
-                  onChange={(e) => setFormData({ ...formData, isWarehouse: e.target.checked })}
-                />
-                <span className="text-sm text-text-primary">
-                  Es el almacén central de la empresa
-                  <span className="block text-xs text-text-muted">Solo puede haber uno. De él salen los envíos a todas las filiales y en él termina lo que se devuelve; entre filiales todo pasa por el almacén.</span>
-                </span>
-              </label>
-              {errors.isWarehouse && <p className="text-xs text-danger-text">{errors.isWarehouse}</p>}
-            </div>
+            {errors.form && <p className="text-xs text-danger-text">{errors.form}</p>}
           </section>
 
           {/* Block 2: Location */}
@@ -498,15 +467,7 @@ export function Branches() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-text-secondary">Responsable de Sede</label>
-              <Select 
-                options={staffOptions}
-                value={formData.responsibleId}
-                onChange={(e) => setFormData({ ...formData, responsibleId: e.target.value })}
-              />
-              <p className="text-[10px] text-text-muted">Personal asignado a la dirección operativa.</p>
-            </div>
+            <p className="text-[11px] text-text-muted">El responsable de la sede se asigna cuando el módulo Personal pase a la base de datos.</p>
 
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-text-secondary">Observaciones</label>
@@ -576,15 +537,6 @@ export function Branches() {
                 <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Estado</span>
                 <div>
                   <Badge variant={selectedBranch.status === 'Activo' ? 'success' : 'danger'}>{selectedBranch.status}</Badge>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Responsable</span>
-                <div className="flex items-center gap-2">
-                  <User size={14} className="text-text-muted" />
-                  <p className="text-sm font-medium text-text-primary">
-                    {staff.find(s => s.id === selectedBranch.responsibleId)?.names || 'Sin asignar'}
-                  </p>
                 </div>
               </div>
               <div className="space-y-1">

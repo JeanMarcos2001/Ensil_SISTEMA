@@ -165,6 +165,7 @@ export function ContractsPage() {
             <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-4 font-medium">Trabajador</th>
+                <th className="px-6 py-4 font-medium">Cargo</th>
                 <th className="px-6 py-4 font-medium">Tipo</th>
                 <th className="px-6 py-4 font-medium">Inicio</th>
                 <th className="px-6 py-4 font-medium">Fin</th>
@@ -177,6 +178,7 @@ export function ContractsPage() {
               {paginatedContracts.map((contract) => (
                 <tr key={contract.id} className="hover:bg-surface-muted/50 transition-colors">
                   <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{getStaffName(contract.staffId)}</td>
+                  <td className="px-6 py-4 text-text-primary">{contract.position || '-'}</td>
                   <td className="px-6 py-4 text-text-primary">{contract.type}</td>
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.startDate}</td>
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.endDate || '-'}</td>

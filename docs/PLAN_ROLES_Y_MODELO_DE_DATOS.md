@@ -12,7 +12,7 @@ definitivo y las sesiones.
 ## 1. Cómo opera el negocio (decidido)
 
 - Una empresa con **varias filiales (sedes)**. Cada trabajador pertenece a una sede, con su especialidad y su contrato.
-- **Un solo almacén para toda la empresa, en Los Olivos**, que abastece a todas las filiales. Los Olivos también es una sede con alumnos.
+- **Un solo almacén para toda la empresa, aparte de las sedes** (desde 2026-11-05; antes era la sede Los Olivos), que abastece a todas las filiales. Los Olivos es una sede con alumnos y stock de venta propio.
 - Cada filial tiene **2 o 3 personas** y normalmente **una laptop**. Secretaría y matrícula son lo mismo. No se puede estar cerrando y abriendo sesión.
 - **Administrador de sede:** matrícula, ventas, caja, cobranza, verificación y entrega de materiales, recepción de envíos y **programación de asesorías y cronogramas** (el alumno fija su horario en secretaría).
 - **Psicopedagogía:** seguimiento del alumno, **asistencia** y avance en clase. No ve dinero.
@@ -28,7 +28,7 @@ Se cargan como datos de ejemplo usando el mismo constructor y se pueden editar o
 |---|---|---|
 | **Administrador de sede** | 1 a 3 cuentas por sede | Matrículas, alumnos y titulares, asesorías y cronogramas, recordatorios, pagos, caja, cobranza, verificación y materiales, recepción de envíos, reportes de su sede |
 | **Psicopedagogía** | por sede | Historial y seguimiento, asistencia, reporte de Psicopedagogía; agenda en lectura; sin dinero |
-| **Almacén central** | 1 a 3 cuentas (Los Olivos) | Catálogo, stock de todas las sedes, envíos, transferencias, kardex, ajustes, reporte de stock |
+| **Almacén central** | 1 a 3 cuentas (por almacén) | Catálogo, stock de todas las sedes, envíos, transferencias, kardex, ajustes, reporte de stock |
 | **Administración general** | central | Aprueba caídas, reactivaciones, cambios y traslados; reaperturas y devoluciones; oferta comercial; personal, contratos y planilla; todos los reportes y la auditoría |
 | **Contabilidad** | opcional | Lectura y exportación de caja, cartera y planilla |
 | **Superusuario** | sistemas | Roles, usuarios y configuración técnica |
@@ -66,7 +66,7 @@ Reglas puras (con su `check-capabilities.ts`): cierre de dependencias de un rol,
 - **Panel B · Editor de rol:** se marcan funciones; semáforo por contraparte («Envío: sin receptor en Piura»), advertencias de incompatibilidad (piden motivo para guardar) y vista previa del menú que verá ese rol.
 - **Panel C · Usuarios:** se crean personas con rol y sede, con el límite por sede definido en el rol.
 - Las conexiones **no se dibujan a mano**: se eligen funciones y el grafo traza las conexiones existentes. Así nadie puede crear un flujo que rompa las reglas (cobrar sin caja, entregar sin verificar).
-- Mientras no haya persistencia, roles y usuarios se guardan de forma provisional en el navegador (**paso 6** ✅: `utils/accessStore.ts`; el resto de los datos sigue en memoria hasta el paso 10).
+- Los **roles, sus funciones y las cuentas ya están en la base de datos** (paso 10, 2026-11-05); el guardado provisional en el navegador (paso 6) y el cambio rápido con PIN (paso 7) se retiraron; el resto de los datos sigue en memoria hasta que pase a la base.
 - **Hecho en el paso 5:** el panel A y el B viven en Organización → Permisos (dos pestañas); el panel C es Organización → Usuarios (con el rol y el límite validados). Las plantillas son datos en `utils/roleTemplates.ts`.
 - Los permisos en pantalla ocultan y bloquean la interfaz; la seguridad real llega con el servidor (sesiones reales).
 
@@ -80,7 +80,7 @@ Los avisos se dirigen por **función y sede**, no por nombre de rol; un usuario 
 |---|---|---|
 | `setRecipes` (la pantalla escribía el estado directo; duplicar creaba una copia activa que chocaba con la original) | Tres acciones con validación y permiso (`saveRecipe`, `duplicateRecipe`, `setRecipeStatus`); las reglas pasan a `utils/recipes.ts`; la copia nace **inactiva** y activarla comprueba el solape | La verificación no puede dudar qué receta entregar |
 | `updateStock` (varias pantallas la llamaban directo) | Deja de existir para las pantallas: **venta en caja** (stock + ingreso en una operación), **entrega de materiales** (todo o nada) e **ingreso de stock** (con documento) son acciones con función propia | Cada movimiento de stock responde a una función que se puede dar o quitar a un rol; ninguno queda sin kardex |
-| Envíos y Transferencias entre sedes | Se **conservan las dos**, con reglas de ruta: hay un **único almacén central** (Los Olivos, por dato); el envío sale siempre de él; la transferencia tiene siempre al almacén en un extremo; **entre dos filiales no hay transferencia directa** | Es la lógica del negocio (todo pasa por el almacén) sin perder la solicitud con aprobación. Se corrigió que los datos de ejemplo trataran a Piura como almacén |
+| Envíos y Transferencias entre sedes | Se **conservan las dos**, con reglas de ruta: hay un **único almacén central** (entidad aparte de las sedes); el envío sale siempre de él; la transferencia tiene siempre al almacén en un extremo; **entre dos filiales no hay transferencia directa** | Es la lógica del negocio (todo pasa por el almacén) sin perder la solicitud con aprobación. Se corrigió que los datos de ejemplo trataran a Piura como almacén |
 | Reportes | Un permiso base y **uno por reporte** (más uno para Auditoría) | Contabilidad ve Caja sin ver Personal |
 | Sueldos | Función propia «Ver remuneraciones»; **sin ella se ocultan los importes** en Contratos, Personal, reporte de personal y Auditoría | Solo quien administra personal ve lo que gana cada quien |
 
@@ -163,6 +163,10 @@ Los pasos 2 y 3 son la base: sin ellos el constructor trabajaría con datos inve
 - La psicopedagoga marca asistencia; el administrador de sede solo la corrige, con motivo.
 - El administrador de sede verifica y entrega materiales.
 - Los envíos van del almacén a las filiales; entre filiales se piden a través del almacén.
-- Los Olivos es almacén y también sede con alumnos.
+- Los Olivos es una sede con alumnos; el almacén es una entidad aparte (Organización → Almacenes).
 - Una sola empresa (un RUC).
 - Administración general es el dueño del sistema, con posibilidad de sumar personas.
+
+## Paso 10 (continuación): Personal y asignaciones en la base; la cuenta nace de una persona ✅ (2026-11-06)
+
+Hecho: tablas `personal` y `asignaciones` con RLS por función y disparadores (migración 0004); gancho `useStaffDirectory` y servicios con repositorio inyectable; Usuarios crea la cuenta eligiendo a la persona (nombre, documento, teléfono y lugares salen de Personal y Asignaciones), con roles filtrados por compatibilidad con su lugar de trabajo y correo institucional; cuenta técnica solo para el Superusuario. Pendiente de activar: ejecutar la migración 0004 y redesplegar la Edge Function `usuarios`. Siguen con datos de ejemplo: contratos, planilla, vacaciones, agenda y matrículas (sus ids de personal de ejemplo no se mezclan con los de la base).

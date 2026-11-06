@@ -17,7 +17,7 @@ const TONE: Record<StockState, 'danger' | 'warning' | 'success'> = { 'Sin stock'
  * materiales según su receta), más los movimientos del período y lo que viene en camino.
  */
 export function StockReport() {
-  const { stockItems, items, branches, recipes, enrollments, kardex, transfers, shipments, can } = useData();
+  const { stockItems, items, stockLocations: branches, recipes, enrollments, kardex, transfers, shipments, can } = useData();
   const today = todayLocalISO();
   const { range, preset, setPreset, setRange } = useRange('mes');
   const [branchId, setBranchId] = useDefaultBranch();

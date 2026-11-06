@@ -14,7 +14,7 @@ import { useData } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 
 export function Stock() {
-  const { stockItems, items, branches, unpackPackage, packPackage, registerStockEntry, addAdjustment, updateMinStock, currentBranchId, can } = useData();
+  const { stockItems, items, stockLocations, unpackPackage, packPackage, registerStockEntry, addAdjustment, updateMinStock, currentBranchId, can } = useData();
   const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
@@ -85,7 +85,7 @@ export function Stock() {
 
   const filteredStocks = stockItems.filter(s => {
     const item = items.find(i => i.id === s.itemId);
-    const branch = branches.find(b => b.id === s.branchId);
+    const branch = stockLocations.find(b => b.id === s.branchId);
     
     const matchesSearch = item?.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           item?.id.toLowerCase().includes(searchTerm.toLowerCase());
@@ -111,7 +111,7 @@ export function Stock() {
       ['Artículo', 'Código', 'Tipo', 'Sede', 'Stock', 'Stock mínimo', 'Estado'],
       filteredStocks.map(s => {
         const item = items.find(i => i.id === s.itemId);
-        return [item?.name ?? s.itemId, s.itemId, item?.type ?? '', branches.find(b => b.id === s.branchId)?.name ?? s.branchId, s.stock, s.minStock, getStockStatus(s.stock, s.minStock)];
+        return [item?.name ?? s.itemId, s.itemId, item?.type ?? '', stockLocations.find(b => b.id === s.branchId)?.name ?? s.branchId, s.stock, s.minStock, getStockStatus(s.stock, s.minStock)];
       })
     );
   };
@@ -179,7 +179,7 @@ export function Stock() {
                 onChange={(e) => setBranchFilter(e.target.value)}
               >
                 <option value="">Todas las sedes</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -226,7 +226,7 @@ export function Stock() {
             <tbody className="divide-y divide-border-soft">
               {paginatedStock.map((row) => {
                 const item = items.find(i => i.id === row.itemId);
-                const branch = branches.find(b => b.id === row.branchId);
+                const branch = stockLocations.find(b => b.id === row.branchId);
                 const status = getStockStatus(row.stock, row.minStock);
                 
                 return (
@@ -333,7 +333,7 @@ export function Stock() {
       >
         {selectedStock && (() => {
           const item = items.find(i => i.id === selectedStock.itemId);
-          const branch = branches.find(b => b.id === selectedStock.branchId);
+          const branch = stockLocations.find(b => b.id === selectedStock.branchId);
           const status = getStockStatus(selectedStock.stock, selectedStock.minStock);
           
           return (
@@ -521,7 +521,7 @@ export function Stock() {
                 onChange={(e) => setEntryBranchId(e.target.value)}
               >
                 <option value="">Seleccionar sede...</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -712,7 +712,7 @@ export function Stock() {
                   }
                   
                   const item = items.find(i => i.id === selectedStock.itemId);
-                  const branch = branches.find(b => b.id === selectedStock.branchId);
+                  const branch = stockLocations.find(b => b.id === selectedStock.branchId);
 
                   const res = addAdjustment({
                     branch: branch?.name || 'Desconocida',

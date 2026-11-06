@@ -15,7 +15,7 @@ import {
   capabilityById, holdersWith, isKnownCapability, menuCapabilities, roleClosure, roleWarnings, type Holder,
 } from './capabilities';
 import { menuCapabilityOf, menuVisible } from './guards';
-import { shipmentRouteError } from './logisticsRoutes';
+import { isWarehouseId, shipmentRouteError, type StockLocation } from './logisticsRoutes';
 import { MIN_REASON } from './assignments';
 
 /** Una combinación a separar que se aceptó al guardar el rol, con su motivo. */
@@ -32,14 +32,15 @@ export function roleUsage(role: Pick<Role, 'name'>, users: Pick<User, 'role' | '
 }
 
 const ALL_BRANCHES = 'Todas';
-const branchesOf = (u: Pick<User, 'branch' | 'additionalBranches'>): string[] => [u.branch, ...(u.additionalBranches ?? [])].filter(b => b && b !== ALL_BRANCHES);
+/** Los lugares que ocupa una cuenta: sus sedes (por nombre) y sus almacenes (por id `ALM-NNN`). */
+const branchesOf = (u: Pick<User, 'branch' | 'additionalBranches' | 'warehouses'>): string[] => [u.branch, ...(u.additionalBranches ?? []), ...(u.warehouses ?? [])].filter(b => b && b !== ALL_BRANCHES);
 
 /** Cuentas activas del rol que cubren la sede (como principal o adicional), sin contar una cuenta (la que se edita). */
-export function seatsUsed(roleName: string, users: Pick<User, 'id' | 'role' | 'status' | 'branch' | 'additionalBranches'>[], branchName: string, exceptUserId?: string): number {
+export function seatsUsed(roleName: string, users: Pick<User, 'id' | 'role' | 'status' | 'branch' | 'additionalBranches' | 'warehouses'>[], branchName: string, exceptUserId?: string): number {
   return users.filter(u => u.id !== exceptUserId && u.role === roleName && u.status === 'Activo' && branchesOf(u).includes(branchName)).length;
 }
 
-type AccountInput = Pick<User, 'role' | 'status' | 'branch' | 'additionalBranches'>;
+type AccountInput = Pick<User, 'role' | 'status' | 'branch' | 'additionalBranches' | 'warehouses'>;
 
 /**
  * ¿La cuenta cabe en el límite del rol? Solo mira las sedes que la cuenta pasa a ocupar: si ya ocupaba el lugar (misma cuenta, mismo rol
@@ -47,7 +48,7 @@ type AccountInput = Pick<User, 'role' | 'status' | 'branch' | 'additionalBranche
  */
 export function seatLimitError(
   role: Pick<Role, 'name' | 'branchUserLimit'> | undefined,
-  users: Pick<User, 'id' | 'role' | 'status' | 'branch' | 'additionalBranches'>[],
+  users: Pick<User, 'id' | 'role' | 'status' | 'branch' | 'additionalBranches' | 'warehouses'>[],
   next: AccountInput,
   before?: User,
 ): string | null {
@@ -57,7 +58,8 @@ export function seatLimitError(
   for (const branch of branchesOf(next)) {
     if (already.includes(branch)) continue;
     const used = seatsUsed(role.name, users, branch, before?.id);
-    if (used + 1 > limit) return `El rol «${role.name}» admite hasta ${limit} cuenta${limit === 1 ? '' : 's'} activa${limit === 1 ? '' : 's'} por sede y «${branch}» ya tiene ${used}.`;
+    const place = isWarehouseId(branch) ? 'el almacén' : `«${branch}»`;
+    if (used + 1 > limit) return `El rol «${role.name}» admite hasta ${limit} cuenta${limit === 1 ? '' : 's'} activa${limit === 1 ? '' : 's'} por sede o almacén y ${place} ya tiene ${used}.`;
   }
   return null;
 }
@@ -173,16 +175,18 @@ export interface CounterpartRow {
   missingIn: string[];
 }
 
-type BranchLike = Pick<Branch, 'id' | 'name' | 'status' | 'isWarehouse'>;
+type LocationLike = Pick<StockLocation, 'id' | 'name' | 'status' | 'kind'>;
 
 /**
  * Para cada contraparte de las funciones del rol: ¿hay quien la cubra con las cuentas de hoy? `holders` ya debe traer el rol con las
  * funciones que se están armando. `roleBranchIds` son las sedes donde el rol tiene cuentas activas (para lo que debe cubrirse «en la
  * misma sede»); sin cuentas todavía no se puede medir y se dice así.
  */
-export function counterpartStatus(selected: string[], holders: Holder[], branches: BranchLike[], roleBranchIds: string[]): CounterpartRow[] {
-  const active = branches.filter(b => b.status === 'Activo');
-  const warehouse = active.find(b => b.isWarehouse);
+export function counterpartStatus(selected: string[], holders: Holder[], locations: LocationLike[], roleBranchIds: string[]): CounterpartRow[] {
+  const active = locations.filter(b => b.status === 'Activo');
+  // Las contrapartes se miden en las sedes; el almacén solo es el origen de los envíos
+  const sedes = active.filter(b => b.kind === 'sede');
+  const warehouse = active.find(b => b.kind === 'almacén');
   const rows: CounterpartRow[] = [];
   for (const id of selected) {
     for (const cp of capabilityById(id)?.counterparts ?? []) {
@@ -192,13 +196,13 @@ export function counterpartStatus(selected: string[], holders: Holder[], branche
         rows.push({ ...base, state: covered ? 'ok' : 'falta', missingIn: covered ? [] : ['toda la empresa'] });
         continue;
       }
-      let targets: BranchLike[];
+      let targets: LocationLike[];
       if (cp.where === 'same-branch') {
-        targets = active.filter(b => roleBranchIds.includes(b.id));
+        targets = sedes.filter(b => roleBranchIds.includes(b.id));
         if (targets.length === 0) { rows.push({ ...base, state: 'sin-cuentas', missingIn: [] }); continue; }
       } else {
         // Un envío sale siempre del almacén central: nunca llega a él ni entre sedes (`shipmentRouteError`)
-        targets = id.startsWith('log-envios:') && warehouse ? active.filter(b => shipmentRouteError(warehouse.id, b.id, branches) === null) : active;
+        targets = id.startsWith('log-envios:') && warehouse ? sedes.filter(b => shipmentRouteError(warehouse.id, b.id, locations as StockLocation[]) === null) : sedes;
       }
       const missing = targets.filter(b => holdersWith(cp.capability, holders, b.id).length === 0).map(b => b.name);
       rows.push({ ...base, state: missing.length === 0 ? 'ok' : 'falta', missingIn: missing });

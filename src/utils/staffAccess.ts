@@ -16,7 +16,7 @@ import type { Assignment, Staff, User } from '../context/DataContext';
 export const NO_ACCESS = 'Sin acceso';
 
 /** Rol sugerido según el «rol del sistema» de la asignación (solo una sugerencia: quien crea la cuenta elige). */
-export const SUGGESTED_ROLE: Record<string, string> = { 'Psicopedagogía': 'Psicopedagogía', Administración: 'Administrador de sede', Ventas: 'Administrador de sede' };
+export const SUGGESTED_ROLE: Record<string, string> = { 'Psicopedagogía': 'Psicopedagogía', Administración: 'Administrador de sede', Ventas: 'Administrador de sede', 'Almacén': 'Almacén central' };
 
 export const staffDisplayName = (s: Pick<Staff, 'names' | 'lastNameP'>) => `${s.names} ${s.lastNameP}`.replace(/\s+/g, ' ').trim();
 

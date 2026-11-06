@@ -38,7 +38,7 @@ export function renewalBlock(c: Contract, today: string): string | null {
 export function renewalForm(c: Contract, input: RenewalInput): ContractForm {
   return {
     ...emptyContractForm(),
-    staffId: c.staffId, type: c.type, startDate: addDaysISO(c.endDate ?? '', 1), endDate: input.endDate,
+    staffId: c.staffId, type: c.type, position: c.position ?? '', startDate: addDaysISO(c.endDate ?? '', 1), endDate: input.endDate,
     grossSalary: input.grossSalary.trim() || String(c.grossSalary ?? ''),
     pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '',
     observations: '', suspension4ta: !!c.suspension4ta,

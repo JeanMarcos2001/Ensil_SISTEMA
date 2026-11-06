@@ -2,10 +2,17 @@
  * Datos de ejemplo del catálogo de la organización y del personal: sedes, programas, niveles, personal, contratos, asignaciones y
  * cuentas. Viven aparte del contexto para poder verificarlos con `scripts/check-integrity.ts` junto con las personas y las matrículas.
  */
-import type { Assignment, Branch, Contract, Level, Permission, Program, Role, Staff, User } from '../context/DataContext';
+import type { Assignment, Branch, Contract, Level, Permission, Program, Role, Staff, User, Warehouse } from '../context/DataContext';
 import { ROLE_TEMPLATES, templatePermissions } from '../utils/roleTemplates';
 import { todayLocalISO } from '../utils/schedule';
-import { hashPin } from '../utils/session';
+
+/** Un solo almacén central, aparte de las sedes: de él salen los envíos a todas las filiales (Los Olivos es una sede como las demás). */
+export const seedWarehouses = (): Warehouse[] => [
+  {
+    id: 'ALM-001', name: 'Almacén central', company: 'Educación y Cultura S.A.C.', status: 'Activo',
+    address: 'Jr. Carlos Monge #233, Los Olivos', observations: 'Abastece a todas las filiales; no vende.',
+  },
+];
 
 export const seedBranches = (): Branch[] => [
     { 
@@ -51,8 +58,6 @@ export const seedBranches = (): Branch[] => [
       id: 'FIL-LOL', 
       name: 'Los Olivos', 
       company: 'Educación y Cultura S.A.C.',
-      // Único almacén de la empresa: abastece a todas las filiales (y también es una sede con alumnos)
-      isWarehouse: true, 
       status: 'Activo', 
       address: 'Jr. Carlos Monge #233', 
       reference: 'Espalda cdra. 4 Av. Izaguirre',
@@ -148,14 +153,14 @@ export const seedStaff = (): Staff[] => [
   ];
 
 export const seedContracts = (): Contract[] => [
-    { id: 'CON-001', staffId: 'STF-001', type: 'Indeterminado', startDate: '2023-01-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'AFP', pensionFund: 'Integra', grossSalary: 3500, contribution: 466.8, incomeTax: 84.88, familyAllowance: 113, netSalary: 3061.32, observations: 'Contrato inicial' },
-    { id: 'CON-002', staffId: 'STF-002', type: 'Plazo Fijo', startDate: '2023-06-01', endDate: '2027-05-31', status: 'Vigente', shift: 'Full time', pensionSystem: 'ONP', grossSalary: 2800, contribution: 364, incomeTax: 8.03, familyAllowance: 0, netSalary: 2427.97, observations: 'Renovación anual' },
+    { id: 'CON-001', staffId: 'STF-001', type: 'Indeterminado', position: 'Psicólogo Senior', startDate: '2023-01-01', status: 'Vigente', shift: 'Full time', pensionSystem: 'AFP', pensionFund: 'Integra', grossSalary: 3500, contribution: 466.8, incomeTax: 84.88, familyAllowance: 113, netSalary: 3061.32, observations: 'Contrato inicial' },
+    { id: 'CON-002', staffId: 'STF-002', type: 'Plazo Fijo', position: 'Coordinadora', startDate: '2023-06-01', endDate: '2027-05-31', status: 'Vigente', shift: 'Full time', pensionSystem: 'ONP', grossSalary: 2800, contribution: 364, incomeTax: 8.03, familyAllowance: 0, netSalary: 2427.97, observations: 'Renovación anual' },
   ];
 
 export const seedAssignments = (): Assignment[] => [
-    { id: 'ASG-001', staffId: 'STF-001', branch: 'Piura', area: 'Psicopedagogía', role: 'Psicólogo Senior', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-002', staffId: 'STF-002', branch: 'Chiclayo', area: 'Administración', role: 'Coordinadora', systemRole: 'Administración', startDate: '2023-06-01', isMain: true, status: 'Activa' },
-    { id: 'ASG-003', staffId: 'STF-002', branch: 'Chiclayo', area: 'Psicopedagogía', role: 'Psicopedagoga', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
+    { id: 'ASG-001', staffId: 'STF-001', branch: 'Piura', area: 'Psicopedagogía', systemRole: 'Psicopedagogía', startDate: '2023-01-01', isMain: true, status: 'Activa' },
+    { id: 'ASG-002', staffId: 'STF-002', branch: 'Chiclayo', area: 'Administración', systemRole: 'Administración', startDate: '2023-06-01', isMain: true, status: 'Activa' },
+    { id: 'ASG-003', staffId: 'STF-002', branch: 'Chiclayo', area: 'Psicopedagogía', systemRole: 'Psicopedagogía', startDate: '2023-06-01', isMain: false, status: 'Activa' },
   ];
 
 /** Los 6 roles de partida salen de las plantillas (`utils/roleTemplates.ts`): son datos y se pueden editar o duplicar. */
@@ -169,17 +174,13 @@ export const seedRoles = (): Role[] =>
 export const seedPermissions = (): Permission[] =>
   seedRoles().map((r, i) => ({ roleId: r.id, permissions: templatePermissions(ROLE_TEMPLATES[i]) }));
 
-/** PIN de las cuentas de ejemplo: 1234 (se cambia desde el menú de la cuenta; el Superusuario lo fija en Usuarios). */
-export const SEED_PIN = '1234';
-const withPin = (u: User): User => ({ ...u, pinHash: hashPin(u.id, SEED_PIN) });
-
 export const seedUsers = (): User[] => ([
     { id: 'USR-001', name: 'Admin Sistema', email: 'admin@ensil.edu.pe', role: 'Administración general', branch: 'Todas', lastAccess: 'Hace 5 min', status: 'Activo' },
     { id: 'USR-002', name: 'Laura Martínez', email: 'lmartinez@ensil.edu.pe', role: 'Administrador de sede', branch: 'Piura', lastAccess: 'Ayer 14:30', status: 'Activo' },
     { id: 'USR-003', name: 'Jorge Torres', email: 'jtorres@ensil.edu.pe', role: 'Administrador de sede', branch: 'Chiclayo', lastAccess: 'Hace 2 días', status: 'Inactivo' },
     { id: 'USR-004', name: 'Juan Pérez', email: 'jperez@ensil.edu.pe', role: 'Psicopedagogía', branch: 'Piura', lastAccess: 'Nunca', status: 'Activo', staffId: 'STF-001', document: '12345678', phone: '987654321' },
-    { id: 'USR-005', name: 'Rosa Quispe', email: 'rquispe@ensil.edu.pe', role: 'Almacén central', branch: 'Los Olivos', lastAccess: 'Hace 1 hora', status: 'Activo' },
+    { id: 'USR-005', name: 'Rosa Quispe', email: 'rquispe@ensil.edu.pe', role: 'Almacén central', branch: '', warehouses: ['ALM-001'], lastAccess: 'Hace 1 hora', status: 'Activo' },
     { id: 'USR-006', name: 'Marco Salas', email: 'msalas@ensil.edu.pe', role: 'Administrador de sede', branch: 'Los Olivos', lastAccess: 'Hoy 08:10', status: 'Activo' },
     { id: 'USR-007', name: 'Elena Ramos', email: 'eramos@ensil.edu.pe', role: 'Contabilidad', branch: 'Los Olivos', lastAccess: 'Hace 3 días', status: 'Activo' },
     { id: 'USR-008', name: 'Superadmin', email: 'superadmin@ensil.edu.pe', role: 'Superusuario', branch: 'Todas', lastAccess: 'Ahora', status: 'Activo' },
-  ] as User[]).map(withPin);
+  ] as User[]);

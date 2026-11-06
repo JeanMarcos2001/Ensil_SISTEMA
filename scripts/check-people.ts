@@ -11,12 +11,15 @@ import {
   MIN_WAGE,
   buildContract,
   contractStatus,
+  currentContractOf,
+  diffContract,
   emptyContractForm,
   estimateNet,
   hasPension,
   hasVacations,
   needsEndDate,
   pensionRate,
+  positionOf,
   validateContractForm,
   type ContractForm,
 } from '../src/utils/payroll';
@@ -95,11 +98,25 @@ const contracts: Contract[] = [
   { id: 'C2', staffId: '2', type: 'Plazo Fijo', startDate: '2023-06-01', endDate: '2024-06-01', status: 'Vigente' },
 ];
 const goodContract = (over: Partial<ContractForm> = {}): ContractForm => ({
-  ...emptyContractForm(), staffId: '1', type: 'Plazo Fijo', startDate: '2026-11-01', endDate: '2027-10-31', grossSalary: '2500', pensionSystem: 'AFP', pensionFund: 'Prima', ...over,
+  ...emptyContractForm(), staffId: '1', type: 'Plazo Fijo', position: 'Psicóloga Senior', startDate: '2026-11-01', endDate: '2027-10-31', grossSalary: '2500', pensionSystem: 'AFP', pensionFund: 'Prima', ...over,
 });
 const cerrs = (f: ContractForm, list: Contract[] = []) => validateContractForm(f, list, existing, TODAY);
 check('Contrato completo → sin errores', Object.keys(cerrs(goodContract())).length === 0);
-check('Vacío → trabajador, tipo, inicio y sueldo son obligatorios', ['staffId', 'type', 'startDate', 'grossSalary'].every(k => k in cerrs(emptyContractForm())));
+check('Vacío → trabajador, tipo, cargo, inicio y sueldo son obligatorios', ['staffId', 'type', 'position', 'startDate', 'grossSalary'].every(k => k in cerrs(emptyContractForm())));
+check('El cargo es del contrato: de 3 a 60 caracteres, se guarda sin espacios sobrantes y la constancia de edición lo muestra', !!cerrs(goodContract({ position: 'ab' })).position && !!cerrs(goodContract({ position: ' '.repeat(5) })).position
+  && !!cerrs(goodContract({ position: 'x'.repeat(61) })).position && !cerrs(goodContract({ position: 'x'.repeat(60) })).position
+  && buildContract(goodContract({ position: '  Coordinadora  ' })).position === 'Coordinadora'
+  && diffContract({ id: 'C', staffId: '1', type: 'Plazo Fijo', position: 'Asistente', startDate: '2026-11-01', status: 'Vigente' }, { position: 'Coordinadora' }).some(c => c.label === 'Cargo' && c.from === 'Asistente' && c.to === 'Coordinadora'));
+check('El cargo de una persona sale de su contrato (el vigente; si no, el último vencido; sin contrato no hay cargo)', (() => {
+  const own: Contract[] = [
+    { id: 'A', staffId: '1', type: 'Plazo Fijo', position: 'Asistente', startDate: '2024-01-01', endDate: '2024-12-31', status: 'Vigente' },
+    { id: 'B', staffId: '1', type: 'Indeterminado', position: 'Coordinadora', startDate: '2025-01-01', status: 'Vigente' },
+    { id: 'C', staffId: '2', type: 'Plazo Fijo', position: 'Analista', startDate: '2024-01-01', endDate: '2024-12-31', status: 'Vigente' },
+    { id: 'D', staffId: '3', type: 'Indeterminado', position: 'Cesada', startDate: '2024-01-01', status: 'Cesado' },
+  ];
+  return positionOf('1', own, TODAY) === 'Coordinadora' && positionOf('2', own, TODAY) === 'Analista' && positionOf('3', own, TODAY) === undefined && positionOf('9', own, TODAY) === undefined
+    && currentContractOf('1', own, TODAY)?.id === 'B';
+})());
 check('Plazo fijo y locación exigen fecha de fin posterior al inicio; el indeterminado no la tiene',
   !!cerrs(goodContract({ endDate: '' })).endDate && !!cerrs(goodContract({ endDate: '2026-11-01' })).endDate &&
   !!cerrs(goodContract({ type: 'Locación de servicios', endDate: '', pensionSystem: '' })).endDate &&

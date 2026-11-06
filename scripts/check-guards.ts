@@ -132,7 +132,7 @@ check('Las acciones que no devuelven resultado están en THROWS_ON_DENIAL (y sol
   const returnsResult = (a: string) => {
     const line = iface.split('\n').find(l => new RegExp(`^  ${a}: `).test(l)) ?? '';
     const ret = line.includes('=>') ? line.slice(line.lastIndexOf('=>')) : (iface.slice(iface.indexOf(line)).split(/\n  \w+: /)[0] ?? '');
-    return /StockResult|ok: boolean/.test(ret) || (a === 'updateEnrollmentVerification');
+    return /StockResult|OpResult|ok: boolean/.test(ret) || (a === 'updateEnrollmentVerification');
   };
   const wrong = actions.filter(a => returnsResult(a) === THROWS_ON_DENIAL.has(a));
   if (wrong.length) console.log('     ', list(wrong));

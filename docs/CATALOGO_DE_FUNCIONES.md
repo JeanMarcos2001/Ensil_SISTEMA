@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**52 funcionalidades · 186 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
+**53 funcionalidades · 187 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -231,7 +231,6 @@ Cómo leerlo:
 | **Editar ficha de personal**<br><code>per-personal:edit</code> | editar | Ver el personal | — | — → Personal, Cuenta de usuario | — |
 | **Inactivar a un trabajador** 🛡 control<br><code>per-personal:inactivate</code> | operar | Ver el personal | — | — → Personal, Cuenta de usuario, Asignación | — |
 | **Reactivar a un trabajador** 🛡 control<br><code>per-personal:reactivate</code> | operar | Ver el personal | — | — → Personal, Cuenta de usuario | — |
-| **Eliminar ficha de personal** 🛡 control<br><code>per-personal:delete</code> | eliminar | Ver el personal | — | — → Personal | — |
 
 ### Contratos `per-contratos`
 
@@ -343,6 +342,14 @@ Cómo leerlo:
 | **Editar filial**<br><code>org-filiales:edit</code> | editar | Ver filiales | — | — → Filial | — |
 | **Eliminar filial** 🛡 control<br><code>org-filiales:delete</code> | eliminar | Ver filiales | — | — → Filial | — |
 
+### Almacenes `org-almacenes`
+
+| Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
+|---|---|---|---|---|---|
+| **Ver almacenes** · menú «Almacenes»<br><code>org-almacenes:view</code> | ver | — | — | Almacén, Stock → — | — |
+| **Crear almacén**<br><code>org-almacenes:create</code> | crear | Ver almacenes | — | — → Almacén | — |
+| **Editar almacén**<br><code>org-almacenes:edit</code> | editar | Ver almacenes | — | — → Almacén | — |
+
 ### Roles y Permisos `org-roles`
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
@@ -358,13 +365,12 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver usuarios** · menú «Usuarios»<br><code>org-usuarios:view</code> | ver | — | — | Cuenta de usuario, Rol, Personal, Filial → — | — |
-| **Crear usuario**<br><code>org-usuarios:create</code> | crear | Ver usuarios, Ver el personal | — | — → Cuenta de usuario | — |
+| **Crear usuario**<br><code>org-usuarios:create</code> | crear | Ver usuarios, Ver el personal, Ver asignaciones | — | — → Cuenta de usuario | — |
 | **Editar usuario**<br><code>org-usuarios:edit</code> | editar | Ver usuarios | — | — → Cuenta de usuario | — |
 | **Desactivar usuario** 🛡 control<br><code>org-usuarios:deactivate</code> | operar | Ver usuarios | — | — → Cuenta de usuario | — |
-| **Resetear acceso** 🛡 control<br><code>org-usuarios:reset_access</code> | operar | Ver usuarios | — | — → Cuenta de usuario | — |
+| **Reenviar acceso** 🛡 control<br><code>org-usuarios:reset_access</code> | operar | Ver usuarios | — | — → Cuenta de usuario | — |
 | **Asignar rol** 🛡 control<br><code>org-usuarios:assign_role</code> | operar | Ver usuarios, Ver roles | — | Rol → Cuenta de usuario | — |
 | **Asignar sedes** 🛡 control<br><code>org-usuarios:assign_branch</code> | operar | Ver usuarios | — | Filial → Cuenta de usuario | — |
-| **Eliminar usuario** 🛡 control<br><code>org-usuarios:delete</code> | eliminar | Ver usuarios | — | — → Cuenta de usuario | — |
 
 ### Alcance por sede `org-alcance`
 
@@ -541,10 +547,9 @@ Acciones del contexto que no pertenecen a una persona (consultas, ayudas interna
 - `payrollLinesOf`: Consulta (líneas de una planilla).
 - `documentContextOf`: Consulta (datos para armar un documento).
 - `setIsEnrollmentWizardOpen`: Estado de la interfaz (abrir el asistente de matrícula).
+- `reloadOrgDirectory`: Consulta (vuelve a leer las empresas y filiales de la base de datos).
+- `reloadStaffDirectory`: Consulta (vuelve a leer el personal y las asignaciones de la base de datos).
 - `selectBranch`: Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).
-- `switchUser`: Sesión: cambio rápido de usuario con PIN (quien sabe el PIN de una cuenta entra a ella).
-- `lockSession`: Sesión: bloquear (nadie trabaja hasta que una cuenta entre con su PIN).
-- `changeOwnPin`: Sesión: cada persona cambia su propio PIN.
 
 Ítems del menú sin función todavía:
 

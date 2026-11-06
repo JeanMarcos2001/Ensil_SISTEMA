@@ -31,8 +31,8 @@ const staff: Staff[] = [
   { id: 'E2', code: '2', docType: 'DNI', docNumber: '2', names: 'Luis', lastNameP: 'Mamani', lastNameM: 'Soto', birthDate: '', phone: '', status: 'Activo' },
 ];
 const assignments: Assignment[] = [
-  { id: 'A1', staffId: 'E1', branch: 'Ayacucho', area: 'Psicopedagogía', role: 'x', startDate: '2026-01-01', isMain: true, status: 'Activa' },
-  { id: 'A2', staffId: 'E2', branch: 'Piura', area: 'Psicopedagogia', role: 'x', startDate: '2026-01-01', isMain: true, status: 'Activa' },
+  { id: 'A1', staffId: 'E1', branch: 'Ayacucho', area: 'Psicopedagogía', startDate: '2026-01-01', isMain: true, status: 'Activa' },
+  { id: 'A2', staffId: 'E2', branch: 'Piura', area: 'Psicopedagogia', startDate: '2026-01-01', isMain: true, status: 'Activa' },
 ];
 const programs: Program[] = [
   { id: 'KIDS', code: 'K', name: 'Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },

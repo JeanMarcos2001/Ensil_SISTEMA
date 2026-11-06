@@ -1,12 +1,12 @@
 /**
  * Reporte de Personal (funciones puras): plantilla, contratos, accesos, bajas y costo de planilla.
  *
- * Cruza las cuatro piezas de Personas que antes se miraban por separado: la ficha, su asignación (sede, área y cargo), su contrato
+ * Cruza las cuatro piezas de Personas que antes se miraban por separado: la ficha, su asignación (lugar y área), su contrato (que da el cargo)
  * (vigente, por vencer o vencido) y su cuenta de acceso; y le suma lo que costó la última planilla cerrada. Señala lo que hay que
  * corregir: personal activo sin contrato, sin asignación o con el contrato vencido.
  */
 import type { Assignment, Contract, PayrollRun, Staff, User } from '../context/DataContext';
-import { contractStatus } from './payroll';
+import { contractStatus, currentContractOf } from './payroll';
 import { addDaysISO } from './schedule';
 import { daysApart, inRange, round2, sum, tally, type Count, type DateRange } from './reportCommon';
 
@@ -66,10 +66,9 @@ export function staffReport(ctx: StaffReportContext, f: StaffFilters): StaffRepo
   const rowOf = (s: Staff): StaffRow => {
     const own = ctx.assignments.filter(a => a.staffId === s.id && a.status === 'Activa');
     const main = own.find(a => a.isMain) ?? own[0];
-    const contracts = ctx.contracts.filter(c => c.staffId === s.id);
-    const current = contracts.find(c => contractStatus(c, ctx.today) === 'Vigente') ?? contracts.filter(c => contractStatus(c, ctx.today) === 'Vencido').sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
+    const current = currentContractOf(s.id, ctx.contracts, ctx.today);
     return {
-      staff: s, name: fullName(s), branch: main?.branch ?? '', area: main?.area ?? '', role: main?.role ?? '', contract: current,
+      staff: s, name: fullName(s), branch: main?.branch ?? '', area: main?.area ?? '', role: current?.position?.trim() ?? '', contract: current,
       contractState: current ? contractStatus(current, ctx.today) : 'Sin contrato', account: ctx.users.find(u => u.staffId === s.id),
     };
   };
@@ -128,7 +127,7 @@ export function staffReport(ctx: StaffReportContext, f: StaffFilters): StaffRepo
     },
     byBranch: tally(active, r => r.branch, 'Sin asignación'),
     byArea: tally(active, r => r.area, 'Sin asignación'),
-    byRole: tally(active, r => r.role, 'Sin asignación'),
+    byRole: tally(active, r => r.role, 'Sin cargo (sin contrato)'),
     contractTypes: tally(active.filter(r => r.contractState === 'Vigente'), r => r.contract?.type),
     alerts,
     withoutContract: active.filter(r => r.contractState !== 'Vigente'),

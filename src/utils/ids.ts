@@ -11,7 +11,7 @@
  */
 
 export const ID_PREFIX = {
-  alumno: 'ALU', titular: 'TIT', personal: 'STF', contrato: 'CON', asignacion: 'ASG', matricula: 'MAT', plan: 'PLN', pago: 'PAG',
+  alumno: 'ALU', titular: 'TIT', empresa: 'EMP', filial: 'FIL', rol: 'ROL', almacen: 'ALM', personal: 'STF', contrato: 'CON', asignacion: 'ASG', matricula: 'MAT', plan: 'PLN', pago: 'PAG',
   movimientoCaja: 'CJ', cajaChica: 'CCH', cierre: 'CIE', deposito: 'DEP', notaCredito: 'NC', solicitud: 'SOL', caida: 'CAI',
   correccion: 'COR', sesion: 'SES', seguimiento: 'TRK', recordatorio: 'REC', recordatorioPsi: 'PRL', stock: 'STK', kardex: 'KDX',
   precio: 'PRC', ajuste: 'ADJ', incidencia: 'INC', notificacion: 'NOT', grupoPromocional: 'PGR', ajustePlanilla: 'AJU',

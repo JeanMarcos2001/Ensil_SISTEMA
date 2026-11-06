@@ -8,7 +8,7 @@ import { useData, Adjustment } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 
 export function Adjustments() {
-  const { adjustments, stockItems, items, branches, addAdjustment, can } = useData();
+  const { adjustments, stockItems, items, stockLocations, addAdjustment, can } = useData();
   const [isNewAdjustmentOpen, setIsNewAdjustmentOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedAdjustment, setSelectedAdjustment] = useState<Adjustment | null>(null);
@@ -37,7 +37,7 @@ export function Adjustments() {
     if (!stock) return;
 
     const item = items.find(i => i.id === stock.itemId);
-    const branch = branches.find(b => b.id === stock.branchId);
+    const branch = stockLocations.find(b => b.id === stock.branchId);
 
     // El signo lo define el tipo de operación; en Regularización administrativa se respeta el signo ingresado.
     const signedQty = type === 'Ajuste Positivo' || type === 'Devolución'
@@ -146,7 +146,7 @@ export function Adjustments() {
                 onChange={(e) => setFilterBranch(e.target.value)}
               >
                 <option value="">Todas las sedes</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.name}>{b.name}</option>
                 ))}
               </select>
@@ -296,7 +296,7 @@ export function Adjustments() {
                     <option value="">Seleccionar artículo y sede...</option>
                     {stockItems.map(s => {
                       const item = items.find(i => i.id === s.itemId);
-                      const branch = branches.find(b => b.id === s.branchId);
+                      const branch = stockLocations.find(b => b.id === s.branchId);
                       return (
                         <option key={s.id} value={s.id}>
                           {item?.name} - {branch?.name} (Saldo: {s.stock})

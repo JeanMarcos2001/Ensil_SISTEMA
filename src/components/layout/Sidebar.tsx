@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ChevronRight, ChevronDown, Home, Briefcase, Package, Brain, Users, Settings2, Building2, FileBarChart, ShieldCheck, HelpCircle, LogOut, Plus, X, Mail } from 'lucide-react';
 import { MODULE_DATA, getAllItemsForModule } from '../../config/modules';
+import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
 import { menuVisible } from '../../utils/guards';
 import { hasSettingsAccess } from '../../config/settingsSections';
@@ -50,7 +51,8 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onItemSelect, onOpenSettings }: SidebarProps) {
   const navigate = useNavigate();
-  const { setIsEnrollmentWizardOpen, lockSession, can } = useData();
+  const { setIsEnrollmentWizardOpen, can } = useData();
+  const { signOut } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedSections, setExpandedSections] = useState<string[]>([activeModule]);
 
@@ -277,15 +279,15 @@ export function Sidebar({ isOpen, activeModule, activeItem, onOpenSidebar, onIte
           </div>
         </button>
         <button
-          onClick={lockSession}
+          onClick={() => void signOut()}
           className={`flex items-center w-full py-[3px] px-2 rounded-xl text-danger-text hover:bg-danger-tint transition-colors relative overflow-hidden`}
-          title="Bloquea la sesión: para seguir hay que entrar con el PIN de una cuenta"
+          title="Cierra la sesión: para seguir hay que ingresar de nuevo con correo y contraseña"
         >
           <div className="flex items-center justify-center w-8 h-8 shrink-0">
             <LogOut size={20} />
           </div>
           <div className={`flex items-center flex-1 transition-all duration-300 whitespace-nowrap ${isOpen ? 'opacity-100 ml-2' : 'opacity-0 w-0 ml-0'}`}>
-            <span className="text-sm font-medium">Bloquear sesión</span>
+            <span className="text-sm font-medium">Cerrar sesión</span>
           </div>
         </button>
       </div>

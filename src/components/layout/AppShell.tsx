@@ -13,6 +13,7 @@ import { Verification } from '../../pages/Verification';
 import { PettyCash } from '../../pages/PettyCash';
 import { Companies } from '../../pages/organization/Companies';
 import { Branches } from '../../pages/organization/Branches';
+import { Warehouses } from '../../pages/organization/Warehouses';
 import { Users } from '../../pages/organization/Users';
 import { Roles } from '../../pages/organization/Roles';
 import { Permissions } from '../../pages/organization/Permissions';
@@ -57,11 +58,10 @@ import { NewEnrollmentWizard } from '../../pages/NewEnrollmentWizard';
 import { useData } from '../../context/DataContext';
 import { NoAccess } from './NoAccess';
 import { menuVisible } from '../../utils/guards';
-import { UserSwitcher } from './UserSwitcher';
 import { firstPathFor } from '../../utils/session';
 
 export function AppShell() {
-  const { isEnrollmentWizardOpen, setIsEnrollmentWizardOpen, can, currentUser, sessionLocked } = useData();
+  const { isEnrollmentWizardOpen, setIsEnrollmentWizardOpen, can, currentUser } = useData();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -134,6 +134,7 @@ export function AppShell() {
     // Organization Module
     if (activeItem === 'Empresas') return <Companies onNavigate={handleNavigate} />;
     if (activeItem === 'Filiales') return <Branches />;
+    if (activeItem === 'Almacenes') return <Warehouses />;
     if (activeItem === 'Usuarios') return <Users />;
     if (activeItem === 'Roles') return <Roles onNavigate={handleNavigate} />;
     if (activeItem === 'Permisos') return <Permissions />;
@@ -201,9 +202,6 @@ export function AppShell() {
           </main>
         </div>
       </div>
-
-      {/* Sin cuenta activa nadie trabaja: se entra con el PIN de una cuenta */}
-      {sessionLocked && <UserSwitcher locked onClose={() => undefined} />}
 
       {/* Global Enrollment Wizard */}
       <Modal 

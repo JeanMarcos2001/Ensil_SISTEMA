@@ -99,7 +99,7 @@ export function buildLines(period: string, ctx: PayrollContext, adjustments: Pay
     if (calc.ctsDeposit > 0) lineWarnings.push(`CTS a depositar este mes: S/ ${calc.ctsDeposit.toFixed(2)} (no forma parte del neto).`);
     lines.push({
       staffId: member.id, staffName: fullName(member), docType: member.docType, docNumber: member.docNumber, contractId: contract.id, contractType: contract.type,
-      branch: assignment?.branch ?? '', role: assignment?.role ?? '', pensionSystem: contract.pensionSystem, pensionFund: contract.pensionFund,
+      branch: assignment?.branch ?? '', role: contract.position?.trim() ?? '', pensionSystem: contract.pensionSystem, pensionFund: contract.pensionFund,
       grossSalary: contract.grossSalary ?? 0, calc, adjustments: latest.id === contract.id ? own : [], warnings: lineWarnings,
     });
   }

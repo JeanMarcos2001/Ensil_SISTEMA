@@ -133,7 +133,9 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
                 {CONTRACT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <div />
+            <Field label="Cargo" required error={err('position')} hint="El cargo pactado: es el que se ve en Personal y en los reportes.">
+              <input type="text" className={cls('position')} value={form.position} maxLength={60} onChange={e => set({ position: e.target.value })} placeholder="Ej: Psicólogo Senior" />
+            </Field>
             <Field label="Fecha de inicio" required error={err('startDate')}>
               <DateInput value={form.startDate} onChange={e => set({ startDate: e.target.value })} />
             </Field>

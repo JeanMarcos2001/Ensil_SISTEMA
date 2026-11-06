@@ -362,13 +362,17 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 
 ## 14. Logística: un almacén central, rutas obligatorias y stock con reglas ✅
 
-**La regla del negocio:** hay **un solo almacén central** (Los Olivos, que además es una sede con alumnos) y todo lo que se mueve entre sedes pasa por él. Se define **por dato** (`Branch.isWarehouse`, casilla en Organización → Filiales), no por un nombre ni un código fijo. Antes los datos de ejemplo trataban a Piura como almacén y el envío salía de «Piura» si no había sede elegida.
+**La regla del negocio:** hay **un solo almacén central, aparte de las sedes** (entidad `Warehouse`, ids `ALM-NNN`, Organización → Almacenes), y todo lo que se mueve entre sedes pasa por él. **Los Olivos es una sede como las demás**, con su propio stock de venta: antes el almacén era esa filial marcada con una casilla y vendía del mismo stock con el que abastecía (se mezclaban). Una **ubicación de stock** es el almacén o una sede (`stockLocations`); el stock, el kardex, los envíos y las transferencias usan su id.
+
+**El almacén no vende** (`locationSaleError`): recibe compras, despacha a las sedes y recibe devoluciones. Se inactiva solo si está vacío, y solo puede haber un almacén central activo.
+
+**Ver no es mover (2026-11-05):** quien alcanza todas las sedes (`org-alcance:all_branches`, la sede «Todas» o un rol con esa función) **ve** el stock, el kardex, los envíos y las transferencias del almacén —necesita el total para aprobar reposiciones y para los reportes—, pero **solo lo mueve** quien tiene el almacén asignado en su cuenta (`User.warehouses`) o es Superusuario: despachar y cancelar envíos, ingresar compras, ajustar, empaquetar y recibir devoluciones (`warehouseOperationError`). Así quien aprueba o consulta no despacha ni ajusta. Los avisos y las contrapartes del almacén («¿quién recibe esta devolución?») se calculan con las cuentas asignadas a él, no con las de alcance total. El límite de cuentas de un rol cuenta **por sede o por almacén**.
 
 | Operación | Ruta permitida | Reglas (`utils/logisticsRoutes.ts`) |
 |---|---|---|
 | **Envío** | Sale siempre del almacén central hacia una filial activa | No puede salir de una filial, ni ir al propio almacén; sin almacén definido no hay envíos |
 | **Transferencia** | Siempre con el almacén en un extremo: reposición (almacén → filial) o devolución (filial → almacén) | **Entre dos filiales no hay transferencia directa**: lo que sobra se devuelve al almacén y desde allí se envía. En la pantalla, al elegir una filial en un extremo, el otro extremo pasa a ser el almacén |
-| **Almacén central** | Uno solo | No puede haber dos marcados; no se puede inactivar ni eliminar mientras siga siendo el almacén |
+| **Almacén central** | Uno solo activo, aparte de las sedes | No puede haber dos activos; no vende; no se inactiva con mercadería dentro |
 
 - **Envío vs. transferencia:** el envío lo prepara el almacén (cajas, courier, seguimiento); la transferencia es una *solicitud con aprobación* (pedir reposición o devolver). Las dos terminan en una recepción.
 - **El stock solo lo mueven acciones con función:** `updateStock` **ya no existe para las pantallas**. Lo que antes la llamaba directo ahora son acciones con validación:
@@ -429,6 +433,8 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 
 ## 19. Roles y cuentas se guardan en el navegador (provisional) ✅
 
+> **Superado el 2026-11-05:** los roles y las cuentas ya viven en la base de datos (ver «Roles y permisos en la base de datos» y «Cuentas con invitación por correo» al final). Esta sección queda como historia.
+
 **Qué es:** mientras no haya base de datos, los **roles, los permisos de cada rol y las cuentas** se guardan en el navegador (`localStorage`, clave `ensil.access`) y se recuperan al recargar. Es un puente hasta el paso 10: vive solo en ese navegador, no lo ven otras personas ni otros equipos y no protege nada (los permisos siguen ocultando botones). **Todo lo demás** (matrículas, pagos, stock, planilla…) sigue en memoria y vuelve a los datos de ejemplo al recargar.
 
 - **Lo guardado no es confiable** (`utils/accessStore.ts`): se valida campo a campo al arrancar. Texto que no es JSON, de otra versión o con otra forma → se usan los datos de ejemplo y se avisa.
@@ -443,6 +449,8 @@ Las tasas (AFP/ONP, UIT, RMV, escala) son **referenciales** y están en `utils/p
 ---
 
 ## 20. Sesión: cuenta activa, cambio rápido con PIN y la sede que se ve ✅
+
+> **Superado el 2026-11-05:** el cambio rápido con PIN, el bloqueo de la sesión y las cuentas de ejemplo con PIN 1234 se retiraron (con ingreso real por contraseña eran una puerta para pasar a «Superadmin»). Siguen vigentes la sede que se ve y las protecciones de las cuentas.
 
 **Qué es:** el sistema ya no trabaja siempre como «Superadmin»: trabaja con **una cuenta de Usuarios** (`currentUser` sale de ella) y todo lo que se hace queda a su nombre. Cambiar de persona es rápido (una laptop por sede): menú de la cuenta (arriba a la derecha) → **Cambiar de usuario** → elegir la cuenta → PIN. **No es seguridad real** (llega con el servidor, paso 10): el PIN se guarda como una marca irreversible, pero un PIN de 4 a 6 dígitos se adivina sin esfuerzo si alguien lee esa marca.
 
@@ -539,3 +547,78 @@ Verificación antes de la primera asesoría: `check-first-session.ts` (42 casos:
 
 `tsc` sin errores · `vite build` · los 15 scripts `check-*` pasan (`check-business`: 97; `check-first-session`: 42; `check-psychopedagogy`: 84; `check-payroll`: 64) · en el navegador: ficha de matrícula y su vista previa, cambio de programa (solicitar → aprobar → plan y programa actualizados), caída y reactivación, vista previa del traslado, arqueo y cierre de caja (con diferencia, bloqueo de reversa en día cerrado, reapertura y su registro), reversa de un pago con nota de crédito `BC01-000001`, política de cobranza con mora del 2 %, cobro de mora (USD 122.40 sobre una cuota de USD 200 con 921 días de atraso), recordatorios, reporte de cartera y renovación (el asistente abre con los datos y la observación).
 No se probó en el navegador la generación del **contrato** (los datos de ejemplo no tienen dirección del titular, y el sistema lo avisa); sí está cubierta por el script de reglas.
+
+## Inicio de sesión real (2026-11-05)
+
+Se ingresa con **correo y contraseña** (Supabase Auth); la contraseña vive solo allí, cifrada. Tener usuario en Auth no basta: debe existir una fila en `cuentas` (la crea el Superusuario) con la cuenta y su rol **activos**. Mientras los roles sigan en el navegador, **solo entra el Superusuario** y trabaja como la cuenta de ejemplo de Superusuario; las demás cuentas verán un aviso que lo explica. El mensaje de error nunca distingue «correo inexistente» de «contraseña incorrecta». El **PIN** sigue siendo solo el cambio rápido de usuario dentro de una sesión ya abierta. «Cerrar sesión» (menú de usuario) reinicia los datos de ejemplo igual que recargar. Reglas en `utils/loginAccess.ts`, verificadas por `scripts/check-login.ts`.
+
+## Empresas y Filiales en la base de datos (2026-11-05)
+
+Organización → **Empresas** y **Filiales** leen y guardan en la base (tablas `empresas` y `sedes`); las pantallas muestran solo lo guardado allí, no los datos de ejemplo. El resto del sistema (matrícula, stock, personal…) sigue con sedes y empresas de ejemplo hasta que se pasen.
+
+- **Empresa:** RUC de 11 dígitos y único; razón social obligatoria; el id `EMP-NNN` lo asigna el sistema (si dos personas crean a la vez, se reintenta con el siguiente). No se inactiva ni se elimina una empresa con filiales vinculadas.
+- **Filial:** el **código** `FIL-NNN` (FIL-001, FIL-002…) lo **asigna el sistema**, igual que `EMP-`, `ALM-` y `ROL-`: nadie lo escribe, no cambia y, si dos personas crean a la vez, se reintenta con el siguiente. La empresa tampoco cambia después de crearla. El nombre no se repite (aunque cambie la mayúscula). Dirección, departamento, provincia y distrito son obligatorios; el correo, si se escribe, debe ser válido. La filial guarda el id de su empresa; el nombre de la empresa se calcula al mostrar. No existe un enlace con la web pública (`id_web` se eliminó en la migración 0002: nada dependía de él).
+- **Lo que ya se usa no se borra:** las claves son RESTRICT; eliminar solo prospera si nada depende del registro y, si no, se propone inactivar.
+- **Responsable de sede:** se asigna cuando el módulo Personal pase a la base (hoy no se elige personal de ejemplo para una sede real).
+- **Motivo del cambio:** la pantalla de Filiales lo pide al editar, pero todavía no se guarda: llega con la bitácora.
+- Reglas en `utils/orgDirectory.ts`, operaciones en `services/orgDirectory.ts`, verificadas por `scripts/check-org-directory.ts` (que además compara los patrones con la migración).
+
+## Almacenes en la base de datos (2026-11-05)
+
+Organización → **Almacenes** lee y guarda en la tabla `almacenes`; muestra solo lo guardado allí. El stock, los envíos y las transferencias siguen con el almacén de ejemplo hasta que pasen a la base, por eso la pantalla ya no muestra «unidades en stock».
+
+- **Código `ALM-NNN`** asignado por el sistema (se reintenta si dos personas crean a la vez). Nombre obligatorio (hasta 80 caracteres) y sin repetir (aunque cambie la mayúscula).
+- **Solo un almacén central activo:** lo exige el sistema y también la base (índice único parcial `almacenes_un_activo`). Para cambiar de almacén central se inactiva el actual y luego se activa el otro.
+- **Empresa opcional;** si se elige debe existir y estar activa (un almacén que ya la tenía puede conservarla). Una empresa con filiales **o almacenes** vinculados no se inactiva ni se elimina.
+- **Un almacén con mercadería no se inactiva** (`warehouseInactivationError`): la regla ya está en la operación y recibirá el stock real cuando este pase a la base.
+- **Permisos:** crear y editar dependen de `org-almacenes:create` / `org-almacenes:edit` también en la base (migración 0003); verlos queda abierto a toda cuenta vigente porque la logística los necesita. Los almacenes no se eliminan.
+
+## Roles y permisos en la base de datos (2026-11-05)
+
+Los **roles y las funciones de cada rol** viven en las tablas `roles` y `rol_funciones`; el sistema los lee **antes de arrancar** (si la base no responde ofrece «Reintentar») y el navegador **ya no los guarda**: solo guarda las cuentas, de forma provisional. Lo que se cambie en Organización → Roles y Permisos lo ven todas las personas con acceso.
+
+- **Ids `ROL-NNN` automáticos** (se reintenta si dos personas crean a la vez). El rol del sistema (Superusuario, `ROL-001`) lo crea la migración 0001; **no guarda funciones** en la base (puede todo) y en el sistema se le muestran todas. Un rol creado desde el sistema nunca es del sistema.
+- **Defensa en dos capas:** el sistema impide tocar el rol del sistema (`roleLockedError`) y la base también (la política lo oculta y un disparador lo impide). Un rol con cuentas no se elimina (clave RESTRICT); se inactiva.
+- **Crear un rol con funciones** guarda primero el rol y luego sus funciones; si las funciones fallan, el rol se borra: nunca queda a medias.
+- **Cambiar las funciones de un rol** primero QUITA las que sobran y después AGREGA las nuevas: si algo falla a mitad, el rol queda con **menos** permisos de los pedidos, nunca con más; el sistema vuelve a leer la base para mostrar lo que quedó y avisa.
+- **Las combinaciones a separar aceptadas** (con su motivo, quién y cuándo) se guardan con el rol (`riesgos_aceptados`).
+- **Lo que se lee de la base se trata como no confiable:** una función que ya no existe en el código o que es reservada no se carga; un motivo mal formado se ignora.
+- **Roles de partida:** `supabase/seed/roles_de_partida.sql` (generado desde las plantillas) carga Administrador de sede, Psicopedagogía, Almacén central, Administración general y Contabilidad como `ROL-002` a `ROL-006`. Se ejecuta una sola vez a mano, es repetible y omite un rol que ya exista (mismo id o mismo nombre). **Sin ese script, las cuentas de ejemplo con esos roles no aparecen** (solo la del Superusuario).
+- **Cuentas ↔ roles:** las cuentas siguen enlazadas al rol por nombre; renombrar un rol arrastra a sus cuentas. Hasta que las cuentas pasen a la base (con invitación por correo), solo ingresa el Superusuario.
+
+## Cuentas con invitación por correo (2026-11-05)
+
+Las **cuentas** viven en las tablas `cuentas`, `cuenta_sedes` y `cuenta_almacenes`. El navegador **solo las lee** (la política RLS decide cuáles ve cada quien); **solo las escribe la Edge Function `usuarios`**, que antes de cada cambio identifica a quien llama por su sesión y vuelve a aplicar las reglas (la pantalla las aplica primero para avisar, pero no es lo que protege).
+
+- **Crear:** el Superusuario (o quien tenga «Crear usuario») elige nombre, correo, rol y sede o almacén en Organización → Usuarios. Se manda una **invitación por correo** (Resend, `no-responder@envios.ensilperu.com`) y la persona abre el enlace y **fija su contraseña** (10 caracteres o más, con letras y números); nadie escribe la contraseña de otra persona. Si algo falla después de crear al usuario de acceso, se borra: nunca queda un usuario sin cuenta.
+- **Reglas del servidor:** el rol debe existir y estar activo, y el del sistema (Superusuario) solo lo da un Superusuario; las sedes y almacenes deben existir, estar activos y ser alcanzables por quien las asigna (salvo que alcance todas las sedes: «Todas» exige ese alcance); se respeta el límite de cuentas del rol por sede o almacén; el correo no se repite; una cuenta necesita al menos una sede o un almacén (el Superusuario no).
+- **Editar:** cada campo que cambia pide su función (corregir datos y activar: «Editar»; desactivar: «Desactivar»; rol: «Asignar rol»; sedes y almacenes: «Asignar sedes»). Nadie cambia el rol ni el estado de su propia cuenta; solo un Superusuario modifica una cuenta de Superusuario; nunca se queda el sistema sin un Superusuario activo (también lo impide la base). **El correo de una cuenta no se cambia:** se desactiva y se crea otra.
+- **Desactivar:** primero el estado en la base (el acceso a los datos se corta al instante) y después el bloqueo del usuario de acceso; con constancia «Desactivado por … el …» (fecha de Lima). **Activar:** primero se quita el bloqueo y después el estado, así un fallo deja la cuenta inactiva, nunca a medias.
+- **Reenviar acceso** (función «Reenviar acceso»): vuelve a mandar la invitación si la persona nunca entró, o el enlace para fijar una contraseña nueva si ya entró. En el ingreso hay además «¿Olvidó su contraseña?», que responde igual exista o no el correo.
+- **Último acceso:** se anota al ingresar; «Nunca» = aún no entró (invitación pendiente).
+- **Cuentas ↔ Personal:** desde la migración 0004 las cuentas vuelven a nacer de la ficha (ver «Personal y asignaciones en la base» más abajo). Las sedes de una cuenta son las guardadas en la base (Organización → Filiales); el resto del sistema sigue usando las sedes de ejemplo por nombre.
+- **Retirado:** las 8 cuentas de ejemplo, el PIN, el bloqueo de sesión, el cambio rápido de usuario y el guardado de cuentas en el navegador. «Cerrar sesión» está en el menú de la cuenta y en la barra lateral. El cambio rápido con PIN volverá verificado en el servidor.
+- Reglas del servidor en `supabase/functions/usuarios/reglas.ts` (verificadas por `scripts/check-cuentas-fn.ts`, 70 casos); lectura de filas y armado de peticiones en `utils/accounts.ts` (`scripts/check-accounts.ts`); contraseña y enlaces del correo en `utils/loginAccess.ts` (`scripts/check-login.ts`).
+
+## Personal y asignaciones en la base; la cuenta nace de una persona (2026-11-06)
+
+**La inconsistencia que había:** el formulario de «Nuevo usuario» pedía otra vez nombre, documento y teléfono (ya están en la ficha de Personal), dejaba elegir sedes y almacén a mano (distintos de los lugares donde la persona trabaja de verdad) y aceptaba combinaciones sin sentido (un rol de almacén sin trabajar en el almacén, o una almacenera con el rol de una sede). **La solución:** una sola fuente. La persona vive en Personal, el lugar donde trabaja en sus asignaciones, y la cuenta solo agrega correo de ingreso y rol.
+
+- **Personal y Asignaciones** viven en las tablas `personal` y `asignaciones` (Personas → Personal / Asignaciones). La ficha **no se borra**: se inactiva con fecha y motivo (`inactivar_personal`: ficha, asignaciones cerradas y cuenta desactivada, todo o nada). La asignación **no se borra**: se cierra con fecha y motivo. Contratos, planilla, agenda y matrículas siguen con los datos de ejemplo hasta que se pasen.
+- **El lugar de una asignación es UNA sede o el almacén central** (nunca los dos). En el almacén solo se trabaja con el rol del sistema «Almacén» o «Sin acceso» (p. ej. limpieza); «Almacén» no existe en una sede. No se repite lugar + área mientras la anterior siga activa y cada persona tiene una sola asignación principal (la primera lo es; si se cierra, pasa la más antigua).
+- **Una persona, una cuenta.** Solo un Superusuario crea una cuenta técnica (sin persona), y solo con un rol del sistema. Puede tener cuenta quien está **activo**, sin cuenta previa y con al menos una asignación activa cuyo rol del sistema no sea «Sin acceso».
+- **Lo que sale de Personal no se escribe en Usuarios:** nombre, documento y teléfono (de la ficha) y **sedes y almacén (de las asignaciones activas con acceso)**. Lo mantienen disparadores de la base, así que no depende de que alguien se acuerde. Si se edita la ficha o se cierra una asignación, la cuenta se actualiza sola.
+- **Coherencia rol ↔ lugar.** El rol dice qué puede hacer y el lugar dónde. Un rol con alguna función que mueve el almacén (despachar, ingresar compras, ajustar stock, empacar, despachar transferencias) exige trabajar en el almacén; quien trabaja en el almacén necesita un rol que lo mueva. Es regla **dura** al crear la cuenta, cambiar su rol o reactivarla (el formulario solo ofrece los roles compatibles); al editar o cerrar asignaciones solo se **avisa** («corrija su rol en Usuarios») y la lista de Usuarios marca las cuentas que quedaron desencontradas. El Superusuario no tiene restricción. Quien trabaja en una sede **y** en el almacén necesita un rol que mueva el almacén.
+- **Correo de ingreso:** debe ser institucional. Si es igual al correo personal de la ficha, **se bloquea** (la base también); si no es `@ensilperu.com`, solo **se avisa** (puede haber un dominio nuevo o un asesor externo). El correo de una cuenta no se cambia.
+- **Baja y reactivación:** inactivar a la persona desactiva su cuenta sola con constancia; reactivarla **no** reactiva la cuenta (se decide en Usuarios; se rechaza mientras la ficha esté inactiva o sin asignación con acceso). La cuenta de la persona dada de baja conserva su historial.
+- **Qué pide cada función:** «Crear usuario» necesita además ver Personal y ver Asignaciones (de ahí sale quién puede recibir cuenta). La función «Eliminar ficha de personal» se retiró: la ficha no se borra.
+- Reglas del servidor en `supabase/functions/usuarios/reglas.ts` (`check-cuentas-fn.ts`); reglas de la pantalla en `utils/accountRules.ts` (importa las del servidor), `utils/assignments.ts` y `utils/staffDb.ts`; operaciones en `services/staffDirectory.ts` (`check-staff-db.ts`, con repositorio en memoria); lo que hace la base se probó contra su esquema real en Postgres en memoria.
+
+## El área depende del lugar y el cargo sale del contrato (2026-11-06)
+
+**La inconsistencia que había:** al elegir el almacén central como lugar de trabajo, el área seguía ofreciendo Administración, Psicopedagogía y Ventas, y la asignación pedía escribir un «Cargo» que en realidad es un dato del contrato.
+
+- **Área según el lugar.** El almacén central es un lugar de logística: una asignación al almacén **solo puede ser del área «Logística»** (al elegir el almacén el área queda elegida sola). Una sede admite todas las áreas, incluida Logística (cada sede tiene su propio stock de venta). Regla en `utils/assignments.ts` (`areasForPlace`, `placeAreaError`) y también en la base (migración 0005, restricción `asignaciones_almacen_solo_logistica`). Va de la mano con la regla del rol del sistema: en el almacén solo «Almacén» o «Sin acceso».
+- **El cargo es del contrato, no de la asignación.** El cargo es lo pactado con la persona (consta en su contrato y no cambia según dónde trabaje), así que se escribe **una sola vez, en el contrato** (campo obligatorio «Cargo», de 3 a 60 caracteres; al editar el contrato queda en la constancia de cambios y al renovarlo se conserva). La asignación ya no tiene cargo: solo lugar, área, rol del sistema y fechas. La columna `cargo` de `asignaciones` se quita (lo derivable no se guarda).
+- **Dónde se ve el cargo:** Personal (lista, filtro, exportación y ficha), Contratos, el reporte de Personal, las boletas de la planilla. Sale del contrato vigente o, si no hay, del último vencido (`positionOf` / `currentContractOf` en `utils/payroll.ts`). **Sin contrato no hay cargo** y se muestra «Sin contrato».
+- **Consecuencia mientras los contratos no estén en la base:** las personas que se crean ahora en Personal (base de datos) no tienen contrato (Contratos todavía usa los datos de ejemplo), así que su cargo aparece como «Sin contrato» hasta que Contratos pase a la base.

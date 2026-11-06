@@ -62,6 +62,8 @@ export function estimateNet(
 export interface ContractForm {
   staffId: string;
   type: string;
+  /** Cargo o puesto pactado: de aquí sale el cargo que se ve en Personal y en los reportes. */
+  position: string;
   startDate: string;
   endDate: string;
   grossSalary: string;
@@ -77,9 +79,12 @@ export interface ContractForm {
 export type ContractErrors = Partial<Record<keyof ContractForm, string>>;
 
 export const emptyContractForm = (): ContractForm => ({
-  staffId: '', type: '', startDate: '', endDate: '', grossSalary: '', pensionSystem: '', pensionFund: '',
+  staffId: '', type: '', position: '', startDate: '', endDate: '', grossSalary: '', pensionSystem: '', pensionFund: '',
   vacationStart: '', vacationEnd: '', observations: '', suspension4ta: false,
 });
+
+export const POSITION_MIN = 3;
+export const POSITION_MAX = 60;
 
 /** El contrato de plazo fijo o la locación necesitan fecha de fin; el indeterminado no la tiene. */
 export const needsEndDate = (type: string) => type === 'Plazo Fijo' || type === 'Locación de servicios';
@@ -90,10 +95,26 @@ export const hasVacations = (type: string) => type !== 'Locación de servicios';
 export const contractStatus = (c: Pick<Contract, 'status' | 'endDate'>, today: string): string =>
   c.status === 'Vigente' && c.endDate && c.endDate < today ? 'Vencido' : c.status;
 
+/**
+ * El contrato de una persona que cuenta hoy: el vigente o, si no hay, el último vencido sin cerrar. Es el que da su cargo y el que se
+ * vigila (alertas de vencimiento). Sin contrato devuelve `undefined`.
+ */
+export function currentContractOf(staffId: string, contracts: Contract[], today: string): Contract | undefined {
+  const own = contracts.filter(c => c.staffId === staffId);
+  return own.find(c => contractStatus(c, today) === 'Vigente')
+    ?? own.filter(c => contractStatus(c, today) === 'Vencido').sort((a, b) => (b.endDate ?? '').localeCompare(a.endDate ?? ''))[0];
+}
+
+/** El cargo de una persona sale de su contrato (no de sus asignaciones): sin contrato no tiene cargo definido. */
+export const positionOf = (staffId: string, contracts: Contract[], today: string): string | undefined =>
+  currentContractOf(staffId, contracts, today)?.position?.trim() || undefined;
+
 export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string, agenda?: AgendaContext): ContractErrors {
   const e: ContractErrors = {};
   if (!f.staffId || !staff.some(s => s.id === f.staffId)) e.staffId = 'Seleccione al trabajador.';
   if (!(CONTRACT_TYPES as readonly string[]).includes(f.type)) e.type = 'Seleccione el tipo de contrato.';
+  if (f.position.trim().length < POSITION_MIN) e.position = 'Indique el cargo (ej.: Psicólogo Senior).';
+  else if (f.position.trim().length > POSITION_MAX) e.position = `El cargo es demasiado largo (máximo ${POSITION_MAX} caracteres).`;
   if (!f.startDate) e.startDate = 'La fecha de inicio es obligatoria.';
   if (needsEndDate(f.type)) {
     if (!f.endDate) e.endDate = 'La fecha de fin es obligatoria para este tipo de contrato.';
@@ -136,6 +157,7 @@ export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } 
   return {
     staffId: f.staffId,
     type: f.type,
+    position: f.position.trim(),
     startDate: f.startDate,
     endDate: needsEndDate(f.type) ? f.endDate : undefined,
     status: 'Vigente',
@@ -157,7 +179,7 @@ export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } 
 // ---------------------------------------------------------------- Edición de un contrato vigente
 
 export const contractToForm = (c: Contract): ContractForm => ({
-  staffId: c.staffId, type: c.type, startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
+  staffId: c.staffId, type: c.type, position: c.position ?? '', startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
   pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '', vacationStart: c.vacationStart ?? '', vacationEnd: c.vacationEnd ?? '',
   observations: c.observations ?? '', suspension4ta: !!c.suspension4ta,
 });
@@ -175,6 +197,7 @@ const txt = (v: string | undefined) => (v && v.trim() ? v : '—');
 export function diffContract(before: Contract, after: Partial<Omit<Contract, 'id'>>): ContractRevisionChange[] {
   const rows: [string, string, string][] = [
     ['Tipo de contrato', txt(before.type), txt(after.type)],
+    ['Cargo', txt(before.position), txt(after.position)],
     ['Fecha de inicio', txt(before.startDate), txt(after.startDate)],
     ['Fecha de fin', txt(before.endDate), txt(after.endDate)],
     ['Sueldo bruto', fmtMoney(before.grossSalary), fmtMoney(after.grossSalary)],

@@ -1,12 +1,12 @@
 /**
- * Verificación de las reglas de logística y recetas: un solo almacén central y rutas obligatorias (envíos y transferencias),
+ * Verificación de las reglas de logística y recetas: un solo almacén central (aparte de las sedes) y rutas obligatorias (envíos y transferencias),
  * recetas sin solapes (copias inactivas), movimientos de stock de todo o nada, ingresos de stock y ventas en caja.
  * Ejecutar: npx tsx scripts/check-logistics.ts
  */
 import type { Item, Recipe, StockItem } from '../src/context/DataContext';
-import { seedBranches } from '../src/data/seedCatalog';
+import { seedBranches, seedWarehouses } from '../src/data/seedCatalog';
 import { itemSaleError, stockEntryError, stockMovesError } from '../src/utils/inventory';
-import { centralWarehouse, shipmentRouteError, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../src/utils/logisticsRoutes';
+import { centralWarehouse, isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../src/utils/logisticsRoutes';
 import { duplicateRecipe, overlappingRecipe, recipeStatusError, recipesOverlap, validateRecipe } from '../src/utils/recipes';
 
 let failed = 0;
@@ -16,29 +16,42 @@ const check = (name: string, ok: boolean, detail = '') => {
 };
 
 // ------------------------------------------------------------------------------------------------------------------ Almacén central y rutas
-const B = (id: string, name: string, extra: { isWarehouse?: boolean; status?: 'Activo' | 'Inactivo' } = {}) => ({ id, name, status: extra.status ?? ('Activo' as const), isWarehouse: extra.isWarehouse });
-const branches = [B('LOL', 'Los Olivos', { isWarehouse: true }), B('PIU', 'Piura'), B('CHI', 'Chiclayo'), B('CAJ', 'Cajamarca', { status: 'Inactivo' })];
+type St = 'Activo' | 'Inactivo';
+const W = (id: string, name: string, status: St = 'Activo') => ({ id, name, status });
+const B = (id: string, name: string, status: St = 'Activo') => ({ id, name, status });
+const warehouses = [W('ALM-001', 'Almacén central')];
+const branches = [B('LOL', 'Los Olivos'), B('PIU', 'Piura'), B('CHI', 'Chiclayo'), B('CAJ', 'Cajamarca', 'Inactivo')];
+const locs = stockLocations(branches, warehouses);
+const noWarehouse = stockLocations(branches, []);
 
-check('Los datos de ejemplo tienen un solo almacén central y es Los Olivos', centralWarehouse(seedBranches())?.id === 'FIL-LOL' && warehouseDefinitionError(seedBranches()) === null);
-check('El almacén central se define por dato, no por nombre', centralWarehouse(branches)?.id === 'LOL' && centralWarehouse(branches.map(b => ({ ...b, isWarehouse: false }))) === undefined);
-check('Un almacén inactivo no cuenta como almacén central', centralWarehouse([B('LOL', 'Los Olivos', { isWarehouse: true, status: 'Inactivo' }), B('PIU', 'Piura')]) === undefined);
-check('No puede haber dos almacenes centrales', /Solo puede haber un almacén central/.test(warehouseDefinitionError([...branches, B('PIU2', 'Piura 2', { isWarehouse: true })]) ?? ''));
-check('Uno o ninguno es válido', warehouseDefinitionError(branches) === null && warehouseDefinitionError(branches.map(b => ({ ...b, isWarehouse: false }))) === null);
-check('El almacén central no se puede inactivar', /No se puede inactivar el almacén central/.test(warehouseInactivationError(branches[0], 'Inactivo') ?? '') && warehouseInactivationError(branches[1], 'Inactivo') === null && warehouseInactivationError(branches[0], 'Activo') === null);
+check('Los datos de ejemplo tienen un solo almacén central, aparte de las sedes (Los Olivos es una sede)', centralWarehouse(seedWarehouses())?.id === 'ALM-001' && warehouseDefinitionError(seedWarehouses()) === null && !seedBranches().some(b => b.id === 'ALM-001'));
+check('Una ubicación de stock es el almacén o una sede, con su tipo', locs.length === 5 && locs[0].kind === 'almacén' && locs.slice(1).every(l => l.kind === 'sede'));
+check('El id del almacén se reconoce por su prefijo y nunca choca con una sede', isWarehouseId('ALM-001') && isWarehouseId('ALM-012') && !isWarehouseId('FIL-LOL') && !isWarehouseId('LOL') && !isWarehouseId('ALM-1'));
+check('El almacén central se define por dato, no por nombre', centralWarehouse(warehouses)?.id === 'ALM-001' && centralWarehouse([]) === undefined);
+check('Un almacén inactivo no cuenta como almacén central', centralWarehouse([W('ALM-001', 'Almacén central', 'Inactivo')]) === undefined);
+check('No puede haber dos almacenes centrales activos', /Solo puede haber un almacén central activo/.test(warehouseDefinitionError([...warehouses, W('ALM-002', 'Otro')]) ?? ''));
+check('Uno inactivo y otro activo es válido (un reemplazo); ninguno también', warehouseDefinitionError([W('ALM-001', 'Viejo', 'Inactivo'), W('ALM-002', 'Nuevo')]) === null && warehouseDefinitionError([]) === null);
+const stk = (branchId: string, stock: number) => ({ branchId, stock });
+check('Un almacén con mercadería no se inactiva (quedaría stock que nadie mueve)', /todavía tiene 12 unidades/.test(warehouseInactivationError(warehouses[0], 'Inactivo', [stk('ALM-001', 10), stk('ALM-001', 2), stk('PIU', 99)]) ?? ''));
+check('Vacío sí se inactiva; y el stock de una sede no cuenta', warehouseInactivationError(warehouses[0], 'Inactivo', [stk('PIU', 99)]) === null && warehouseInactivationError(warehouses[0], 'Inactivo', [stk('ALM-001', 0)]) === null);
+check('Reactivarlo o dejarlo igual no pide nada', warehouseInactivationError(warehouses[0], 'Activo', [stk('ALM-001', 5)]) === null && warehouseInactivationError(W('ALM-001', 'x', 'Inactivo'), 'Inactivo', [stk('ALM-001', 5)]) === null);
+check('El almacén no vende: la venta es en una sede', /no vende/.test(locationSaleError('ALM-001') ?? '') && locationSaleError('FIL-PIU') === null && locationSaleError('LOL') === null);
 
-check('Un envío sale del almacén central hacia una filial', shipmentRouteError('LOL', 'PIU', branches) === null);
-check('Un envío no puede salir de una filial', /salen del almacén central \(Los Olivos\)/.test(shipmentRouteError('PIU', 'CHI', branches) ?? ''));
-check('Un envío no puede ir al propio almacén', /no el propio almacén/.test(shipmentRouteError('LOL', 'LOL', branches) ?? ''));
-check('Un envío exige destino, que exista y esté activo', shipmentRouteError('LOL', '', branches) === 'Indique la filial de destino.' && /no existe/.test(shipmentRouteError('LOL', 'XXX', branches) ?? '') && /inactiva/.test(shipmentRouteError('LOL', 'CAJ', branches) ?? ''));
-check('Sin almacén definido no hay envíos y se dice cómo arreglarlo', /Organización → Filiales/.test(shipmentRouteError('LOL', 'PIU', branches.map(b => ({ ...b, isWarehouse: false }))) ?? ''));
+check('Un envío sale del almacén central hacia una filial', shipmentRouteError('ALM-001', 'PIU', locs) === null);
+check('Los Olivos recibe envíos como cualquier otra sede (ya no es el almacén)', shipmentRouteError('ALM-001', 'LOL', locs) === null);
+check('Un envío no puede salir de una filial', /salen del almacén central \(Almacén central\)/.test(shipmentRouteError('PIU', 'CHI', locs) ?? ''));
+check('Un envío no puede ir al propio almacén', /no el propio almacén/.test(shipmentRouteError('ALM-001', 'ALM-001', locs) ?? ''));
+check('Un envío exige destino, que exista y esté activo', shipmentRouteError('ALM-001', '', locs) === 'Indique la filial de destino.' && /no existe/.test(shipmentRouteError('ALM-001', 'XXX', locs) ?? '') && /inactiva/.test(shipmentRouteError('ALM-001', 'CAJ', locs) ?? ''));
+check('Sin almacén definido no hay envíos y se dice cómo arreglarlo', /Organización → Almacenes/.test(shipmentRouteError('ALM-001', 'PIU', noWarehouse) ?? ''));
 
-check('Una transferencia puede ser del almacén a una filial (reposición)', transferRouteError('LOL', 'PIU', branches) === null);
-check('…o de una filial al almacén (devolución)', transferRouteError('CHI', 'LOL', branches) === null);
-check('Entre dos filiales no hay transferencia: todo pasa por el almacén', /Entre filiales todo pasa por el almacén central \(Los Olivos\)/.test(transferRouteError('PIU', 'CHI', branches) ?? ''));
-check('El origen y el destino deben ser distintos', transferRouteError('PIU', 'PIU', branches) === 'El origen y el destino deben ser distintos.');
-check('Una transferencia exige las dos sedes', transferRouteError('', 'PIU', branches) !== null && transferRouteError('LOL', '', branches) !== null);
-check('La sede de una transferencia debe estar activa', /inactiva/.test(transferRouteError('LOL', 'CAJ', branches) ?? '') && /inactiva/.test(transferRouteError('CAJ', 'LOL', branches) ?? ''));
-check('Sin almacén definido tampoco hay transferencias', /Organización → Filiales/.test(transferRouteError('PIU', 'CHI', branches.map(b => ({ ...b, isWarehouse: false }))) ?? ''));
+check('Una transferencia puede ser del almacén a una filial (reposición)', transferRouteError('ALM-001', 'PIU', locs) === null);
+check('…o de una filial al almacén (devolución)', transferRouteError('CHI', 'ALM-001', locs) === null);
+check('Los Olivos devuelve al almacén como cualquier otra sede', transferRouteError('LOL', 'ALM-001', locs) === null);
+check('Entre dos filiales no hay transferencia: todo pasa por el almacén', /Entre filiales todo pasa por el almacén central \(Almacén central\)/.test(transferRouteError('PIU', 'CHI', locs) ?? '') && /Entre filiales/.test(transferRouteError('LOL', 'PIU', locs) ?? ''));
+check('El origen y el destino deben ser distintos', transferRouteError('PIU', 'PIU', locs) === 'El origen y el destino deben ser distintos.');
+check('Una transferencia exige las dos sedes', transferRouteError('', 'PIU', locs) !== null && transferRouteError('ALM-001', '', locs) !== null);
+check('La sede de una transferencia debe estar activa', /inactiva/.test(transferRouteError('ALM-001', 'CAJ', locs) ?? '') && /inactiva/.test(transferRouteError('CAJ', 'ALM-001', locs) ?? ''));
+check('Sin almacén definido tampoco hay transferencias', /Organización → Almacenes/.test(transferRouteError('PIU', 'CHI', noWarehouse) ?? ''));
 
 // ------------------------------------------------------------------------------------------------------------------ Recetas
 const item = (id: string, extra: Partial<Item> = {}): Item => ({ id, name: `Artículo ${id}`, status: 'Activo', type: 'Libro', description: '', unit: 'u', cost: 1, isSold: false, isDeliveredOnEnrollment: true, ...extra } as Item);

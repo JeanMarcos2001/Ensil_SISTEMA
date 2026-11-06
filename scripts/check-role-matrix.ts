@@ -4,7 +4,7 @@
  * La matriz completa se genera en docs/PRUEBAS_POR_ROL.md (`npx tsx scripts/doc-role-matrix.ts`).
  * Ejecutar: npx tsx scripts/check-role-matrix.ts
  */
-import { seedBranches, seedPermissions, seedRoles, seedUsers } from '../src/data/seedCatalog';
+import { seedBranches, seedPermissions, seedRoles, seedUsers, seedWarehouses } from '../src/data/seedCatalog';
 import { PERM, can as canDo } from '../src/utils/authority';
 import { ALL_CAPABILITIES, capabilityById } from '../src/utils/capabilities';
 import { EVENTS } from '../src/utils/capabilityRegistry';
@@ -23,7 +23,7 @@ const check = (name: string, ok: boolean, detail = '') => {
 };
 const list = (xs: string[]) => (xs.length ? xs.slice(0, 10).join(', ') + (xs.length > 10 ? ` … (+${xs.length - 10})` : '') : '');
 
-const src = { users: seedUsers(), roles: seedRoles(), permissions: seedPermissions(), branches: seedBranches() };
+const src = { users: seedUsers(), roles: seedRoles(), permissions: seedPermissions(), branches: seedBranches(), warehouses: seedWarehouses() };
 const profiles = accountProfiles(src);
 const of = (name: string): AccountProfile => profiles.find(p => p.name === name)!;
 const byRole = (role: string) => profiles.filter(p => p.role === role);

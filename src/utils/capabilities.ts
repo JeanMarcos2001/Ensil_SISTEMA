@@ -10,6 +10,7 @@
  */
 import type { Branch, Permission, Role, User } from '../context/DataContext';
 import { SUPERUSER } from './authority';
+import { isWarehouseId } from './logisticsRoutes';
 import {
   CATALOG_MODULES, ENTITIES, EVENTS, FUNCTIONALITIES, INCOMPATIBILITIES,
   type CapabilityDef, type EventDef, type FunctionalityDef, type IncompatibilityDef,
@@ -103,11 +104,15 @@ export interface Holder {
   name: string;
   branchIds: string[];
   allBranches: boolean;
+  /** Almacenes en los que trabaja (asignados a su cuenta). Alcanzar todas las sedes NO cuenta como estar en el almacén. */
+  warehouseIds: string[];
+  /** Solo el Superusuario (opción explícita): opera en todos los almacenes. */
+  allWarehouses: boolean;
   capabilities: Set<string>;
 }
 
 export interface HolderSources {
-  users: Pick<User, 'id' | 'name' | 'role' | 'branch' | 'additionalBranches' | 'status'>[];
+  users: Pick<User, 'id' | 'name' | 'role' | 'branch' | 'additionalBranches' | 'warehouses' | 'status'>[];
   roles: Pick<Role, 'id' | 'name' | 'status'>[];
   permissions: Permission[];
   branches: Pick<Branch, 'id' | 'name'>[];
@@ -124,7 +129,7 @@ export function buildHolders(src: HolderSources, opts: { includeSuperuser?: bool
     if (u.status !== 'Activo') continue;
     if (u.role === SUPERUSER) {
       // Como en `can()`: el Superusuario puede todo y en todas las sedes, haya o no un rol con ese nombre.
-      if (opts.includeSuperuser) holders.push({ id: u.id, name: u.name, branchIds: [], allBranches: true, capabilities: new Set(ALL_CAPABILITIES.map(c => c.id)) });
+      if (opts.includeSuperuser) holders.push({ id: u.id, name: u.name, branchIds: [], allBranches: true, warehouseIds: [], allWarehouses: true, capabilities: new Set(ALL_CAPABILITIES.map(c => c.id)) });
       continue;
     }
     const role = src.roles.find(r => r.name === u.role && r.status === 'Activo');
@@ -136,15 +141,21 @@ export function buildHolders(src: HolderSources, opts: { includeSuperuser?: bool
       name: u.name,
       branchIds: names.map(branchIdOf).filter((x): x is string => !!x),
       allBranches: capabilities.has('org-alcance:all_branches'),
+      warehouseIds: u.warehouses ?? [],
+      allWarehouses: false,
       capabilities,
     });
   }
   return holders;
 }
 
-/** Las personas que tienen la función y alcanzan la sede (o cualquiera, si no se indica sede). */
-export function holdersWith(capabilityId: string, holders: Holder[], branchId?: string): Holder[] {
-  return holders.filter(h => h.capabilities.has(capabilityId) && (!branchId || h.allBranches || h.branchIds.includes(branchId)));
+/**
+ * Las personas que tienen la función y alcanzan el lugar (o cualquiera, si no se indica). En una sede, también quien alcanza todas las
+ * sedes; en un almacén, solo quien lo tiene asignado (o el Superusuario): ver todas las sedes no es trabajar en el almacén.
+ */
+export function holdersWith(capabilityId: string, holders: Holder[], locationId?: string): Holder[] {
+  const reaches = (h: Holder, id: string) => (isWarehouseId(id) ? h.allWarehouses || h.warehouseIds.includes(id) : h.allBranches || h.branchIds.includes(id));
+  return holders.filter(h => h.capabilities.has(capabilityId) && (!locationId || reaches(h, locationId)));
 }
 
 export interface Availability {

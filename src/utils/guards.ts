@@ -107,14 +107,14 @@ export function denialMessage(clause: string[]): string {
  */
 export const THROWS_ON_DENIAL: ReadonlySet<string> = new Set([
   // devuelven la entidad creada
-  'addCashMovement', 'addContract', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStaff', 'addStudent', 'addTracking',
+  'addCashMovement', 'addContract', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStudent', 'addTracking',
   // no devuelven nada
-  'addCompany', 'addLeadSource', 'addLevel', 'addPaymentType', 'addProgram', 'addPromotion', 'addTariff',
-  'confirmReception', 'markNotificationAsRead', 'setCapacityConfig',
-  'deleteCompany', 'deleteLeadSource', 'deleteLevel', 'deleteMonthlySchedule', 'deletePaymentType', 'deleteProgram', 'deletePromotion',
-  'deleteShipment', 'deleteStaff', 'deleteTariff',
-  'updateCompany', 'updateContract', 'updateGuardian', 'updateLeadSource', 'updateLevel', 'updateMinStock', 'updateMonthlySchedule',
-  'updatePaymentType', 'updateProgram', 'updatePromotion', 'updateStaff', 'updateStudent', 'updateTariff', 'updateTracking',
+  'addLeadSource', 'addLevel', 'addPaymentType', 'addProgram', 'addPromotion', 'addTariff',
+  'markNotificationAsRead', 'setCapacityConfig',
+  'deleteLeadSource', 'deleteLevel', 'deleteMonthlySchedule', 'deletePaymentType', 'deleteProgram', 'deletePromotion',
+  'deleteShipment', 'deleteTariff',
+  'updateContract', 'updateGuardian', 'updateLeadSource', 'updateLevel', 'updateMinStock', 'updateMonthlySchedule',
+  'updatePaymentType', 'updateProgram', 'updatePromotion', 'updateStudent', 'updateTariff', 'updateTracking',
 ]);
 
 /**

@@ -7,7 +7,8 @@ import { Modal } from '../../components/ui/Modal';
 import { Search, Plus, Building2, MapPin, Phone, Mail, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
-import { nextSequentialId } from '../../utils/ids';
+import { OrgDbNotice } from '../../components/organization/OrgDbNotice';
+import { companyFieldErrors, hasLinkedBranches as companyHasBranches } from '../../utils/orgDirectory';
 
 interface CompaniesProps {
   onNavigate?: (item: string) => void;
@@ -20,7 +21,13 @@ export function Companies({ onNavigate }: CompaniesProps) {
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const { branches, companies, addCompany, updateCompany, deleteCompany, can } = useData();
+  const { orgBranches: branches, orgWarehouses: warehouses, orgCompanies: companies, orgDirectory, addCompany, updateCompany, deleteCompany, can } = useData();
+  /** Filiales y almacenes juntos: cualquiera vinculado a la empresa impide inactivarla o eliminarla. */
+  const linked = [...branches, ...warehouses];
+  const [saving, setSaving] = useState(false);
+  /** Error de una acción de la tabla (activar) y de las ventanas de desactivar y eliminar. */
+  const [pageError, setPageError] = useState('');
+  const [modalError, setModalError] = useState('');
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -53,9 +60,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const selectedCompanyData = companies.find(c => c.id === selectedCompany);
-  const hasLinkedBranches = selectedCompanyData 
-    ? branches.some(b => b.company === selectedCompanyData.name) 
-    : false;
+  const hasLinkedBranches = selectedCompanyData ? companyHasBranches(selectedCompanyData.id, linked) : false;
 
   const handleOpenDetail = (id: string) => {
     setSelectedCompany(id);
@@ -88,63 +93,49 @@ export function Companies({ onNavigate }: CompaniesProps) {
   };
 
   const validateForm = () => {
+    const found = companyFieldErrors(
+      { ruc: formData.ruc, name: formData.razonSocial, status: formData.estado === 'activo' ? 'Activo' : 'Inactivo' },
+      companies, selectedCompany ?? undefined, linked,
+    );
     const newErrors: Record<string, string> = {};
-    if (!formData.ruc) {
-      newErrors.ruc = 'El RUC es obligatorio';
-    } else if (!/^\d{11}$/.test(formData.ruc)) {
-      newErrors.ruc = 'El RUC debe tener exactamente 11 dígitos numéricos';
-    } else {
-      const isDuplicate = companies.some(c => c.ruc === formData.ruc && c.id !== selectedCompany);
-      if (isDuplicate) {
-        newErrors.ruc = 'Este RUC ya está registrado en otra empresa';
-      }
-    }
-    
-    if (!formData.razonSocial.trim()) {
-      newErrors.razonSocial = 'La razón social es obligatoria';
-    }
-
-    if (formData.estado === 'inactivo' && hasLinkedBranches) {
-      newErrors.estado = 'No se puede inactivar una empresa con filiales vinculadas';
-    }
-
+    if (found.ruc) newErrors.ruc = found.ruc;
+    if (found.name) newErrors.razonSocial = found.name;
+    if (found.status) newErrors.estado = found.status;
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = () => {
-    if (validateForm()) {
-      const newCompanyData = {
-        ruc: formData.ruc,
-        name: formData.razonSocial,
-        commercialName: formData.nombreCorto,
-        status: (formData.estado === 'activo' ? 'Activo' : 'Inactivo') as 'Activo' | 'Inactivo',
-        observaciones: formData.observaciones
-      };
-
-      if (selectedCompany) {
-        updateCompany(selectedCompany, newCompanyData);
-      } else {
-        addCompany({
-          ...newCompanyData,
-          id: nextSequentialId('EMP', companies.map(x => x.id))
-        });
-      }
-      setIsFormOpen(false);
-    }
+  const handleSave = async () => {
+    if (saving || !validateForm()) return;
+    const data = {
+      ruc: formData.ruc,
+      name: formData.razonSocial,
+      commercialName: formData.nombreCorto,
+      status: (formData.estado === 'activo' ? 'Activo' : 'Inactivo') as 'Activo' | 'Inactivo',
+      observaciones: formData.observaciones,
+    };
+    setSaving(true);
+    const result = selectedCompany ? await updateCompany(selectedCompany, data) : await addCompany(data);
+    setSaving(false);
+    if (!result.ok) { setErrors({ form: result.error ?? 'No se pudo guardar la empresa.' }); return; }
+    setIsFormOpen(false);
   };
 
   const handleDeactivate = (id: string) => {
     setSelectedCompany(id);
+    setModalError('');
     setIsDeactivateModalOpen(true);
   };
 
-  const handleActivate = (id: string) => {
-    updateCompany(id, { status: 'Activo' });
+  const handleActivate = async (id: string) => {
+    setPageError('');
+    const result = await updateCompany(id, { status: 'Activo' });
+    if (!result.ok) setPageError(result.error ?? 'No se pudo activar la empresa.');
   };
 
   const handleDelete = (id: string) => {
     setSelectedCompany(id);
+    setModalError('');
     setIsDeleteModalOpen(true);
   };
 
@@ -158,13 +149,16 @@ export function Companies({ onNavigate }: CompaniesProps) {
         </div>
         <div className="flex items-center gap-3">
           {can('org-empresas:create') && (
-            <Button variant="primary" className="flex items-center gap-2" onClick={() => handleOpenForm()}>
+            <Button variant="primary" className="flex items-center gap-2" disabled={orgDirectory.status !== 'ready'} onClick={() => handleOpenForm()}>
               <Plus size={16} />
               Nueva Empresa
             </Button>
           )}
         </div>
       </div>
+
+      <OrgDbNotice />
+      {pageError && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{pageError}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -231,6 +225,13 @@ export function Companies({ onNavigate }: CompaniesProps) {
                   </td>
                 </tr>
               ))}
+              {orgDirectory.status === 'ready' && filteredCompanies.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-10 text-center text-sm text-text-muted">
+                    {companies.length === 0 ? 'Aún no hay empresas guardadas. Cree la primera con «Nueva Empresa».' : 'Ninguna empresa coincide con la búsqueda.'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -331,8 +332,8 @@ export function Companies({ onNavigate }: CompaniesProps) {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSave}>
-              {selectedCompany ? 'Guardar Cambios' : 'Crear Empresa'}
+            <Button variant="primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Guardando…' : selectedCompany ? 'Guardar Cambios' : 'Crear Empresa'}
             </Button>
           </div>
         }
@@ -419,7 +420,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                 <div className="p-3 bg-error/10 border border-error/20 rounded-xl flex gap-3 items-start animate-in fade-in slide-in-from-top-2">
                   <AlertTriangle className="text-error shrink-0 mt-0.5" size={16} />
                   <p className="text-sm text-error leading-relaxed">
-                    No se puede inactivar esta empresa porque está vinculada a al menos una filial. Debe desvincular las filiales primero.
+                    No se puede inactivar esta empresa porque está vinculada a al menos una filial o un almacén.
                   </p>
                 </div>
               )}
@@ -444,6 +445,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
               </div>
             </div>
           </div>
+          {errors.form && <p className="text-sm text-danger-text" role="alert">{errors.form}</p>}
         </form>
       </Modal>
 
@@ -457,9 +459,10 @@ export function Companies({ onNavigate }: CompaniesProps) {
             <Button variant="ghost" onClick={() => setIsDeactivateModalOpen(false)}>Cancelar</Button>
             <Button 
               variant="danger" 
-              onClick={() => {
+              onClick={async () => {
                 if (selectedCompany) {
-                  updateCompany(selectedCompany, { status: 'Inactivo' });
+                  const result = await updateCompany(selectedCompany, { status: 'Inactivo' });
+                  if (!result.ok) { setModalError(result.error ?? 'No se pudo desactivar la empresa.'); return; }
                 }
                 setIsDeactivateModalOpen(false);
               }}
@@ -477,6 +480,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
           <p className="text-sm text-text-secondary">
             Al desactivar la empresa, esta ya no estará activa para relacionarse con nuevas filiales. Los datos se mantendrán en el historial.
           </p>
+          {modalError && <p className="text-sm font-medium text-danger-text" role="alert">{modalError}</p>}
         </div>
       </Modal>
 
@@ -491,9 +495,10 @@ export function Companies({ onNavigate }: CompaniesProps) {
             {!hasLinkedBranches && (
               <Button 
                 variant="danger" 
-                onClick={() => {
+                onClick={async () => {
                   if (selectedCompany) {
-                    deleteCompany(selectedCompany);
+                    const result = await deleteCompany(selectedCompany);
+                    if (!result.ok) { setModalError(result.error ?? 'No se pudo eliminar la empresa.'); return; }
                   }
                   setIsDeleteModalOpen(false);
                 }}
@@ -512,7 +517,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                 <p className="text-sm font-medium">No se puede eliminar esta empresa</p>
               </div>
               <p className="text-sm text-text-secondary">
-                El sistema ha detectado que esta empresa está vinculada a alguna filial. 
+                El sistema ha detectado que esta empresa está vinculada a alguna filial o almacén. 
                 Primero desvincula todas las sedes de esta empresa para poder eliminarla.
               </p>
             </>
@@ -525,6 +530,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
               <p className="text-sm text-text-secondary">
                 Esta acción es irreversible. Todos los datos asociados a esta empresa serán eliminados permanentemente del sistema.
               </p>
+              {modalError && <p className="text-sm font-medium text-danger-text" role="alert">{modalError}</p>}
             </>
           )}
         </div>

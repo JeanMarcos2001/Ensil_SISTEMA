@@ -17,7 +17,8 @@ export function Transfers() {
     couriers, 
     stockItems, 
     items, 
-    branches,
+    warehouses,
+    stockLocations,
     addTransfer,
     updateTransferStatus,
     updateTransfer,
@@ -43,7 +44,7 @@ export function Transfers() {
   const [originId, setOriginId] = useState('');
   const [destinationId, setDestinationId] = useState('');
   // Entre filiales todo pasa por el almacén central: si se elige una filial en un extremo, el otro extremo es el almacén
-  const warehouse = centralWarehouse(branches);
+  const warehouse = centralWarehouse(warehouses);
   const [reason, setReason] = useState('');
   const [observation, setObservation] = useState('');
   const [date, setDate] = useState(todayLocalISO());
@@ -193,7 +194,7 @@ export function Transfers() {
 
   /** ¿Habrá quien recepcione en la sede destino? (contraparte obligatoria de despachar) */
   const dispatchAvailability = (t: Transfer) => {
-    const destination = branches.find(b => b.id === t.destinationId);
+    const destination = stockLocations.find(b => b.id === t.destinationId);
     return availabilityOf('log-transfer:dispatch', { branchId: t.destinationId, branchName: destination?.name ?? t.destinationId });
   };
 
@@ -462,7 +463,7 @@ export function Transfers() {
                 onChange={(e) => setFilterOrigin(e.target.value)}
               >
                 <option value="">Sede origen</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -472,7 +473,7 @@ export function Transfers() {
                 onChange={(e) => setFilterDestination(e.target.value)}
               >
                 <option value="">Sede destino</option>
-                {branches.map(b => (
+                {stockLocations.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -517,8 +518,8 @@ export function Transfers() {
             </thead>
             <tbody className="divide-y divide-border-soft">
               {filteredTransfers.map((transfer) => {
-                const origin = branches.find(b => b.id === transfer.originId)?.name || transfer.originId;
-                const destination = branches.find(b => b.id === transfer.destinationId)?.name || transfer.destinationId;
+                const origin = stockLocations.find(b => b.id === transfer.originId)?.name || transfer.originId;
+                const destination = stockLocations.find(b => b.id === transfer.destinationId)?.name || transfer.destinationId;
                 const totalItems = transfer.items.reduce((sum, item) => sum + item.quantity, 0);
 
                 return (
@@ -620,7 +621,7 @@ export function Transfers() {
                     onChange={(e) => { setOriginId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setDestinationId(warehouse.id); }}
                   >
                     <option value="">Seleccionar sede origen</option>
-                    {branches.filter(b => b.status === 'Activo').map(b => (
+                    {stockLocations.filter(b => b.status === 'Activo').map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -633,7 +634,7 @@ export function Transfers() {
                     onChange={(e) => { setDestinationId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setOriginId(warehouse.id); }}
                   >
                     <option value="">Seleccionar sede destino</option>
-                    {branches.filter(b => b.status === 'Activo').map(b => (
+                    {stockLocations.filter(b => b.status === 'Activo').map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -783,7 +784,7 @@ export function Transfers() {
                   <input 
                     type="text" 
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={branches.find(b => b.id === originId)?.name || ''}
+                    value={stockLocations.find(b => b.id === originId)?.name || ''}
                     disabled
                   />
                 </div>
@@ -792,7 +793,7 @@ export function Transfers() {
                   <input 
                     type="text" 
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={branches.find(b => b.id === destinationId)?.name || ''}
+                    value={stockLocations.find(b => b.id === destinationId)?.name || ''}
                     disabled
                   />
                 </div>
@@ -940,11 +941,11 @@ export function Transfers() {
           <div className="bg-surface-muted p-4 rounded-xl border border-border-soft grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-text-secondary block mb-1">Origen:</span>
-              <span className="font-medium text-text-primary">{branches.find(b => b.id === originId)?.name}</span>
+              <span className="font-medium text-text-primary">{stockLocations.find(b => b.id === originId)?.name}</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Destino:</span>
-              <span className="font-medium text-text-primary">{branches.find(b => b.id === destinationId)?.name}</span>
+              <span className="font-medium text-text-primary">{stockLocations.find(b => b.id === destinationId)?.name}</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Método de Envío:</span>
@@ -982,7 +983,7 @@ export function Transfers() {
             <AlertTriangle size={20} className="shrink-0 mt-0.5" />
             <div className="text-sm">
               <p className="font-medium mb-1">Confirmación de Salida de Stock</p>
-              <p>Al confirmar, el stock será descontado de la sede origen ({branches.find(b => b.id === originId)?.name}) y el documento pasará a estado "En tránsito".</p>
+              <p>Al confirmar, el stock será descontado de la sede origen ({stockLocations.find(b => b.id === originId)?.name}) y el documento pasará a estado "En tránsito".</p>
             </div>
           </div>
 
@@ -1022,11 +1023,11 @@ export function Transfers() {
                 <div className="space-y-2">
                   <div>
                     <span className="text-xs text-text-muted block">Origen</span>
-                    <span className="text-sm font-medium text-text-primary">{branches.find(b => b.id === selectedTransfer.originId)?.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedTransfer.originId)?.name}</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">Destino</span>
-                    <span className="text-sm font-medium text-text-primary">{branches.find(b => b.id === selectedTransfer.destinationId)?.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedTransfer.destinationId)?.name}</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">ETA</span>
