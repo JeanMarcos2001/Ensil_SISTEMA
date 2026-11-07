@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Session } from '@supabase/supabase-js';
 import { initialAuthHash } from '../lib/authHash';
 import { supabase, supabaseConfigured } from '../lib/supabase';
+import { appUrl } from '../utils/appUrl';
 import {
   RESET_SENT, admitAccount, authErrorMessage, loginInputError, normalizeEmail, parseAuthHash, passwordError, type LoginAccount, type LoginAccountRow,
 } from '../utils/loginAccess';
@@ -102,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const requestReset = useCallback<AuthContextType['requestReset']>(async email => {
     const problem = loginInputError(email, 'x');
     if (problem) return { ok: false, error: problem };
-    const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo: window.location.origin });
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo: appUrl() });
     // Un límite de envíos sí se avisa; cualquier otro resultado responde igual, exista o no la cuenta
     if (error && (error.status === 429 || /rate limit/i.test(error.message))) return { ok: false, error: authErrorMessage(error.message, error.status) };
     return { ok: true, message: RESET_SENT };

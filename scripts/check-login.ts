@@ -3,6 +3,7 @@
  * Ejecutar: npx tsx scripts/check-login.ts
  */
 import { PASSWORD_MAX, PASSWORD_MIN, RESET_SENT, admitAccount, authErrorMessage, loginInputError, normalizeEmail, parseAuthHash, passwordError, type LoginAccountRow } from '../src/utils/loginAccess';
+import { resolveAppUrl } from '../src/utils/appUrl';
 
 let failed = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -61,6 +62,10 @@ check('Sin token, o con otro tipo, no es un enlace de acceso', parseAuthHash('')
 const expired = parseAuthHash('#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
 check('Un enlace vencido se avisa con un mensaje claro y sin texto técnico', expired.kind === 'error' && /venció o ya se usó/.test(expired.error!) && !/otp|access_denied|Email link/.test(expired.error!));
 check('Cualquier otro error del enlace también se explica', parseAuthHash('#error=server_error&error_code=unexpected_failure').kind === 'error' && /no es válido/.test(parseAuthHash('#error=server_error&error_code=unexpected_failure').error!));
+
+// ------------------------------------------------------------------------------------------------ Dirección de los enlaces de los correos
+check('Los enlaces de los correos usan la dirección configurada (p. ej. Vercel) aunque el sistema esté abierto en localhost', resolveAppUrl('https://ensil-sistema.vercel.app', 'http://localhost:3000') === 'https://ensil-sistema.vercel.app');
+check('Sin configurar, o con una dirección inválida, se usa la de la pestaña; la barra final se quita', resolveAppUrl(undefined, 'http://localhost:3000') === 'http://localhost:3000' && resolveAppUrl('  ', 'https://a.com/') === 'https://a.com' && resolveAppUrl('ensil-sistema.vercel.app', 'http://localhost:3000') === 'http://localhost:3000' && resolveAppUrl('javascript:alert(1)', 'https://a.com') === 'https://a.com' && resolveAppUrl('https://ensil-sistema.vercel.app/', 'x') === 'https://ensil-sistema.vercel.app');
 
 if (failed > 0) {
   console.log(`\n${failed} comprobaciones fallaron.`);

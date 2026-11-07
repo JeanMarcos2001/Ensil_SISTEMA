@@ -18,6 +18,7 @@ import { partsUSD } from '../utils/payments';
 import type { AssignmentForm, Place } from '../utils/assignments';
 import { useStaffDirectory, type StaffDirectoryStatus } from '../hooks/useStaffDirectory';
 import { NOT_YET_IN_DB, placesOf } from '../utils/staffDb';
+import { appUrl } from '../utils/appUrl';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
 import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
 import { buildRenewal, markRenewed, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
@@ -3913,7 +3914,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
     // Una cuenta nace de una persona de Personal (o es técnica, solo si la crea un Superusuario): el servidor vuelve a revisar todo
     const check = accountCreateCheck({ staffId: form.staffId, name: form.name, email: form.email, role: form.role }, accountRules());
     if (check.error) return { ok: false, error: check.error };
-    const request = inviteBody(form, roles, window.location.origin);
+    const request = inviteBody(form, roles, appUrl());
     if (!request.ok || !request.body) return { ok: false, error: request.error };
     const res = await accountsRepo.call(request.body);
     if (!res.ok) return { ok: false, error: res.error };
@@ -3948,7 +3949,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
 
   const resendAccess: DataContextType['resendAccess'] = async id => {
     if (!users.some(u => u.id === id)) return { ok: false, error: 'No se encontró el usuario.' };
-    const res = await accountsRepo.call({ accion: 'reenviar', cuentaId: id, redirectTo: window.location.origin });
+    const res = await accountsRepo.call({ accion: 'reenviar', cuentaId: id, redirectTo: appUrl() });
     return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
