@@ -1,8 +1,11 @@
 /**
  * Planilla mensual (funciones puras): cómo se genera desde los contratos, se ajusta, se cierra, se paga y se reabre.
  *
+ * **Una planilla es de UNA empresa y UN mes**: cada RUC presenta la suya, con sus boletas, y se cierra y reabre por separado (un problema
+ * en los contratos de una empresa no frena el cierre de las demás). Solo entran los contratos de esa empresa.
+ *
  * Flujo:
- *  1. GENERAR el período (AAAA-MM): una línea por contrato que cubre algún día del mes, calculada con `payrollEngine`
+ *  1. GENERAR el período (AAAA-MM) de una empresa: una línea por contrato suyo que cubre algún día del mes, calculada con `payrollEngine`
  *     (prorrateo por días, asignación familiar, pensión, renta de 5.ª / 4.ª, gratificación). El contrato es la fuente:
  *     mientras la planilla es BORRADOR, si el contrato cambia, la línea se recalcula.
  *  2. AJUSTAR (solo en borrador): ingresos eventuales (bonos, comisiones, horas extra) y descuentos (adelantos, tardanzas),
@@ -15,20 +18,23 @@
  * Qué no cubre: liquidación de beneficios al cese (gratificación y CTS truncas, vacaciones truncas), PLAME / T-Registro,
  * ni ingresos de otros empleadores. Ver `docs/REGLAS_DE_NEGOCIO.md`.
  */
-import type { Assignment, Contract, PayrollAdjustment, PayrollLine, PayrollRun, Staff } from '../context/DataContext';
+import type { Assignment, Company, Contract, PayrollAdjustment, PayrollLine, PayrollRun, Staff } from '../context/DataContext';
 import { addPeriods, computeLine, coveredDays, isFreelance, isPeriod, periodEnd, periodLabel, periodOf, periodStart, periodYear, round2, type PriorMonth } from './payrollEngine';
 import { escapeHtml } from './printTable';
 
 export const MIN_TEXT = 5;
 export const MAX_ADJUSTMENT = 100000;
 
-export const runIdOf = (period: string) => `PLA-${period}`;
+/** `PLA-AAAA-MM-EMP-NNN`: la planilla de ese mes de esa empresa (el mismo código que guarda la base). */
+export const runIdOf = (period: string, companyId: string) => `PLA-${period}-${companyId}`;
 
 export interface PayrollContext {
   contracts: Contract[];
   staff: Staff[];
   assignments: Assignment[];
   runs: PayrollRun[];
+  /** Las empresas (para rotular las líneas con su nombre y RUC). */
+  companies: Pick<Company, 'id' | 'name' | 'ruc'>[];
 }
 
 export interface PayrollWarning {
@@ -44,9 +50,9 @@ export interface BuiltPayroll {
 
 const fullName = (s: Pick<Staff, 'names' | 'lastNameP' | 'lastNameM'>) => `${s.names} ${s.lastNameP} ${s.lastNameM}`.replace(/\s+/g, ' ').trim();
 
-/** Contratos que cubren algún día del período (vigentes, vencidos que aún cubrían el mes o cesados dentro de él). */
-export function contractsInPeriod(contracts: Contract[], period: string): Contract[] {
-  return contracts.filter(c => (c.grossSalary ?? 0) > 0 && coveredDays(c, period) > 0);
+/** Contratos que cubren algún día del período (vigentes, vencidos que aún cubrían el mes o cesados dentro de él); de una empresa si se indica. */
+export function contractsInPeriod(contracts: Contract[], period: string, companyId?: string): Contract[] {
+  return contracts.filter(c => (c.grossSalary ?? 0) > 0 && coveredDays(c, period) > 0 && (!companyId || c.companyId === companyId));
 }
 
 /** Lo realmente cobrado y retenido por el trabajador en los meses anteriores del año, según las planillas cerradas. */
@@ -69,11 +75,13 @@ const mainAssignment = (staffId: string, assignments: Assignment[]): Assignment 
   return own.find(a => a.isMain) ?? own[0];
 };
 
-/** Construye las líneas de un período a partir de los contratos y de los ajustes cargados. */
-export function buildLines(period: string, ctx: PayrollContext, adjustments: PayrollAdjustment[]): BuiltPayroll {
+/** Construye las líneas de un período de UNA empresa a partir de sus contratos y de los ajustes cargados. */
+export function buildLines(period: string, companyId: string, ctx: PayrollContext, adjustments: PayrollAdjustment[]): BuiltPayroll {
   const lines: PayrollLine[] = [];
   const warnings: PayrollWarning[] = [];
-  const covered = contractsInPeriod(ctx.contracts, period);
+  const company = ctx.companies.find(x => x.id === companyId);
+  const covered = contractsInPeriod(ctx.contracts, period, companyId);
+  const coveredAnywhere = contractsInPeriod(ctx.contracts, period);
 
   for (const contract of covered) {
     const member = ctx.staff.find(s => s.id === contract.staffId);
@@ -99,14 +107,18 @@ export function buildLines(period: string, ctx: PayrollContext, adjustments: Pay
     if (calc.ctsDeposit > 0) lineWarnings.push(`CTS a depositar este mes: S/ ${calc.ctsDeposit.toFixed(2)} (no forma parte del neto).`);
     lines.push({
       staffId: member.id, staffName: fullName(member), docType: member.docType, docNumber: member.docNumber, contractId: contract.id, contractType: contract.type,
+      companyId, companyName: company?.name ?? '', companyRuc: company?.ruc ?? '',
       branch: assignment?.branch ?? '', role: contract.position?.trim() ?? '', pensionSystem: contract.pensionSystem, pensionFund: contract.pensionFund,
       grossSalary: contract.grossSalary ?? 0, calc, adjustments: latest.id === contract.id ? own : [], warnings: lineWarnings,
     });
   }
 
-  // Personal activo sin contrato que cubra el mes
-  for (const member of ctx.staff.filter(s => s.status === 'Activo')) {
-    if (!covered.some(c => c.staffId === member.id)) warnings.push({ level: 'aviso', staffId: member.id, text: `${fullName(member)}: personal activo sin contrato que cubra ${periodLabel(period)} (no entra a la planilla).` });
+  // Personal activo sin contrato que cubra el mes en NINGUNA empresa: no entra a ninguna planilla. Como la empresa que emplea a alguien no depende de
+  // la sede donde trabaja, no se puede saber a cuál le tocaría: se avisa una sola vez, con sus nombres, en la planilla de cualquier empresa.
+  const without = ctx.staff.filter(s => s.status === 'Activo' && !coveredAnywhere.some(c => c.staffId === s.id));
+  if (without.length > 0) {
+    const who = without.map(fullName).join(', ');
+    warnings.push({ level: 'aviso', text: `${without.length === 1 ? '1 persona activa no tiene contrato' : `${without.length} personas activas no tienen contrato`} que cubra ${periodLabel(period)} en ninguna empresa (no entra${without.length === 1 ? '' : 'n'} a ninguna planilla): ${who}.` });
   }
   lines.sort((a, b) => a.staffName.localeCompare(b.staffName));
   return { lines, warnings };
@@ -115,7 +127,7 @@ export function buildLines(period: string, ctx: PayrollContext, adjustments: Pay
 /** Líneas de una planilla: la foto si ya se cerró; si es borrador, se recalculan con el contrato actual. */
 export function linesOf(run: PayrollRun, ctx: PayrollContext): BuiltPayroll {
   if (run.status !== 'Borrador' && run.lines) return { lines: run.lines, warnings: [] };
-  return buildLines(run.period, { ...ctx, runs: ctx.runs.filter(r => r.id !== run.id) }, run.adjustments);
+  return buildLines(run.period, run.companyId, { ...ctx, runs: ctx.runs.filter(r => r.id !== run.id) }, run.adjustments);
 }
 
 export interface PayrollTotals {
@@ -142,14 +154,16 @@ export function totalsOf(lines: PayrollLine[]): PayrollTotals {
 }
 
 // ---------------------------------------------------------------- Validaciones del flujo
-export function validateGenerate(period: string, runs: PayrollRun[], today: string): string[] {
+export function validateGenerate(period: string, companyId: string, runs: Pick<PayrollRun, 'companyId' | 'period' | 'status'>[], today: string): string[] {
   const e: string[] = [];
+  if (!companyId) return ['Elija la empresa de la planilla.'];
   if (!isPeriod(period)) return ['Elija el mes de la planilla.'];
+  const own = runs.filter(r => r.companyId === companyId);
   if (period > periodOf(today)) e.push('No se genera la planilla de un mes que aún no empieza.');
-  if (runs.some(r => r.period === period)) e.push(`Ya existe la planilla de ${periodLabel(period)}.`);
+  if (own.some(r => r.period === period)) e.push(`Ya existe la planilla de ${periodLabel(period)} de esa empresa.`);
   const previous = addPeriods(period, -1);
-  if (periodYear(previous) === periodYear(period) && runs.some(r => r.period === previous && r.status === 'Borrador')) {
-    e.push(`Cierre primero la planilla de ${periodLabel(previous)}: la renta de 5.ª categoría de este mes depende de lo retenido en el anterior.`);
+  if (periodYear(previous) === periodYear(period) && own.some(r => r.period === previous && r.status === 'Borrador')) {
+    e.push(`Cierre primero la planilla de ${periodLabel(previous)} de esa empresa: la renta de 5.ª categoría de este mes depende de lo retenido en el anterior.`);
   }
   return e;
 }
@@ -175,11 +189,11 @@ export function validateClose(run: Pick<PayrollRun, 'status' | 'period'>, built:
   return e;
 }
 
-export function validateReopen(run: Pick<PayrollRun, 'status' | 'period' | 'id'>, runs: PayrollRun[], reason: string): string[] {
+export function validateReopen(run: Pick<PayrollRun, 'status' | 'period' | 'id' | 'companyId'>, runs: Pick<PayrollRun, 'id' | 'status' | 'period' | 'companyId'>[], reason: string): string[] {
   const e: string[] = [];
   if (run.status !== 'Cerrada') e.push('La planilla ya está en borrador.');
   if (reason.trim().length < MIN_TEXT) e.push('Indique el motivo de la reapertura: queda en el historial.');
-  const later = runs.find(r => r.id !== run.id && r.status !== 'Borrador' && periodYear(r.period) === periodYear(run.period) && r.period > run.period);
+  const later = runs.find(r => r.id !== run.id && r.companyId === run.companyId && r.status !== 'Borrador' && periodYear(r.period) === periodYear(run.period) && r.period > run.period);
   if (later) e.push(`Ya está cerrada la planilla de ${periodLabel(later.period)}: reabra primero esa (la renta de 5.ª depende del orden).`);
   return e;
 }
@@ -195,7 +209,7 @@ export const payrollRows = (lines: PayrollLine[]): (string | number)[][] => line
 ]);
 
 /** Boleta de pago (HTML listo para imprimir o guardar como PDF). */
-export function payslipHtml(line: PayrollLine, period: string, company: string): string {
+export function payslipHtml(line: PayrollLine, period: string): string {
   const c = line.calc;
   const rows = (items: [string, number][]) => items.filter(([, v]) => v !== 0).map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td class="n">${escapeHtml(money(v))}</td></tr>`).join('');
   const extras = line.adjustments.filter(a => a.kind === 'Ingreso').map(a => [a.concept, a.amount] as [string, number]);
@@ -208,7 +222,7 @@ export function payslipHtml(line: PayrollLine, period: string, company: string):
     .sign{margin-top:48px;display:flex;justify-content:space-between;font-size:11px} .sign div{border-top:1px solid #333;width:44%;text-align:center;padding-top:4px}
     .note{font-size:10px;color:#777;margin-top:16px}
   </style></head><body>
-    <h1>${escapeHtml(company)}</h1><p>Boleta de pago · ${escapeHtml(periodLabel(period))}</p>
+    <h1>${escapeHtml(line.companyName)}</h1><p>${line.companyRuc ? `RUC ${escapeHtml(line.companyRuc)} · ` : ''}Boleta de pago · ${escapeHtml(periodLabel(period))}</p>
     <h2>Trabajador</h2>
     <p><b>${escapeHtml(line.staffName)}</b> · ${escapeHtml(line.docType)} ${escapeHtml(line.docNumber)}</p>
     <p>${escapeHtml(line.role)}${line.branch ? ` · ${escapeHtml(line.branch)}` : ''} · ${escapeHtml(line.contractType)}${line.pensionSystem ? ` · ${escapeHtml(line.pensionSystem)}${line.pensionFund ? ` ${escapeHtml(line.pensionFund)}` : ''}` : ''}</p>

@@ -1,7 +1,7 @@
 /**
  * Renovación de contratos (funciones puras).
  *
- * Renovar es seguir con la misma persona sin pasar por un cese: el contrato que vence queda **«Renovado»** (historial, con su fecha de
+ * Renovar es seguir con la misma persona y la misma empresa sin pasar por un cese: el contrato que vence queda **«Renovado»** (historial, con su fecha de
  * fin intacta) y nace uno nuevo que empieza **el día siguiente** a su fin, con las mismas condiciones salvo lo que se indique (la nueva
  * fecha de fin y, si cambia, el sueldo). Las vacaciones no se copian (son de cada período). El nuevo contrato guarda de cuál viene
  * (`renewsId`); el contrato anterior no guarda a cuál dio paso (se deduce).
@@ -38,7 +38,7 @@ export function renewalBlock(c: Contract, today: string): string | null {
 export function renewalForm(c: Contract, input: RenewalInput): ContractForm {
   return {
     ...emptyContractForm(),
-    staffId: c.staffId, type: c.type, position: c.position ?? '', startDate: addDaysISO(c.endDate ?? '', 1), endDate: input.endDate,
+    staffId: c.staffId, companyId: c.companyId ?? '', type: c.type, position: c.position ?? '', startDate: addDaysISO(c.endDate ?? '', 1), endDate: input.endDate,
     grossSalary: input.grossSalary.trim() || String(c.grossSalary ?? ''),
     pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '',
     observations: '', suspension4ta: !!c.suspension4ta,
@@ -46,7 +46,7 @@ export function renewalForm(c: Contract, input: RenewalInput): ContractForm {
 }
 
 /** Todo lo que impide renovar con estos datos (el primero va al usuario). */
-export function validateRenewal(c: Contract, input: RenewalInput, contracts: Contract[], staff: Staff[], runs: Pick<PayrollRun, 'status' | 'period'>[], today: string): string[] {
+export function validateRenewal(c: Contract, input: RenewalInput, contracts: Contract[], staff: Staff[], runs: Pick<PayrollRun, 'status' | 'period' | 'companyId'>[], today: string): string[] {
   const block = renewalBlock(c, today);
   if (block) return [block];
   const e: string[] = [];
@@ -59,7 +59,8 @@ export function validateRenewal(c: Contract, input: RenewalInput, contracts: Con
   const first = errors.grossSalary ?? errors.pensionSystem ?? errors.pensionFund ?? errors.endDate ?? errors.staffId;
   if (first && !e.includes(first)) e.push(first);
   if (contracts.some(x => x.id !== c.id && x.staffId === c.staffId && x.startDate >= form.startDate)) e.push('Ya hay un contrato de esta persona que empieza después del fin de este: no se puede renovar encima.');
-  if (runs.some(r => r.status !== 'Borrador' && r.period >= periodOf(form.startDate))) {
+  // La planilla es de cada empresa: solo cuentan las cerradas de la empresa del contrato
+  if (runs.some(r => r.status !== 'Borrador' && r.period >= periodOf(form.startDate) && (!c.companyId || r.companyId === c.companyId))) {
     e.push(`Ya hay una planilla cerrada de ${periodOf(form.startDate)} o posterior: reábrala antes de renovar con fecha de inicio ${form.startDate}.`);
   }
   return e;

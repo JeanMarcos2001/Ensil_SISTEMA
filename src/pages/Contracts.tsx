@@ -18,9 +18,10 @@ import { csvFileName, downloadCsv } from '../utils/exportCsv';
 import { todayLocalISO } from '../utils/schedule';
 import { periodLabel } from '../utils/payrollEngine';
 import { PERM } from '../utils/authority';
+import { ContractsDbNotice } from '../components/people/ContractsDbNotice';
 
 export function ContractsPage() {
-  const { contracts, staff, closeContract, renewContract, payrollRuns, can } = useData();
+  const { contracts, orgStaff: staff, companies, closeContract, renewContract, payrollRuns, can } = useData();
   // Los importes solo los ve quien tiene «Ver remuneraciones y costo de planilla»
   const showPay = can(PERM.payView);
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export function ContractsPage() {
   const [editing, setEditing] = useState<Contract | null>(null);
   const [selectedType, setSelectedType] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState('');
   // Cierre de contrato (cese): fecha y motivo obligatorios
   const [toClose, setToClose] = useState<Contract | null>(null);
   const [closeDate, setCloseDate] = useState('');
@@ -53,10 +55,11 @@ export function ContractsPage() {
     const matchesType = !selectedType || contract.type === selectedType;
     const matchesStatus = !selectedStatus || contractStatus(contract, today) === selectedStatus;
     const matchesStaff = !staffFilter || contract.staffId === staffFilter;
-    return matchesSearch && matchesType && matchesStatus && matchesStaff;
+    const matchesCompany = !selectedCompany || contract.companyId === selectedCompany;
+    return matchesSearch && matchesType && matchesStatus && matchesStaff && matchesCompany;
   });
-  const hasFilters = !!(searchTerm || selectedType || selectedStatus || staffFilter);
-  const clearFilters = () => { setSearchTerm(''); setSelectedType(''); setSelectedStatus(''); setParams({}); };
+  const hasFilters = !!(searchTerm || selectedType || selectedStatus || selectedCompany || staffFilter);
+  const clearFilters = () => { setSearchTerm(''); setSelectedType(''); setSelectedStatus(''); setSelectedCompany(''); setParams({}); };
 
   const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -65,20 +68,20 @@ export function ContractsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedType, selectedStatus, staffFilter]);
+  }, [searchTerm, selectedType, selectedStatus, selectedCompany, staffFilter]);
 
   const openNew = () => { setEditing(null); setIsFormOpen(true); };
   const openEdit = (contract: Contract) => { setEditing(contract); setIsFormOpen(true); };
 
   /** Columnas de remuneración del CSV: sin permiso no se exportan. */
-  const PAY_COLUMNS = [7, 8, 9];
+  const PAY_COLUMNS = [8, 9, 10];
   const visibleColumns = <T,>(row: T[]): T[] => (showPay ? row : row.filter((_, i) => !PAY_COLUMNS.includes(i)));
 
   const handleExport = () => {
     downloadCsv(
       csvFileName('Contratos', today),
-      visibleColumns(['Código', 'Trabajador', 'Tipo', 'Jornada', 'Inicio', 'Fin', 'Estado', 'Sueldo bruto (S/)', 'Aportes (S/)', 'Sueldo neto estimado (S/)', 'Pensiones', 'Motivo de cese']),
-      filteredContracts.map(c => visibleColumns([c.id, getStaffName(c.staffId), c.type, c.shift ?? '', c.startDate, c.endDate ?? '', contractStatus(c, today), c.grossSalary ?? '', c.contribution ?? '', c.netSalary ?? '', `${c.pensionSystem ?? ''} ${c.pensionFund ?? ''}`.trim(), c.terminationReason ?? '']))
+      visibleColumns(['Código', 'Trabajador', 'Empresa', 'Tipo', 'Jornada', 'Inicio', 'Fin', 'Estado', 'Sueldo bruto (S/)', 'Aportes (S/)', 'Sueldo neto estimado (S/)', 'Pensiones', 'Motivo de cese']),
+      filteredContracts.map(c => visibleColumns([c.id, getStaffName(c.staffId), companyName(c.companyId), c.type, c.shift ?? '', c.startDate, c.endDate ?? '', contractStatus(c, today), c.grossSalary ?? '', c.contribution ?? '', c.netSalary ?? '', `${c.pensionSystem ?? ''} ${c.pensionFund ?? ''}`.trim(), c.terminationReason ?? '']))
     );
   };
 
@@ -86,6 +89,8 @@ export function ContractsPage() {
     setSelectedContract(contract);
     setIsDetailOpen(true);
   };
+
+  const companyName = (companyId?: string) => companies.find(x => x.id === companyId)?.name ?? '—';
 
   const getStaffName = (staffId: string) => {
     const member = staff.find(s => s.id === staffId);
@@ -113,6 +118,8 @@ export function ContractsPage() {
           )}
         </div>
       </div>
+
+      <ContractsDbNotice />
 
       {/* Filters */}
       <Card className="mb-6 p-4">
@@ -147,6 +154,14 @@ export function ContractsPage() {
               <option value="Cesado">Cesado</option>
               <option value="Renovado">Renovado</option>
             </select>
+            <select
+              value={selectedCompany}
+              onChange={(e) => setSelectedCompany(e.target.value)}
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[160px]"
+            >
+              <option value="">Todas las empresas</option>
+              {companies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
             <ClearFilters active={hasFilters} onClear={clearFilters} />
           </div>
         </div>
@@ -165,6 +180,7 @@ export function ContractsPage() {
             <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50 sticky top-0 z-10">
               <tr>
                 <th className="px-6 py-4 font-medium">Trabajador</th>
+                <th className="px-6 py-4 font-medium">Empresa</th>
                 <th className="px-6 py-4 font-medium">Cargo</th>
                 <th className="px-6 py-4 font-medium">Tipo</th>
                 <th className="px-6 py-4 font-medium">Inicio</th>
@@ -178,6 +194,7 @@ export function ContractsPage() {
               {paginatedContracts.map((contract) => (
                 <tr key={contract.id} className="hover:bg-surface-muted/50 transition-colors">
                   <td className="px-6 py-4 font-medium text-text-primary whitespace-nowrap">{getStaffName(contract.staffId)}</td>
+                  <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{companyName(contract.companyId)}</td>
                   <td className="px-6 py-4 text-text-primary">{contract.position || '-'}</td>
                   <td className="px-6 py-4 text-text-primary">{contract.type}</td>
                   <td className="px-6 py-4 text-text-secondary whitespace-nowrap">{contract.startDate}</td>
@@ -259,6 +276,7 @@ export function ContractsPage() {
             <div className="bg-surface-muted p-4 rounded-xl border border-border-soft">
               <label className="text-xs text-text-muted uppercase tracking-wider">Trabajador</label>
               <p className="text-lg font-semibold text-text-primary mt-1">{getStaffName(selectedContract.staffId)}</p>
+              <p className="text-sm text-text-secondary mt-1">{companyName(selectedContract.companyId)} · {selectedContract.position || 'Sin cargo'}</p>
             </div>
 
             {/* Contract Conditions */}
@@ -403,9 +421,9 @@ export function ContractsPage() {
             <Button variant="ghost" onClick={() => setToRenew(null)}>Cancelar</Button>
             <Button
               variant="primary"
-              onClick={() => {
+              onClick={async () => {
                 if (!toRenew) return;
-                const res = renewContract(toRenew.id, renewal);
+                const res = await renewContract(toRenew.id, renewal);
                 if (!res.ok) { setRenewError(res.error ?? 'No se pudo renovar el contrato.'); return; }
                 setToRenew(null);
               }}
@@ -461,9 +479,9 @@ export function ContractsPage() {
             <Button variant="ghost" onClick={() => setToClose(null)}>Cancelar</Button>
             <Button
               variant="primary"
-              onClick={() => {
+              onClick={async () => {
                 if (!toClose) return;
-                const res = closeContract(toClose.id, closeDate, closeReason);
+                const res = await closeContract(toClose.id, closeDate, closeReason);
                 if (!res.ok) { setCloseError(res.error ?? 'No se pudo cerrar el contrato.'); return; }
                 setToClose(null);
               }}

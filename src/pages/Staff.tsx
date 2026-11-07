@@ -23,9 +23,9 @@ import { ageText, staffAge } from '../utils/identity';
 import { NOT_YET_IN_DB } from '../utils/staffDb';
 
 export function StaffPage() {
-  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, inactivateStaff, reactivateStaff, can } = useData();
-  // Contratos y agenda aún no están en la base: no se cruzan con las personas de la base (ver NOT_YET_IN_DB)
-  const { contracts, schedules, activities } = NOT_YET_IN_DB;
+  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, contracts, inactivateStaff, reactivateStaff, can } = useData();
+  // Los contratos son los de la base; la agenda aún no está en la base: no se cruza con las personas de la base (ver NOT_YET_IN_DB)
+  const { schedules, activities } = NOT_YET_IN_DB;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [toInactivate, setToInactivate] = useState<Staff | null>(null);

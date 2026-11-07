@@ -120,7 +120,7 @@ export function buildAudit(c: AuditContext): AuditEntry[] {
   }
 
   for (const r of c.payrollRuns) {
-    for (const [i, ev] of r.events.entries()) push({ id: `${r.id}-${i}`, at: ev.at, module: 'Planilla', action: `Planilla ${ev.action.toLowerCase()}`, detail: trim(`${r.period}${ev.detail ? ` · ${c.showPay ? ev.detail : maskMoney(ev.detail)}` : ''}`), by: ev.by, ref: r.id, link: '/personas/planilla' });
+    for (const [i, ev] of r.events.entries()) push({ id: `${r.id}-${i}`, at: ev.at, module: 'Planilla', action: `Planilla ${ev.action.toLowerCase()}`, detail: trim(`${r.period} · ${r.companyId}${ev.detail ? ` · ${c.showPay ? ev.detail : maskMoney(ev.detail)}` : ''}`), by: ev.by, ref: r.id, link: '/personas/planilla' });
   }
   for (const k of c.contracts) {
     for (const [i, rev] of (k.revisions ?? []).entries()) {

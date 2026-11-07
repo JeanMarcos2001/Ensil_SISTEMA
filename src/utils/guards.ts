@@ -107,13 +107,13 @@ export function denialMessage(clause: string[]): string {
  */
 export const THROWS_ON_DENIAL: ReadonlySet<string> = new Set([
   // devuelven la entidad creada
-  'addCashMovement', 'addContract', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStudent', 'addTracking',
+  'addCashMovement', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStudent', 'addTracking',
   // no devuelven nada
   'addLeadSource', 'addLevel', 'addPaymentType', 'addProgram', 'addPromotion', 'addTariff',
   'markNotificationAsRead', 'setCapacityConfig',
   'deleteLeadSource', 'deleteLevel', 'deleteMonthlySchedule', 'deletePaymentType', 'deleteProgram', 'deletePromotion',
   'deleteShipment', 'deleteTariff',
-  'updateContract', 'updateGuardian', 'updateLeadSource', 'updateLevel', 'updateMinStock', 'updateMonthlySchedule',
+  'updateGuardian', 'updateLeadSource', 'updateLevel', 'updateMinStock', 'updateMonthlySchedule',
   'updatePaymentType', 'updateProgram', 'updatePromotion', 'updateStudent', 'updateTariff', 'updateTracking',
 ]);
 

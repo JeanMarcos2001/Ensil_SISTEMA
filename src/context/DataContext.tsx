@@ -7,8 +7,8 @@ import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, prog
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
 import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
 import { staffDisplayName } from '../utils/staffAccess';
-import { linesOf, runIdOf, validateAdjustment, validateClose, validateGenerate, validateReopen as validatePayrollReopen, type BuiltPayroll } from '../utils/payrollRun';
-import { periodLabel, periodOf, round2, type LineCalc } from '../utils/payrollEngine';
+import { linesOf, type BuiltPayroll, type PayrollContext } from '../utils/payrollRun';
+import { type LineCalc } from '../utils/payrollEngine';
 import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
 import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
 import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
@@ -17,12 +17,13 @@ import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEn
 import { partsUSD } from '../utils/payments';
 import type { AssignmentForm, Place } from '../utils/assignments';
 import { useStaffDirectory, type StaffDirectoryStatus } from '../hooks/useStaffDirectory';
+import { useContractsPayroll, type ContractsPayrollStatus } from '../hooks/useContractsPayroll';
 import { NOT_YET_IN_DB, placesOf } from '../utils/staffDb';
 import { appUrl } from '../utils/appUrl';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
-import { buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
-import { buildRenewal, markRenewed, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
-import { ceseAgendaError, sessionResponsibleUnavailable, unavailableOn } from '../utils/staffAvailability';
+import { type ContractForm } from '../utils/payroll';
+import { type RenewalInput } from '../utils/contractRenewal';
+import { sessionResponsibleUnavailable, unavailableOn } from '../utils/staffAvailability';
 import { applyCashReversal, buildDeposit, cashReversalCheck, validateCashReversal, validateDeposit, type DepositInput } from '../utils/cash';
 import { PERM, SUPERUSER, can as canDo, type AuthorityContext } from '../utils/authority';
 import { allowedNoteModes, buildCreditNote, validateNoteChoice, type NoteMode } from '../utils/creditNotes';
@@ -967,6 +968,8 @@ export interface Staff {
 export interface Contract {
   id: string;
   staffId: string;
+  /** Empresa que emplea al trabajador (la que firma el contrato y presenta su planilla). No depende de la sede donde trabaja; se puede corregir o cambiar (con motivo). Los contratos de ejemplo de la agenda no la tienen. */
+  companyId?: string;
   type: string;
   /** Cargo o puesto pactado (el que se ve en Personal y en los reportes: no se escribe en las asignaciones). */
   position?: string;
@@ -1032,6 +1035,10 @@ export interface PayrollLine {
   docNumber: string;
   contractId: string;
   contractType: string;
+  /** Empresa de la planilla (foto: queda como estaba al cerrar aunque después cambie su razón social). */
+  companyId: string;
+  companyName: string;
+  companyRuc: string;
   branch: string;
   role: string;
   pensionSystem?: string;
@@ -1049,9 +1056,11 @@ export interface PayrollEvent {
   detail?: string;
 }
 
-/** Planilla de un mes (informativa: el sistema no registra pagos al personal). Borrador = se recalcula con los contratos; Cerrada guarda la foto de las líneas. */
+/** Planilla de UN MES de UNA EMPRESA (cada RUC cierra la suya; informativa: el sistema no registra pagos al personal). Borrador = se recalcula con los contratos; Cerrada guarda la foto de las líneas. */
 export interface PayrollRun {
   id: string;
+  /** Empresa de la planilla (sus contratos son los únicos que entran). */
+  companyId: string;
   /** AAAA-MM. */
   period: string;
   status: 'Borrador' | 'Cerrada';
@@ -1352,7 +1361,7 @@ interface DataContextType {
   deleteMonthlySchedule: (id: string) => void;
   capacityConfig: CapacityConfig;
   setCapacityConfig: (config: CapacityConfig) => void;
-  /** Personal de ejemplo (en memoria): lo siguen usando contratos, planilla, agenda y matrículas. Personas → Personal y Asignaciones usan `orgStaff` y `orgAssignments`. */
+  /** Personal de ejemplo (en memoria): lo siguen usando la agenda (asesorías, actividades, entrevistas) y las matrículas. Personas → Personal, Asignaciones, Contratos y Planilla usan `orgStaff` y `orgAssignments`. */
   staff: Staff[];
   /** Personal y asignaciones guardados en la base de datos (Personas → Personal y Asignaciones; de ahí salen las cuentas de usuario). */
   orgStaff: Staff[];
@@ -1361,16 +1370,21 @@ interface DataContextType {
   orgPlaces: Place[];
   staffDirectory: { status: StaffDirectoryStatus; error: string };
   reloadStaffDirectory: () => Promise<void>;
+  /** Contratos guardados en la base de datos, cada uno con su empresa. Quien no tiene «Ver remuneraciones» los recibe SIN sueldo (lo decide la base). */
   contracts: Contract[];
-  addContract: (contract: Omit<Contract, 'id'>) => Contract;
-  updateContract: (id: string, data: Partial<Omit<Contract, 'id'>>) => void;
+  /** Contratos de ejemplo de la agenda (en memoria): solo dicen quién del personal de ejemplo está de vacaciones o cesó. Se quitan cuando la agenda lea el personal de la base. */
+  agendaContracts: Contract[];
+  contractsPayroll: { status: ContractsPayrollStatus; error: string };
+  reloadContractsPayroll: () => Promise<void>;
+  /** Registra un contrato (valida con el formulario, la empresa es obligatoria; el código lo asigna el sistema). */
+  addContract: (form: ContractForm) => Promise<StockResult & { id?: string }>;
   assignments: Assignment[];
   /** Crea (o edita, con `editingId`) una asignación. La nueva principal desplaza a la anterior. */
   saveAssignment: (form: AssignmentForm, editingId?: string) => Promise<StockResult>;
   /** Cierra una asignación con fecha y motivo (no se borra). */
   closeAssignment: (id: string, date: string, reason: string) => Promise<StockResult>;
   /** Edita un contrato vigente con motivo; queda la constancia de lo que cambió. */
-  editContract: (id: string, form: ContractForm, reason: string) => StockResult;
+  editContract: (id: string, form: ContractForm, reason: string) => Promise<StockResult>;
   /** Da de baja a un trabajador (cierra sus asignaciones). Exige contrato cerrado y sin asesorías futuras. */
   inactivateStaff: (id: string, input: { reason: string; detail: string; date: string }) => Promise<StockResult>;
   reactivateStaff: (id: string, detail: string) => Promise<StockResult>;
@@ -1389,16 +1403,17 @@ interface DataContextType {
   payrollRuns: PayrollRun[];
   /** Líneas de una planilla: la foto si ya se cerró; en borrador, se recalculan con los contratos. */
   payrollLinesOf: (run: PayrollRun) => BuiltPayroll;
-  generatePayroll: (period: string) => StockResult;
-  deletePayrollDraft: (runId: string) => StockResult;
-  addPayrollAdjustment: (runId: string, input: { staffId: string; kind: 'Ingreso' | 'Descuento'; concept: string; amount: number; taxable: boolean; reason: string }) => StockResult;
-  removePayrollAdjustment: (runId: string, adjustmentId: string) => StockResult;
-  closePayroll: (runId: string) => StockResult;
-  reopenPayroll: (runId: string, reason: string) => StockResult;
+  /** Genera la planilla de un mes de UNA empresa (cada RUC presenta la suya). */
+  generatePayroll: (companyId: string, period: string) => Promise<StockResult & { id?: string }>;
+  deletePayrollDraft: (runId: string) => Promise<StockResult>;
+  addPayrollAdjustment: (runId: string, input: { staffId: string; kind: 'Ingreso' | 'Descuento'; concept: string; amount: number; taxable: boolean; reason: string }) => Promise<StockResult>;
+  removePayrollAdjustment: (runId: string, adjustmentId: string) => Promise<StockResult>;
+  closePayroll: (runId: string) => Promise<StockResult>;
+  reopenPayroll: (runId: string, reason: string) => Promise<StockResult>;
   /** Cierra un contrato vigente (cese); no se permite si una planilla ya cerrada lo pagó en esas fechas. */
-  closeContract: (id: string, date: string, reason: string) => StockResult;
-  /** Renueva un contrato con fecha de fin: el anterior queda «Renovado» y nace uno nuevo desde el día siguiente a su fin (con motivo). */
-  renewContract: (id: string, input: RenewalInput) => StockResult;
+  closeContract: (id: string, date: string, reason: string) => Promise<StockResult>;
+  /** Renueva un contrato con fecha de fin: el anterior queda «Renovado» y nace uno nuevo, de la misma empresa, desde el día siguiente a su fin (con motivo). */
+  renewContract: (id: string, input: RenewalInput) => Promise<StockResult>;
   permissions: Permission[];
   savePermissions: (roleId: string, newPermissions: string[], reasons?: Record<string, string>) => Promise<OpResult>;
   /** Empresas, filiales y almacenes: los de la base de datos (única fuente de todo el sistema; ver `useOrgDirectory`). */
@@ -1889,7 +1904,7 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     const moved = next.status !== 'Cancelado' && (next.date !== target.date || next.time !== target.time || next.responsible.trim() !== target.responsible.trim());
     // El responsable de una asesoría que se mueve o se reasigna debe trabajar ese día (no de vacaciones ni cesado)
     if (moved) {
-      const away = sessionResponsibleUnavailable(next.responsible, next.date, staff, contracts);
+      const away = sessionResponsibleUnavailable(next.responsible, next.date, staff, agendaContracts);
       if (away) return { ok: false, reason: away };
     }
     if (cancelling || moved) {
@@ -1969,7 +1984,7 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     if (!can(PERM.psiActivityLead)) return { ok: false, error: 'Su rol no puede asignar el responsable de una actividad.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
-    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, contracts) });
+    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, agendaContracts) });
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const member = staffId ? staff.find(s => s.id === staffId) : undefined;
     patchActivity(a, x => ({ ...x, responsable: member ? staffLabel(member) : '', responsableId: member?.id }));
@@ -2154,9 +2169,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
 
   const [staff, setStaff] = useState<Staff[]>(() => seedStaff());
 
-  const [contracts, setContracts] = useState<Contract[]>(() => seedContracts());
-
-  const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
+  // Contratos de ejemplo de la agenda: solo para saber quién del personal de ejemplo está de vacaciones o cesó (la agenda aún lee ese personal).
+  // Los contratos y las planillas REALES viven en la base (`useContractsPayroll`, más abajo).
+  const [agendaContracts] = useState<Contract[]>(() => seedContracts());
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => seedAssignments());
 
@@ -2187,6 +2202,10 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
   // Personal y Asignaciones viven en la base: cargan cuando ya están las sedes y el almacén (el lugar de una asignación sale de ellos).
   const places = useMemo(() => placesOf(org.branches, org.warehouses), [org.branches, org.warehouses]);
   const staffDir = useStaffDirectory(places, org.status === 'ready', resyncUsers);
+  // Contratos (con su empresa) y planillas (una por empresa y mes): de la base de datos.
+  const cp = useContractsPayroll();
+  const contracts = cp.contracts;
+  const payrollRuns = cp.runs;
   const rolesRepo = useMemo(() => createSupabaseRolesRepository(supabase), []);
   /** Vuelve a leer los roles de la base (después de un cambio que quedó a medias, para mostrar lo que de verdad quedó). */
   const resyncRoles = async () => {
@@ -2922,16 +2941,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     return { ok: true };
   };
 
-  const updateContract = (id: string, data: Partial<Omit<Contract, 'id'>>) => {
-    setContracts(prev => prev.map(c => (c.id === id ? { ...c, ...data } : c)));
-  };
-
-  const addContract = (data: Omit<Contract, 'id'>): Contract => {
-    const created: Contract = { ...data, id: nextSequentialId('CON', contracts.map(c => c.id)) };
-    setContracts(prev => [...prev, created]);
-    return created;
-  };
-
   const addStudent = (studentData: Omit<Student, 'id'>): Student => {
     const newStudent: Student = { ...studentData, id: nextSequentialId('ALU', students.map(s => s.id)) };
     setStudents(prev => [...prev, newStudent]);
@@ -3180,8 +3189,8 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities });
 
   const inactivateStaff: DataContextType['inactivateStaff'] = async (id, input) => {
-    // Los contratos y la agenda de ejemplo no se cruzan con las personas de la base (ver NOT_YET_IN_DB)
-    const ctx = { contracts: NOT_YET_IN_DB.contracts, assignments: [], schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities, today: todayLocalISO() };
+    // Los contratos son los de la base; la agenda de ejemplo no se cruza con las personas de la base (ver NOT_YET_IN_DB)
+    const ctx = { contracts, assignments: [], schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities, today: todayLocalISO() };
     const hasActiveAccount = users.some(u => u.staffId === id && u.status === 'Activo');
     const res = await staffDir.inactivateStaff(id, input, currentUser.name, ctx, hasActiveAccount);
     return { ok: res.ok, error: res.error };
@@ -3192,121 +3201,69 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     return { ok: res.ok, error: res.error };
   };
 
-  // ---- Contratos y planilla
-  const closeContract: DataContextType['closeContract'] = (id, date, reason) => {
-    const contract = contracts.find(x => x.id === id);
-    if (!contract) return { ok: false, error: 'No se encontró el contrato.' };
-    if (contract.status !== 'Vigente') return { ok: false, error: 'Solo se cierra un contrato vigente.' };
-    if (!date) return { ok: false, error: 'Indique la fecha de cese.' };
-    if (date < contract.startDate) return { ok: false, error: 'La fecha de cese no puede ser anterior al inicio del contrato.' };
-    if (reason.trim().length < 5) return { ok: false, error: 'Indique el motivo del cese.' };
-    // Quien cesa no puede quedar como responsable de asesorías ni actividades posteriores al cese
-    const leaver = staff.find(s => s.id === contract.staffId);
-    const agendaProblem = leaver ? ceseAgendaError(leaver, date, { schedules, activities: allActivities(monthlySchedules) }) : null;
-    if (agendaProblem) return { ok: false, error: agendaProblem };
-    const paid = payrollRuns.find(r => r.status !== 'Borrador' && r.period >= periodOf(date) && r.lines?.some(l => l.contractId === id));
-    if (paid) return { ok: false, error: `La planilla de ${periodLabel(paid.period)} ya está cerrada con este contrato: reábrala o elija una fecha de cese posterior.` };
-    setContracts(prev => prev.map(x => (x.id === id ? { ...x, status: 'Cesado', endDate: date, terminationReason: reason.trim() } : x)));
-    return { ok: true };
+  // ---- Contratos y planilla (en la base de datos; las reglas puras están en utils/ y el orden en services/contractsPayroll.ts)
+  /** El personal de la base (el contrato es de una persona de Personal); la agenda de una persona de la base aún no existe (NOT_YET_IN_DB). */
+  const contractsBase = () => ({
+    staff: staffDir.staff, companies, today: todayLocalISO(), agenda: { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities },
+  });
+  const payrollContext = (): Omit<PayrollContext, 'runs'> => ({
+    contracts, staff: staffDir.staff, assignments: staffDir.assignments, companies,
+  });
+
+  const addContract: DataContextType['addContract'] = async form => {
+    const res = await cp.createContract(contractsBase(), form);
+    return { ok: res.ok, error: res.error, id: res.value?.id };
+  };
+  const editContract: DataContextType['editContract'] = async (id, form, reason) => {
+    const res = await cp.editContract(contractsBase(), id, form, reason);
+    return { ok: res.ok, error: res.error };
+  };
+  const closeContract: DataContextType['closeContract'] = async (id, date, reason) => {
+    const res = await cp.closeContract(contractsBase(), id, date, reason);
+    return { ok: res.ok, error: res.error };
+  };
+  const renewContract: DataContextType['renewContract'] = async (id, input) => {
+    const res = await cp.renewContract(contractsBase(), id, input);
+    return { ok: res.ok, error: res.error };
   };
 
-  const renewContract: DataContextType['renewContract'] = (id, input) => {
-    const old = contracts.find(x => x.id === id);
-    if (!old) return { ok: false, error: 'No se encontró el contrato.' };
-    const member = staff.find(s => s.id === old.staffId);
-    const problems = validateRenewal(old, input, contracts, staff, payrollRuns, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const created: Contract = { ...buildRenewal(old, input, member ?? {}), id: nextSequentialId('CON', contracts.map(x => x.id)) };
-    setContracts(prev => [...prev.map(x => (x.id === id ? markRenewed(x) : x)), created]);
-    return { ok: true };
-  };
+  const payrollLinesOf: DataContextType['payrollLinesOf'] = run => linesOf(run, { ...payrollContext(), runs: payrollRuns });
 
-  const payrollContext = () => ({ contracts, staff, assignments, runs: payrollRuns });
-  const payrollLinesOf: DataContextType['payrollLinesOf'] = run => linesOf(run, payrollContext());
-  const patchRun = (id: string, fn: (r: PayrollRun) => PayrollRun) => setPayrollRuns(prev => prev.map(r => (r.id === id ? fn(r) : r)));
-  const payrollEvent = (action: PayrollEvent['action'], detail?: string): PayrollEvent => ({ at: new Date().toISOString(), by: currentUser.name, action, detail });
-
-  const generatePayroll: DataContextType['generatePayroll'] = period => {
+  const generatePayroll: DataContextType['generatePayroll'] = async (companyId, period) => {
     if (!can(PERM.payrollGenerate)) return { ok: false, error: 'Su rol no puede generar planillas.' };
-    const problems = validateGenerate(period, payrollRuns, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const run: PayrollRun = { id: runIdOf(period), period, status: 'Borrador', adjustments: [], createdAt: new Date().toISOString(), createdBy: currentUser.name, events: [payrollEvent('Generada')] };
-    setPayrollRuns(prev => [run, ...prev].sort((a, b) => b.period.localeCompare(a.period)));
-    return { ok: true };
+    const res = await cp.generatePayroll(companies, companyId, period, todayLocalISO());
+    return { ok: res.ok, error: res.error, id: res.value?.id };
   };
 
-  const deletePayrollDraft: DataContextType['deletePayrollDraft'] = runId => {
+  const deletePayrollDraft: DataContextType['deletePayrollDraft'] = async runId => {
     if (!can(PERM.payrollGenerate)) return { ok: false, error: 'Su rol no puede eliminar planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
-    if (run.status !== 'Borrador') return { ok: false, error: 'Solo se elimina una planilla en borrador.' };
-    setPayrollRuns(prev => prev.filter(r => r.id !== runId));
-    return { ok: true };
+    const res = await cp.deletePayrollDraft(runId);
+    return { ok: res.ok, error: res.error };
   };
 
-  const addPayrollAdjustment: DataContextType['addPayrollAdjustment'] = (runId, input) => {
+  const addPayrollAdjustment: DataContextType['addPayrollAdjustment'] = async (runId, input) => {
     if (!can(PERM.payrollAdjust)) return { ok: false, error: 'Su rol no puede ajustar planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
-    const inLines = payrollLinesOf(run).lines.some(l => l.staffId === input.staffId);
-    const problems = validateAdjustment(run, input, inLines);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const adjustment: PayrollAdjustment = {
-      id: nextSequentialId('AJU', payrollRuns.flatMap(r => r.adjustments.map(a => a.id))), staffId: input.staffId, kind: input.kind, concept: input.concept.trim(),
-      amount: round2(input.amount), taxable: input.kind === 'Ingreso' ? input.taxable : true, reason: input.reason.trim(), by: currentUser.name, at: new Date().toISOString(),
-    };
-    const who = staff.find(s => s.id === input.staffId);
-    patchRun(runId, r => ({ ...r, adjustments: [...r.adjustments, adjustment], events: [...r.events, payrollEvent('Ajuste', `${adjustment.kind}: ${adjustment.concept} S/ ${adjustment.amount.toFixed(2)}${who ? ` (${staffDisplayName(who)})` : ''}`)] }));
-    return { ok: true };
+    const who = staffDir.staff.find(s => s.id === input.staffId);
+    const res = await cp.addPayrollAdjustment(payrollContext(), runId, input, who ? staffDisplayName(who) : '');
+    return { ok: res.ok, error: res.error };
   };
 
-  const removePayrollAdjustment: DataContextType['removePayrollAdjustment'] = (runId, adjustmentId) => {
+  const removePayrollAdjustment: DataContextType['removePayrollAdjustment'] = async (runId, adjustmentId) => {
     if (!can(PERM.payrollAdjust)) return { ok: false, error: 'Su rol no puede ajustar planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    const adjustment = run?.adjustments.find(a => a.id === adjustmentId);
-    if (!run || !adjustment) return { ok: false, error: 'No se encontró el ajuste.' };
-    if (run.status !== 'Borrador') return { ok: false, error: 'Solo se ajusta una planilla en borrador.' };
-    patchRun(runId, r => ({ ...r, adjustments: r.adjustments.filter(a => a.id !== adjustmentId), events: [...r.events, payrollEvent('Ajuste', `Se quitó: ${adjustment.concept} S/ ${adjustment.amount.toFixed(2)}`)] }));
-    return { ok: true };
+    const res = await cp.removePayrollAdjustment(runId, adjustmentId);
+    return { ok: res.ok, error: res.error };
   };
 
-  const closePayroll: DataContextType['closePayroll'] = runId => {
+  const closePayroll: DataContextType['closePayroll'] = async runId => {
     if (!can(PERM.payrollClose)) return { ok: false, error: 'Su rol no puede cerrar planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
-    const built = payrollLinesOf(run);
-    const problems = validateClose(run, built, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const net = round2(built.lines.reduce((s, l) => s + l.calc.net, 0));
-    patchRun(runId, r => ({ ...r, status: 'Cerrada', lines: built.lines, closedAt: new Date().toISOString(), closedBy: currentUser.name, events: [...r.events, payrollEvent('Cerrada', `${built.lines.length} trabajador(es) · neto S/ ${net.toFixed(2)}`)] }));
-    return { ok: true };
+    const res = await cp.closePayroll(payrollContext(), runId, todayLocalISO());
+    return { ok: res.ok, error: res.error };
   };
 
-  const reopenPayroll: DataContextType['reopenPayroll'] = (runId, reason) => {
+  const reopenPayroll: DataContextType['reopenPayroll'] = async (runId, reason) => {
     if (!can(PERM.payrollReopen)) return { ok: false, error: 'Su rol no puede reabrir planillas.' };
-    const run = payrollRuns.find(r => r.id === runId);
-    if (!run) return { ok: false, error: 'No se encontró la planilla.' };
-    const problems = validatePayrollReopen(run, payrollRuns, reason);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    patchRun(runId, r => ({ ...r, status: 'Borrador', lines: undefined, closedAt: undefined, closedBy: undefined, events: [...r.events, payrollEvent('Reabierta', reason.trim())] }));
-    return { ok: true };
-  };
-
-  const editContract = (id: string, form: ContractForm, reason: string): StockResult => {
-    const current = contracts.find(c => c.id === id);
-    if (!current) return { ok: false, error: 'No se encontró el contrato.' };
-    if (form.staffId !== current.staffId) return { ok: false, error: 'No se puede cambiar el trabajador de un contrato.' };
-    const errors = validateContractForm(form, contracts, staff, todayLocalISO(), id, { schedules, activities: allActivities(monthlySchedules) });
-    const first = Object.values(errors)[0];
-    if (first) return { ok: false, error: first };
-    const patch = buildContractPatch(form, staff.find(s => s.id === current.staffId) ?? {});
-    const changes = diffContract(current, patch);
-    const problems = validateContractEdit(current, changes, reason);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setContracts(prev => prev.map(c => (c.id === id
-      ? { ...c, ...patch, revisions: [{ at: new Date().toISOString(), by: currentUser.name, reason: reason.trim(), changes }, ...(c.revisions ?? [])] }
-      : c)));
-    return { ok: true };
+    const res = await cp.reopenPayroll(runId, reason);
+    return { ok: res.ok, error: res.error };
   };
 
   // ---- Caja: reversa de movimientos y lotes de depósito
@@ -4046,6 +4003,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
       setCapacityConfig,
       staff,
       contracts,
+      agendaContracts,
+      contractsPayroll: { status: cp.status, error: cp.error },
+      reloadContractsPayroll: cp.reload,
       assignments,
       saveAssignment,
       closeAssignment,
@@ -4056,8 +4016,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
       orgDirectory: { status: org.status, error: org.error },
       reloadOrgDirectory: org.reload,
       addCompany: org.addCompany,
-      updateCompany: org.updateCompany,
-      deleteCompany: org.deleteCompany,
+      // Una empresa con contratos vigentes no se inactiva ni se elimina (igual que con filiales o almacenes)
+      updateCompany: (id, companyData) => org.updateCompany(id, companyData, contracts.filter(k => k.status === 'Vigente')),
+      deleteCompany: id => org.deleteCompany(id, contracts.filter(k => k.status === 'Vigente')),
       roles,
       addRole,
       updateRole,
@@ -4102,7 +4063,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
       addTransfer,
       addStaff,
       addContract,
-      updateContract,
       updateStaff,
       orgStaff: staffDir.staff,
       orgAssignments: staffDir.assignments,

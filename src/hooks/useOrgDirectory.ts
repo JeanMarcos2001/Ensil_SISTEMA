@@ -57,14 +57,15 @@ export function useOrgDirectory(initial: OrgDirectoryData) {
     return { ...res, id: res.value?.id };
   }, [repo]);
 
-  const updateCompany = useCallback(async (id: string, patch: Partial<Company>): Promise<OpResult<Company>> => {
-    const res = await editCompany(repo, companiesRef.current, linkedToCompany(), id, patch);
+  /** `extraLinked`: otros registros que dependen de la empresa y que este gancho no conoce (los contratos vigentes). */
+  const updateCompany = useCallback(async (id: string, patch: Partial<Company>, extraLinked: { companyId?: string }[] = []): Promise<OpResult<Company>> => {
+    const res = await editCompany(repo, companiesRef.current, [...linkedToCompany(), ...extraLinked], id, patch);
     if (res.ok && res.value) setCompanies(prev => prev.map(c => (c.id === id ? res.value! : c)));
     return res;
   }, [repo]);
 
-  const deleteCompany = useCallback(async (id: string): Promise<OpResult> => {
-    const res = await removeCompany(repo, companiesRef.current, linkedToCompany(), id);
+  const deleteCompany = useCallback(async (id: string, extraLinked: { companyId?: string }[] = []): Promise<OpResult> => {
+    const res = await removeCompany(repo, companiesRef.current, [...linkedToCompany(), ...extraLinked], id);
     if (res.ok) setCompanies(prev => prev.filter(c => c.id !== id));
     return res;
   }, [repo]);

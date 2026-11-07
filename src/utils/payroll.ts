@@ -8,7 +8,7 @@
  *  - No hay «tipo de comisión»: de cada AFP se usa su tasa total referencial.
  *  - La locación de servicios no tiene pensión ni 5.ª; retiene 4.ª categoría (8 %) si el honorario pasa de S/ 3 300.
  */
-import type { Contract, ContractRevisionChange, Staff } from '../context/DataContext';
+import type { Company, Contract, ContractRevisionChange, Staff } from '../context/DataContext';
 import { vacationAgendaError, type AgendaContext } from './staffAvailability';
 import { AFP_RATES as ENGINE_AFP_RATES, ONP_RATE as ENGINE_ONP_RATE, RMV, regularMonth, type RegularMonth } from './payrollEngine';
 
@@ -61,6 +61,8 @@ export function estimateNet(
 
 export interface ContractForm {
   staffId: string;
+  /** Empresa que emplea al trabajador: obligatoria. NO depende de la sede donde trabaja; se puede corregir o cambiar después (con motivo). */
+  companyId: string;
   type: string;
   /** Cargo o puesto pactado: de aquí sale el cargo que se ve en Personal y en los reportes. */
   position: string;
@@ -79,7 +81,7 @@ export interface ContractForm {
 export type ContractErrors = Partial<Record<keyof ContractForm, string>>;
 
 export const emptyContractForm = (): ContractForm => ({
-  staffId: '', type: '', position: '', startDate: '', endDate: '', grossSalary: '', pensionSystem: '', pensionFund: '',
+  staffId: '', companyId: '', type: '', position: '', startDate: '', endDate: '', grossSalary: '', pensionSystem: '', pensionFund: '',
   vacationStart: '', vacationEnd: '', observations: '', suspension4ta: false,
 });
 
@@ -109,9 +111,22 @@ export function currentContractOf(staffId: string, contracts: Contract[], today:
 export const positionOf = (staffId: string, contracts: Contract[], today: string): string | undefined =>
   currentContractOf(staffId, contracts, today)?.position?.trim() || undefined;
 
-export function validateContractForm(f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string, agenda?: AgendaContext): ContractErrors {
+/**
+ * `companies`: las empresas de la base. Si se pasan, la empresa del contrato es obligatoria y debe existir y estar activa (un contrato que
+ * se edita conserva la suya aunque después se inactive). Las verificaciones antiguas sin lista de empresas no la revisan.
+ */
+export function validateContractForm(
+  f: ContractForm, contracts: Contract[], staff: Staff[], today: string, editingId?: string, agenda?: AgendaContext, companies?: Pick<Company, 'id' | 'status'>[],
+): ContractErrors {
   const e: ContractErrors = {};
   if (!f.staffId || !staff.some(s => s.id === f.staffId)) e.staffId = 'Seleccione al trabajador.';
+  if (companies) {
+    const company = companies.find(x => x.id === f.companyId);
+    const unchanged = !!editingId && contracts.find(x => x.id === editingId)?.companyId === f.companyId;
+    if (!f.companyId) e.companyId = 'Seleccione la empresa que emplea al trabajador.';
+    else if (!company) e.companyId = 'La empresa elegida no existe.';
+    else if (company.status !== 'Activo' && !unchanged) e.companyId = 'La empresa elegida está inactiva.';
+  }
   if (!(CONTRACT_TYPES as readonly string[]).includes(f.type)) e.type = 'Seleccione el tipo de contrato.';
   if (f.position.trim().length < POSITION_MIN) e.position = 'Indique el cargo (ej.: Psicólogo Senior).';
   else if (f.position.trim().length > POSITION_MAX) e.position = `El cargo es demasiado largo (máximo ${POSITION_MAX} caracteres).`;
@@ -156,6 +171,7 @@ export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } 
   const est = estimateNet(gross, f.type, f.pensionSystem, f.pensionFund, staff, year, f.suspension4ta);
   return {
     staffId: f.staffId,
+    companyId: f.companyId || undefined,
     type: f.type,
     position: f.position.trim(),
     startDate: f.startDate,
@@ -179,23 +195,24 @@ export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } 
 // ---------------------------------------------------------------- Edición de un contrato vigente
 
 export const contractToForm = (c: Contract): ContractForm => ({
-  staffId: c.staffId, type: c.type, position: c.position ?? '', startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
+  staffId: c.staffId, companyId: c.companyId ?? '', type: c.type, position: c.position ?? '', startDate: c.startDate, endDate: c.endDate ?? '', grossSalary: c.grossSalary !== undefined ? String(c.grossSalary) : '',
   pensionSystem: c.pensionSystem ?? '', pensionFund: c.pensionFund ?? '', vacationStart: c.vacationStart ?? '', vacationEnd: c.vacationEnd ?? '',
   observations: c.observations ?? '', suspension4ta: !!c.suspension4ta,
 });
 
-/** Cambios que se guardan al editar (no toca al trabajador ni el estado del contrato). */
-export function buildContractPatch(f: ContractForm, staff: { hasChildren?: boolean } = {}): Partial<Omit<Contract, 'id'>> {
-  const { staffId: _staffId, status: _status, ...patch } = buildContract(f, staff);
+/** Cambios que se guardan al editar (no toca al trabajador ni el estado del contrato; la empresa sí puede cambiar). */
+export function buildContractPatch(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear()): Partial<Omit<Contract, 'id'>> {
+  const { staffId: _staffId, status: _status, ...patch } = buildContract(f, staff, year);
   return patch;
 }
 
 const fmtMoney = (n: number | undefined) => (n === undefined ? '—' : `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const txt = (v: string | undefined) => (v && v.trim() ? v : '—');
 
-/** Qué cambia al editar un contrato (con etiquetas legibles, para la constancia). */
-export function diffContract(before: Contract, after: Partial<Omit<Contract, 'id'>>): ContractRevisionChange[] {
+/** Qué cambia al editar un contrato (con etiquetas legibles, para la constancia). `companyName` da el nombre de una empresa a partir de su código. */
+export function diffContract(before: Contract, after: Partial<Omit<Contract, 'id'>>, companyName: (id?: string) => string = id => id ?? ''): ContractRevisionChange[] {
   const rows: [string, string, string][] = [
+    ['Empresa', txt(companyName(before.companyId)), txt(companyName('companyId' in after ? after.companyId : before.companyId))],
     ['Tipo de contrato', txt(before.type), txt(after.type)],
     ['Cargo', txt(before.position), txt(after.position)],
     ['Fecha de inicio', txt(before.startDate), txt(after.startDate)],

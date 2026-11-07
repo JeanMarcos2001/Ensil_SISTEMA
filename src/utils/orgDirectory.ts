@@ -6,7 +6,7 @@
  *   aquí están las mismas reglas para avisar en el formulario antes de enviar. `check-org-directory.ts` compara ambas.
  * - Una filial o un almacén guarda el id de su empresa (`companyId`); el nombre de la empresa NO se guarda en la filial, se calcula al mostrar
  *   (`withCompanyNames`): si se corrige la razón social, todas las filiales la muestran corregida.
- * - Lo que ya se usa no se borra: una empresa con filiales o almacenes no se inactiva ni se elimina.
+ * - Lo que ya se usa no se borra: una empresa con filiales, almacenes o contratos vigentes no se inactiva ni se elimina.
  */
 import type { Branch, Company, Warehouse } from '../context/DataContext';
 import { warehouseDefinitionError } from './logisticsRoutes';
@@ -140,18 +140,18 @@ export type FieldErrors = Record<string, string>;
 /** El primer mensaje de un conjunto de errores (para las acciones, que devuelven uno solo). */
 export const firstError = (errors: FieldErrors): string | null => Object.values(errors).find(Boolean) ?? null;
 
-/** ¿Alguna filial o almacén (de cualquier estado) pertenece a esa empresa? Se pasa la lista de filiales y almacenes juntos. */
+/** ¿Alguna filial, almacén (de cualquier estado) o contrato vigente pertenece a esa empresa? Se pasan las listas juntas. */
 export const hasLinkedBranches = (companyId: string, linked: { companyId?: string }[]): boolean => linked.some(b => b.companyId === companyId);
 
 export const companyInactivationError = (company: Pick<Company, 'id'>, linked: { companyId?: string }[]): string | null =>
-  hasLinkedBranches(company.id, linked) ? 'No se puede inactivar una empresa con filiales o almacenes vinculados.' : null;
+  hasLinkedBranches(company.id, linked) ? 'No se puede inactivar una empresa con filiales, almacenes o contratos vigentes vinculados.' : null;
 
 export const companyDeletionError = (company: Pick<Company, 'id'>, linked: { companyId?: string }[]): string | null =>
-  hasLinkedBranches(company.id, linked) ? 'No se puede eliminar esta empresa: tiene filiales o almacenes vinculados. Inactívela si ya no se usa.' : null;
+  hasLinkedBranches(company.id, linked) ? 'No se puede eliminar esta empresa: tiene filiales, almacenes o contratos vinculados. Inactívela si ya no se usa.' : null;
 
 /**
  * Errores por campo de una empresa (claves: `ruc`, `name`, `status`). `selfId` = la empresa que se edita (no se compara consigo misma).
- * La inactivación con filiales o almacenes (`linked`) solo se revisa al editar (`selfId`) y solo si la empresa estaba activa.
+ * La inactivación con filiales, almacenes o contratos vigentes (`linked`) solo se revisa al editar (`selfId`) y solo si la empresa estaba activa.
  */
 export function companyFieldErrors(
   input: Pick<Company, 'ruc' | 'name' | 'status'>,
@@ -240,7 +240,7 @@ export interface DbErrorLike { code?: string; message?: string; details?: string
 const text = (e: DbErrorLike): string => `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase();
 
 /** ¿El error es que ya existe una fila con ese id generado (dos personas crearon a la vez)? Se reintenta con el id siguiente. */
-export const isIdConflict = (e: DbErrorLike | null | undefined): boolean => !!e && e.code === '23505' && /(empresas|sedes|almacenes|roles|personal|asignaciones)_pkey|sedes_id_unico|personal_codigo_key/.test(text(e));
+export const isIdConflict = (e: DbErrorLike | null | undefined): boolean => !!e && e.code === '23505' && /(empresas|sedes|almacenes|roles|personal|asignaciones|contratos|planilla_ajustes)_pkey|sedes_id_unico|personal_codigo_key/.test(text(e));
 
 /** Mensaje claro para un error de la base. No muestra texto técnico. */
 export function dbErrorMessage(e: DbErrorLike | null | undefined): string {
@@ -257,6 +257,8 @@ export function dbErrorMessage(e: DbErrorLike | null | undefined): string {
     if (t.includes('asignaciones_una_principal')) return 'La persona ya tiene una asignación principal activa.';
     if (t.includes('asignaciones_sin_duplicar')) return 'Esta persona ya tiene una asignación activa en ese lugar y área.';
     if (t.includes('cuentas_personal_unico')) return 'Esta persona ya tiene una cuenta.';
+    if (t.includes('planillas_pkey') || t.includes('planillas_empresa_id_periodo_key')) return 'Ya existe la planilla de ese mes de esa empresa.';
+    if (t.includes('contratos_pkey')) return 'Este código de contrato ya está en uso.';
     if (t.includes('almacenes_un_activo')) return 'Solo puede haber un almacén central activo: inactive el actual antes de activar otro.';
     return 'Ya existe un registro con esos datos.';
   }

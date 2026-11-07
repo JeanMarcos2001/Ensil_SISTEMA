@@ -203,12 +203,12 @@ function fakeRepo(initialStaff: Staff[], initialAssignments: Assignment[], fallo
     && !bad({ branch: 'Almacén central', area: 'Logística' }).area && AREAS.every(a => !bad({ branch: 'Piura', area: a }).area || /ya tiene/.test(bad({ branch: 'Piura', area: a }).area!)));
   check('areasForPlace / placeAreaError: el almacén ofrece solo Logística; sin saber el tipo de lugar no opina', areasForPlace('almacen').join() === 'Logística' && areasForPlace('sede').length === AREAS.length && areasForPlace(undefined).length === AREAS.length
     && placeAreaError(undefined, 'Ventas') === undefined && placeAreaError('almacen', 'Ventas') !== undefined && placeAreaError('almacen', 'Logística') === undefined && placeAreaError('sede', 'Logística') === undefined);
-  check('Las personas de la base no se cruzan con los contratos ni la agenda de ejemplo (sus ids tienen el mismo formato: STF-001)', (() => {
+  check('Las personas de la base no se cruzan con la agenda de ejemplo (sus ids tienen el mismo formato: STF-001); los contratos sí son los de la base', (() => {
   const seedContract = { id: 'CON-001', staffId: 'STF-001', type: 'Indeterminado', position: 'Psicólogo Senior', startDate: '2023-01-01', status: 'Vigente' } as never;
   const read = (f: string) => readFileSync(f, 'utf8');
-  const takesSeed = (src: string) => /const \{[^}]*\} = useData\(\);/.test(src) && src.split('\n').some(l => /= useData\(\)/.test(l) && /\b(contracts|schedules|monthlySchedules)\b/.test(l));
-  return NOT_YET_IN_DB.contracts.length === 0 && NOT_YET_IN_DB.schedules.length === 0 && NOT_YET_IN_DB.activities.length === 0
-    && positionOf('STF-001', NOT_YET_IN_DB.contracts, today) === undefined && positionOf('STF-001', [seedContract], today) === 'Psicólogo Senior'
+  const takesSeed = (src: string) => /const \{[^}]*\} = useData\(\);/.test(src) && src.split('\n').some(l => /= useData\(\)/.test(l) && /\b(schedules|monthlySchedules|agendaContracts)\b/.test(l));
+  return NOT_YET_IN_DB.schedules.length === 0 && NOT_YET_IN_DB.activities.length === 0 && !('contracts' in NOT_YET_IN_DB)
+    && positionOf('STF-001', [], today) === undefined && positionOf('STF-001', [seedContract], today) === 'Psicólogo Senior'
     && !takesSeed(read('src/pages/Staff.tsx')) && !takesSeed(read('src/pages/Assignments.tsx')) && !takesSeed(read('src/pages/people/AssignmentFormModal.tsx'));
 })());
 check('La asignación ya no guarda cargo ni rol del sistema (el cargo sale del contrato; el rol, de Usuarios)', !('cargo' in asgRow()) && !('rol_sistema' in asgRow()) && !('role' in assignmentFromRow(asgRow(), FIL)) && !('systemRole' in assignmentFromRow(asgRow(), FIL))

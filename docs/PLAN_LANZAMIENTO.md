@@ -16,9 +16,9 @@ Documento de trabajo del **2026-11-06**. Reúne **todo lo que falta** para usar 
 - Inicio de sesión real (correo y contraseña), invitación por correo para fijar la contraseña, «olvidé mi contraseña» y «reenviar acceso».
 - Guardado en Supabase de: Empresas, Filiales (sedes), Almacén central, Roles y sus funciones, Cuentas de usuario, Personal y Asignaciones, con seguridad por función y por sede (RLS).
 - Reglas del acceso: una cuenta nace de una persona de Personal; el rol real se elige solo en Usuarios y se filtra por el lugar de trabajo; el Superusuario es solo para cuentas técnicas; alcance por sede en Personal y Asignaciones.
-- Hoy hay en la base: 2 empresas, 2 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación.
+- Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía).
 
-**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, alumnos, titulares, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, catálogo comercial (programas, niveles, tarifarios, promociones, tipos de pago), artículos, recetas, stock y kardex, envíos, transferencias, recepciones, ajustes, asesorías y actividades de Psicopedagogía, verificación de materiales, contratos y planilla, solicitudes, cierres, auditoría y avisos.
+**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, alumnos, titulares, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, catálogo comercial (programas, niveles, tarifarios, promociones, tipos de pago), artículos, recetas, stock y kardex, envíos, transferencias, recepciones, ajustes, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
 
 > **Consecuencia:** el sistema **no puede usarse todavía con datos reales de alumnos ni dinero**. Eso es el centro de este plan (Fase 3). Todo lo demás lo rodea.
 
@@ -152,7 +152,7 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 **Hecho el 2026-11-07:** el sistema ya no tiene sedes, empresas ni almacén de ejemplo aparte: usa los de la base (16 sedes, 6 empresas y el almacén `ALM-001`), que se leen al iniciar sesión. Los datos de ejemplo apuntan a esas mismas sedes (mismos códigos `FIL-NNN`).
 - ☑ **Datos de ejemplo con sedes que no estaban en la base** (Chiclayo, Cajamarca…): decidido el 2026-11-07 **cargar primero todas las sedes reales** (hecho: ya están las 16). Los 9 nombres que usan los datos de ejemplo (Piura, Chiclayo, Cajamarca, Los Olivos, San Isidro, Huancayo, Puno, Juliaca, Tacna) existen en la base; no se reubica ni se quita nada ahora, y los datos de ejemplo se quitan al final, cuando todo esté en la base. *(S)*
 - ☑ **Que Matrículas, Caja, Stock y el resto usen las sedes y el almacén de la base (por id)** (2026-11-07): `AccessGate` lee empresas, sedes y almacén junto con roles y cuentas; `DataProvider` los recibe y todas las pantallas leen `branches`, `warehouses` y `companies` del contexto; los códigos de los datos de ejemplo pasaron de `FIL-PIU`… a `FIL-001`…; se retiraron `orgBranches`/`orgCompanies`/`orgWarehouses` (un solo lugar para cada dato). *(L)*
-- ☐ 🤖 **Lo que sigue de esto (Lote 3):** el contrato debe saber de qué empresa es (hoy las planillas se rotulan «ENSIL» porque hay varias empresas y no se adivina una) y Contratos y Planilla pasan a la base; el alcance por sede de las pantallas lo dará la propia base cuando cada tabla se pase. *(L)*
+- ☑ **Lote 3** (2026-11-07): el contrato sabe de qué empresa es y la planilla es de una empresa y un mes; ver 6.6. *(L)*
 
 ### 6.2 Catálogo comercial
 
@@ -175,7 +175,8 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.6 Contratos y planilla  *(Lote 3)*
 
-- ☐ 🤖 Contratos con **empresa** (empleador) y cargo, planilla mensual (como foto al cerrar), vacaciones, ajustes. Hoy Contratos solo lista a las personas de ejemplo: **las personas de la base aún no pueden tener contrato**. *(L)*
+- ☑ **Contratos y planilla en la base** (2026-11-07, migración 0007): cada contrato lleva su **empresa** (obligatoria, independiente de la sede donde trabaja; se puede cambiar con motivo y resguardos) y su cargo; la planilla es **de una empresa y un mes** (cada RUC cierra la suya, con boleta a su nombre y RUC) y al cerrar guarda la foto de las líneas; vacaciones y ajustes incluidos. Nadie escribe las tablas directo (solo funciones de la base que validan y dejan quién y cuándo); los **sueldos van en una tabla aparte** que solo lee quien tiene «Ver remuneraciones». Probado en una copia local de Postgres (121 casos) y con `check-contracts-db.ts`. Migraciones **0007 y 0008** (empresa editable) aplicadas el 2026-11-07. *(L)*
+- ☐ 🤖 **Lo que queda de esto:** la agenda (Psicopedagogía, entrevistas, matrículas) todavía lee el personal y los contratos **de ejemplo** (`agendaContracts`): quien está de vacaciones o cesó en la base aún no se refleja ahí; pasa a la base con la agenda (6.7). La liquidación de beneficios al cese sigue sin hacerse. *(M)*
 - ☐ 🧑 **Validar con contabilidad** las tasas (AFP/ONP, UIT, RMV) y las reglas de renta de 5.ª categoría: hoy son referenciales y viven en `utils/payrollEngine.ts`. *(M)*
 
 ### 6.7 Psicopedagogía y verificación

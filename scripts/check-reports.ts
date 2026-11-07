@@ -202,6 +202,17 @@ check('Personal: cuenta de acceso solo si está activa', sf.kpis.withAccount ===
 check('Personal: las bajas se cuentan por la fecha de estado en el rango', sf.kpis.leavers === 1 && staffReport(stctx, { branchId: '', range: { from: '2026-01-01', to: '2026-01-31' } }).kpis.leavers === 0);
 check('Personal: planilla = última cerrada, no el borrador', sf.payroll?.period === '2026-09' && sf.payroll.net === 2700 && sf.payroll.employerCost === 3270, JSON.stringify(sf.payroll));
 check('Personal: costo de planilla por sede', sf.payroll?.byBranch[0].name === 'Arequipa' && sf.payroll.byBranch[0].employerCost === 2180);
+// Cada empresa cierra su planilla: el costo del último mes suma las de TODAS las empresas, no solo la primera que aparezca
+const twoCompanies = staffReport({
+  ...stctx,
+  payrollRuns: [
+    { id: 'PLA-2026-09-EMP-001', companyId: 'EMP-001', period: '2026-09', status: 'Cerrada', events: [], lines: [{ staffId: 'Ana', branch: 'Lima', calc: { net: 900, totalIncome: 1000, essalud: 90 } }] },
+    { id: 'PLA-2026-09-EMP-002', companyId: 'EMP-002', period: '2026-09', status: 'Cerrada', events: [], lines: [{ staffId: 'Beto', branch: 'Arequipa', calc: { net: 1800, totalIncome: 2000, essalud: 180 } }] },
+    { id: 'PLA-2026-08-EMP-001', companyId: 'EMP-001', period: '2026-08', status: 'Cerrada', events: [], lines: [{ staffId: 'Ana', branch: 'Lima', calc: { net: 1, totalIncome: 1, essalud: 0 } }] },
+    { id: 'PLA-2026-10-EMP-001', companyId: 'EMP-001', period: '2026-10', status: 'Borrador', events: [] },
+  ] as never,
+}, { branchId: '', range: octubre });
+check('Personal: el costo de planilla es el del último mes cerrado y suma TODAS las empresas', twoCompanies.payroll?.period === '2026-09' && twoCompanies.payroll?.headcount === 2 && twoCompanies.payroll?.net === 2700 && twoCompanies.payroll?.employerCost === 3270 && twoCompanies.payroll?.byBranch.length === 2, JSON.stringify(twoCompanies.payroll));
 check('Personal: filtro por sede', staffReport(stctx, { branchId: 'S1', range: octubre }).kpis.active === 2 && staffReport(stctx, { branchId: 'S1', range: octubre }).payroll?.headcount === 1);
 check('Personal: por sede cuenta sin asignación aparte', sf.byBranch.some(b => b.name === 'Sin asignación' && b.count === 1));
 

@@ -95,11 +95,14 @@ export function staffReport(ctx: StaffReportContext, f: StaffFilters): StaffRepo
     .map(r => ({ staffName: r.name, from: r.contract!.vacationStart as string, to: r.contract!.vacationEnd as string }))
     .sort((a, b) => a.from.localeCompare(b.from));
 
-  // Última planilla cerrada (o pagada): costo por sede
-  const run = [...ctx.payrollRuns].filter(r => r.status !== 'Borrador' && r.lines).sort((a, b) => b.period.localeCompare(a.period))[0];
+  // Planillas cerradas del último mes con alguna cerrada (TODAS las empresas: cada una cierra la suya): costo por sede
+  const closedRuns = ctx.payrollRuns.filter(r => r.status !== 'Borrador' && r.lines);
+  const latestPeriod = closedRuns.map(r => r.period).sort().at(-1);
+  const latestRuns = closedRuns.filter(r => r.period === latestPeriod);
+  const run = latestRuns[0];
   let payroll: StaffReport['payroll'];
-  if (run?.lines) {
-    const lines = run.lines.filter(l => !f.branchId || l.branch === branchName);
+  if (run) {
+    const lines = latestRuns.flatMap(r => r.lines ?? []).filter(l => !f.branchId || l.branch === branchName);
     const groups = new Map<string, { name: string; staff: Set<string>; net: number; employerCost: number }>();
     for (const l of lines) {
       const name = l.branch || 'Sin sede';

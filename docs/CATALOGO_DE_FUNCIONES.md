@@ -549,6 +549,7 @@ Acciones del contexto que no pertenecen a una persona (consultas, ayudas interna
 - `setIsEnrollmentWizardOpen`: Estado de la interfaz (abrir el asistente de matrícula).
 - `reloadOrgDirectory`: Consulta (vuelve a leer las empresas y filiales de la base de datos).
 - `reloadStaffDirectory`: Consulta (vuelve a leer el personal y las asignaciones de la base de datos).
+- `reloadContractsPayroll`: Consulta (vuelve a leer los contratos y las planillas de la base de datos).
 - `selectBranch`: Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).
 
 Ítems del menú sin función todavía:

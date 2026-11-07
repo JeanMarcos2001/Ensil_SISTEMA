@@ -11,9 +11,9 @@
 | Marco Salas | Administrador de sede | Los Olivos | 57 | 30 | 23 | 6 | 7 |
 | Juan Pérez | Psicopedagogía | Piura | 15 | 6 | 8 | 0 | 1 |
 | Rosa Quispe | Almacén central | todas (16) | 24 | 12 | 9 | 1 | 6 |
-| Admin Sistema | Administración general | todas (16) | 87 | 48 | 31 | 5 | 13 |
+| Admin Sistema | Administración general | todas (16) | 87 | 47 | 31 | 5 | 13 |
 | Elena Ramos | Contabilidad | todas (16) | 17 | 1 | 11 | 2 | 1 |
-| Superadmin | Superusuario | todas (16) | 184 | 122 | 48 | 7 | todos (soporte) |
+| Superadmin | Superusuario | todas (16) | 184 | 121 | 48 | 7 | todos (soporte) |
 
 ## 2. Acciones clave
 

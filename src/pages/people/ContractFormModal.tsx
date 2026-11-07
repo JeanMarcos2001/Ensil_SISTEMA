@@ -4,13 +4,13 @@ import { Button } from '../../components/ui/Button';
 import { DateInput } from '../../components/ui/DateInput';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Contract } from '../../context/DataContext';
-import { allActivities, todayLocalISO } from '../../utils/schedule';
+import { todayLocalISO } from '../../utils/schedule';
+import { NOT_YET_IN_DB } from '../../utils/staffDb';
 import {
   AFP_FUNDS,
   CONTRACT_TYPES,
   MIN_WAGE,
   PENSION_SYSTEMS,
-  buildContract,
   buildContractPatch,
   contractToForm,
   diffContract,
@@ -31,6 +31,9 @@ interface Props {
   editing?: Contract | null;
 }
 
+/** La agenda de una persona de la base aún no existe (ver NOT_YET_IN_DB): no hay asesorías ni actividades que cruzar con sus vacaciones. */
+const AGENDA = { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities };
+
 const money = (n: number) => `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none';
 
@@ -40,12 +43,13 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
  * Al editar, el trabajador no se cambia, se pide el motivo y queda la constancia de lo que cambió.
  */
 export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
-  const { staff, contracts, schedules, monthlySchedules, addContract, editContract } = useData();
+  const { orgStaff: staff, contracts, companies, addContract, editContract } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<ContractForm>(emptyContractForm());
   const [submitted, setSubmitted] = useState(false);
   const [reason, setReason] = useState('');
   const [serverError, setServerError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -56,11 +60,11 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
   }, [isOpen, editing]);
 
   const member = staff.find(s => s.id === form.staffId);
-  const agenda = useMemo(() => ({ schedules, activities: allActivities(monthlySchedules) }), [schedules, monthlySchedules]);
-  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id, agenda), [form, contracts, staff, today, editing?.id, agenda]);
+  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id, AGENDA, companies), [form, contracts, staff, today, editing?.id, companies]);
+
   const changes = useMemo(
-    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {})) : []),
-    [editing, errors, form, member]
+    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {}), id => companies.find(x => x.id === id)?.name ?? id ?? '') : []),
+    [editing, errors, form, member, companies]
   );
   const set = (patch: Partial<ContractForm>) => { setForm(f => ({ ...f, ...patch })); setServerError(null); };
   const err = (k: keyof ContractForm) => (submitted ? errors[k] : undefined);
@@ -81,15 +85,13 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSubmitted(true);
-    if (Object.keys(errors).length > 0) return;
-    if (editing) {
-      const r = editContract(editing.id, form, reason);
-      if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar el contrato.'); return; }
-    } else {
-      addContract(buildContract(form, member ?? {}));
-    }
+    if (Object.keys(errors).length > 0 || saving) return;
+    setSaving(true);
+    const r = editing ? await editContract(editing.id, form, reason) : await addContract(form);
+    setSaving(false);
+    if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar el contrato.'); return; }
     onClose();
   };
 
@@ -104,7 +106,7 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>{editing ? 'Guardar cambios' : 'Guardar Contrato'}</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : editing ? 'Guardar cambios' : 'Guardar Contrato'}</Button>
         </div>
       }
     >
@@ -125,6 +127,15 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
                 {staff.filter(s => s.status === 'Activo' || s.id === form.staffId).map(s => (
                   <option key={s.id} value={s.id}>{s.names} {s.lastNameP} {s.lastNameM}</option>
                 ))}
+              </select>
+            </Field>
+            <Field
+              label="Empresa" required className="md:col-span-2" error={err('companyId')}
+              hint={editing ? 'Se puede corregir o cambiar (queda en el historial con su motivo). No se permite si una planilla ya cerrada incluye este contrato: primero se reabre o se cesa y se registra uno nuevo.' : 'La empresa que emplea al trabajador: firma el contrato y presenta su planilla. No depende de la sede donde trabaja: elíjala según su contrato.'}
+            >
+              <select className={cls('companyId')} value={form.companyId} onChange={e => set({ companyId: e.target.value })}>
+                <option value="">Seleccionar empresa...</option>
+                {companies.filter(x => x.status === 'Activo' || x.id === form.companyId).map(x => <option key={x.id} value={x.id}>{x.name} · RUC {x.ruc}</option>)}
               </select>
             </Field>
             <Field label="Tipo de contrato" required error={err('type')} hint="Jornada: Full time">

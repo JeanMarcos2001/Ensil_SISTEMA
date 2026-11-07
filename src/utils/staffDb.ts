@@ -7,7 +7,7 @@
  * - Nombre, documento y teléfono de la cuenta de la persona, y las sedes y el almacén de esa cuenta, los mantiene la base a partir de la
  *   ficha y de las asignaciones activas con acceso: aquí solo se explica lo que va a pasar.
  */
-import type { Assignment, Branch, Contract, Permission, Role, Schedule, Staff, User, Warehouse } from '../context/DataContext';
+import type { Assignment, Branch, Permission, Role, Schedule, Staff, User, Warehouse } from '../context/DataContext';
 import { errorCoherenciaRolLugar, rolMueveAlmacen } from '../../supabase/functions/usuarios/reglas.ts';
 import type { Place } from './assignments';
 import type { FlatActivity } from './schedule';
@@ -15,12 +15,13 @@ import type { FlatActivity } from './schedule';
 // ------------------------------------------------------------------------------------------------------------------ Lo que todavía no está en la base
 
 /**
- * Contratos, asesorías y actividades todavía NO están en la base: son datos de ejemplo con sus propios ids de personal (`STF-001`…), que
- * tienen el MISMO formato que los de la base. Cruzarlos atribuiría a una persona de la base el contrato o las asesorías de otra de ejemplo
- * (p. ej. el cargo y el contrato de «Laura» a quien en la base también es `STF-001`). Por eso Personal y Asignaciones, que ya leen la base,
- * usan estas listas vacías: una persona de la base aún no tiene contrato, asesorías ni actividades. Se quita cuando pasen a la base.
+ * Las asesorías y actividades de Psicopedagogía todavía NO están en la base: son datos de ejemplo con sus propios ids de personal (`STF-001`…),
+ * que tienen el MISMO formato que los de la base. Cruzarlos atribuiría a una persona de la base las asesorías de otra de ejemplo (p. ej. las de
+ * «Laura» a quien en la base también es `STF-001`). Por eso Personal, Asignaciones y Contratos, que ya leen la base, usan estas listas vacías: una
+ * persona de la base aún no tiene asesorías ni actividades. Se quita cuando la agenda pase a la base. (Los contratos YA están en la base; los de
+ * ejemplo que quedan, `agendaContracts`, solo los usa la agenda para el personal de ejemplo.)
  */
-export const NOT_YET_IN_DB = { contracts: [] as Contract[], schedules: [] as Schedule[], activities: [] as FlatActivity[] };
+export const NOT_YET_IN_DB = { schedules: [] as Schedule[], activities: [] as FlatActivity[] };
 
 // ------------------------------------------------------------------------------------------------------------------ Filas de la base
 

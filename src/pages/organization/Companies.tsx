@@ -21,9 +21,9 @@ export function Companies({ onNavigate }: CompaniesProps) {
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const { branches, warehouses, companies, orgDirectory, addCompany, updateCompany, deleteCompany, can } = useData();
-  /** Filiales y almacenes juntos: cualquiera vinculado a la empresa impide inactivarla o eliminarla. */
-  const linked = [...branches, ...warehouses];
+  const { branches, warehouses, companies, contracts, orgDirectory, addCompany, updateCompany, deleteCompany, can } = useData();
+  /** Filiales, almacenes y contratos vigentes juntos: cualquiera vinculado a la empresa impide inactivarla o eliminarla. */
+  const linked = [...branches, ...warehouses, ...contracts.filter(k => k.status === 'Vigente')];
   const [saving, setSaving] = useState(false);
   /** Error de una acción de la tabla (activar) y de las ventanas de desactivar y eliminar. */
   const [pageError, setPageError] = useState('');
@@ -420,7 +420,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                 <div className="p-3 bg-error/10 border border-error/20 rounded-xl flex gap-3 items-start animate-in fade-in slide-in-from-top-2">
                   <AlertTriangle className="text-error shrink-0 mt-0.5" size={16} />
                   <p className="text-sm text-error leading-relaxed">
-                    No se puede inactivar esta empresa porque está vinculada a al menos una filial o un almacén.
+                    No se puede inactivar esta empresa porque está vinculada a al menos una filial, un almacén o un contrato vigente.
                   </p>
                 </div>
               )}
@@ -517,7 +517,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                 <p className="text-sm font-medium">No se puede eliminar esta empresa</p>
               </div>
               <p className="text-sm text-text-secondary">
-                El sistema ha detectado que esta empresa está vinculada a alguna filial o almacén. 
+                El sistema ha detectado que esta empresa está vinculada a alguna filial, almacén o contrato vigente. 
                 Primero desvincula todas las sedes de esta empresa para poder eliminarla.
               </p>
             </>

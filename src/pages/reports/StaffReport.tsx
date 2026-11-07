@@ -15,7 +15,7 @@ const HEADERS = ['Trabajador', 'Documento', 'Sede', 'Área', 'Cargo', 'Estado', 
 
 /** Reportes → Personal: la plantilla, quién tiene contrato y cuenta, qué contratos vencen y cuánto costó la última planilla. */
 export function StaffReport() {
-  const { staff, contracts, assignments, users, branches, payrollRuns, can } = useData();
+  const { orgStaff: staff, contracts, orgAssignments: assignments, users, branches, payrollRuns, can } = useData();
   const navigate = useNavigate();
   const today = todayLocalISO();
   const { range, preset, setPreset, setRange } = useRange('anio');

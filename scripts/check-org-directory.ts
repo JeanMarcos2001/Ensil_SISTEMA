@@ -217,11 +217,11 @@ function memoryRepo(initialCompanies: Company[] = [], initialBranches: Branch[] 
   check('Editar la razón social guarda el cambio', edit.ok && edit.value?.name === 'SILEE E.I.R.L.' && m4.emps[1].razon_social === 'SILEE E.I.R.L.');
   const updatesBefore = m4.calls.filter(c => c === 'updateCompany').length;
   const inact1 = await editCompany(m4.repo, cs, bs, 'EMP-001', { status: 'Inactivo' });
-  check('No se inactiva una empresa con filiales (no llega a la base)', !inact1.ok && /filiales o almacenes vinculados/.test(inact1.error!) && m4.emps[0].estado === 'Activo' && m4.calls.filter(c => c === 'updateCompany').length === updatesBefore);
+  check('No se inactiva una empresa con filiales (no llega a la base)', !inact1.ok && /filiales, almacenes o contratos vigentes vinculados/.test(inact1.error!) && m4.emps[0].estado === 'Activo' && m4.calls.filter(c => c === 'updateCompany').length === updatesBefore);
   const inact2 = await editCompany(m4.repo, cs, bs, 'EMP-002', { status: 'Inactivo' });
   check('Una empresa sin filiales sí se inactiva', inact2.ok && inact2.value?.status === 'Inactivo');
   const del1 = await removeCompany(m4.repo, cs, bs, 'EMP-001');
-  check('No se elimina una empresa con filiales', !del1.ok && /filiales o almacenes/.test(del1.error!) && m4.emps.length === 2);
+  check('No se elimina una empresa con filiales', !del1.ok && /filiales, almacenes o contratos/.test(del1.error!) && m4.emps.length === 2);
   const del2 = await removeCompany(m4.repo, cs, bs, 'EMP-002');
   check('Una empresa sin filiales se elimina', del2.ok && m4.emps.length === 1);
   check('La base también protege si la pantalla tenía la lista desactualizada (sin filiales a la vista)', await (async () => {

@@ -11,10 +11,11 @@ import { useData, type PayrollLine, type PayrollRun } from '../../context/DataCo
 import { PERM } from '../../utils/authority';
 import { csvFileName, downloadCsv } from '../../utils/exportCsv';
 import { addPeriods, periodLabel, periodOf } from '../../utils/payrollEngine';
-import { PAYROLL_HEADERS, payrollRows, payslipHtml, totalsOf } from '../../utils/payrollRun';
+import { PAYROLL_HEADERS, payrollRows, payslipHtml, runIdOf, totalsOf } from '../../utils/payrollRun';
 import { printHtml, printTable } from '../../utils/printTable';
 import { todayLocalISO } from '../../utils/schedule';
 import { Field, inputCls } from '../enrollment/fields';
+import { ContractsDbNotice } from '../../components/people/ContractsDbNotice';
 
 const money = (n: number) => `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const STATUS_TONE: Record<PayrollRun['status'], 'warning' | 'info'> = { Borrador: 'warning', Cerrada: 'info' };
@@ -36,7 +37,7 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?
  */
 export function Payroll() {
   const {
-    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, reopenPayroll, companies, staff, can,
+    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, reopenPayroll, companies, orgStaff: staff, can,
   } = useData();
   const today = todayLocalISO();
   const [params, setParams] = useSearchParams();
@@ -51,27 +52,34 @@ export function Payroll() {
   const [reopening, setReopening] = useState(false);
   const [adjForm, setAdjForm] = useState({ staffId: '', kind: 'Ingreso' as 'Ingreso' | 'Descuento', concept: '', amount: '', taxable: true, reason: '' });
   const [adjError, setAdjError] = useState<string | null>(null);
+  const [companyId, setCompanyId] = useState('');
 
   const run = payrollRuns.find(r => r.id === openId);
   const built = useMemo(() => (run ? payrollLinesOf(run) : { lines: [] as PayrollLine[], warnings: [] }), [run, payrollLinesOf]);
   const totals = totalsOf(built.lines);
-  // El contrato todavía no sabe de qué empresa es (Lote 3): con varias empresas no se adivina una, se rotula «ENSIL».
-  const onlyCompany = companies.filter(c => c.status === 'Activo').length === 1 ? companies.find(c => c.status === 'Activo') : undefined;
-  const company = onlyCompany?.commercialName || onlyCompany?.name || 'ENSIL';
+  // Cada planilla es de UNA empresa (la de sus contratos): se rotula con su razón social (en una cerrada, la de la foto).
+  const activeCompanies = companies.filter(c => c.status === 'Activo');
+  const genCompanyId = companyId || activeCompanies[0]?.id || '';
+  const companyOf = (id: string) => companies.find(c => c.id === id)?.name ?? id;
+  const company = run ? (built.lines[0]?.companyName || companyOf(run.companyId)) : '';
   const member = staffFilter ? staff.find(s => s.id === staffFilter) : undefined;
 
   if (!can(PERM.payrollView)) {
     return <div className="flex items-center justify-center h-full text-text-muted"><p>Su rol no tiene permiso para ver las planillas.</p></div>;
   }
 
-  const report = (r: { ok: boolean; error?: string }, okText: string) => setMessage({ ok: r.ok, text: r.ok ? okText : r.error ?? 'No se pudo completar.' });
+  const report = async (pending: Promise<{ ok: boolean; error?: string }>, okText: string) => {
+    const r = await pending;
+    setMessage({ ok: r.ok, text: r.ok ? okText : r.error ?? 'No se pudo completar.' });
+    return r;
+  };
   const line = run && lineOpen ? built.lines.find(l => `${l.contractId}` === lineOpen) : undefined;
   const editable = run?.status === 'Borrador' && can(PERM.payrollAdjust);
 
   const openAdjust = (staffId = '') => { setAdjForm({ staffId, kind: 'Ingreso', concept: '', amount: '', taxable: true, reason: '' }); setAdjError(null); setAdjusting(true); };
-  const submitAdjust = () => {
+  const submitAdjust = async () => {
     if (!run) return;
-    const res = addPayrollAdjustment(run.id, { staffId: adjForm.staffId, kind: adjForm.kind, concept: adjForm.concept, amount: Number(adjForm.amount), taxable: adjForm.taxable, reason: adjForm.reason });
+    const res = await addPayrollAdjustment(run.id, { staffId: adjForm.staffId, kind: adjForm.kind, concept: adjForm.concept, amount: Number(adjForm.amount), taxable: adjForm.taxable, reason: adjForm.reason });
     if (!res.ok) { setAdjError(res.error ?? 'No se pudo agregar el ajuste.'); return; }
     setAdjusting(false);
     setMessage({ ok: true, text: 'Ajuste agregado: la planilla se recalculó.' });
@@ -79,7 +87,7 @@ export function Payroll() {
 
   const exportRun = () => run && downloadCsv(csvFileName(`Planilla ${run.period}`, today), PAYROLL_HEADERS, payrollRows(built.lines));
   const printRun = () => run && printTable(`Planilla de ${periodLabel(run.period)}`, `${company} · ${built.lines.length} trabajador(es) · neto ${money(totals.net)}`, PAYROLL_HEADERS, payrollRows(built.lines));
-  const printSlip = (l: PayrollLine) => run && printHtml(payslipHtml(l, run.period, company));
+  const printSlip = (l: PayrollLine) => run && printHtml(payslipHtml(l, run.period));
 
   // ---------------------------------------------------------------- Detalle de una planilla
   if (run) {
@@ -90,7 +98,7 @@ export function Payroll() {
         <div className="flex flex-wrap justify-between items-start gap-3">
           <div>
             <button type="button" onClick={() => { setOpenId(null); setMessage(null); }} className="text-sm text-primary-accent hover:underline flex items-center gap-1 mb-2"><ArrowLeft size={14} /> Todas las planillas</button>
-            <h2 className="text-2xl font-semibold text-text-primary flex items-center gap-3">Planilla de {periodLabel(run.period)} <Badge variant={STATUS_TONE[run.status]}>{run.status}</Badge></h2>
+            <h2 className="text-2xl font-semibold text-text-primary flex items-center gap-3">Planilla de {periodLabel(run.period)} <span className="text-lg font-normal text-text-secondary">· {company}</span> <Badge variant={STATUS_TONE[run.status]}>{run.status}</Badge></h2>
             <p className="text-sm text-text-secondary mt-1">
               {run.status === 'Borrador' ? 'Se recalcula con los contratos. Ajuste lo eventual y ciérrela.' : `Cerrada el ${run.closedAt ? when(run.closedAt) : ''} por ${run.closedBy}. Las líneas son una foto: cambiar un contrato ya no las altera.`}
             </p>
@@ -105,6 +113,7 @@ export function Payroll() {
           </div>
         </div>
 
+        <ContractsDbNotice />
         {message && <p className={`text-sm ${message.ok ? 'text-success-text' : 'text-danger-text'}`}>{message.text}</p>}
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -262,7 +271,7 @@ export function Payroll() {
         <ConfirmDialog
           isOpen={confirmDelete}
           onClose={() => setConfirmDelete(false)}
-          onConfirm={() => { const r = deletePayrollDraft(run.id); report(r, 'Borrador eliminado.'); if (r.ok) setOpenId(null); }}
+          onConfirm={() => { void report(deletePayrollDraft(run.id), 'Borrador eliminado.').then(r => { if (r.ok) setOpenId(null); }); }}
           title="Eliminar el borrador"
           description={`Se eliminará el borrador de ${periodLabel(run.period)} con sus ajustes. Se puede generar de nuevo.`}
           variant="danger"
@@ -277,7 +286,7 @@ export function Payroll() {
           danger
           detailLabel="Motivo de la reapertura"
           detailPlaceholder="Qué se corregirá y por qué"
-          onSubmit={({ detail }) => { const r = reopenPayroll(run.id, detail); if (r.ok) setMessage({ ok: true, text: 'Planilla reabierta: vuelve a ser un borrador.' }); return r.ok ? null : r.error ?? 'No se pudo reabrir.'; }}
+          onSubmit={async ({ detail }) => { const r = await reopenPayroll(run.id, detail); if (r.ok) setMessage({ ok: true, text: 'Planilla reabierta: vuelve a ser un borrador.' }); return r.ok ? null : r.error ?? 'No se pudo reabrir.'; }}
         >
           <p className="text-sm text-text-secondary">Vuelve a ser un borrador y se recalcula con los contratos de hoy. Queda en el historial con su motivo.</p>
         </ReasonDialog>
@@ -286,7 +295,8 @@ export function Payroll() {
   }
 
   // ---------------------------------------------------------------- Lista de planillas
-  const nextPeriod = payrollRuns.length > 0 ? addPeriods(payrollRuns[0].period, 1) : periodOf(today);
+  const ownRuns = payrollRuns.filter(r => r.companyId === genCompanyId);
+  const nextPeriod = ownRuns.length > 0 ? addPeriods(ownRuns[0].period, 1) : periodOf(today);
   const history = member
     ? payrollRuns.flatMap(r => payrollLinesOf(r).lines.filter(l => l.staffId === member.id).map(l => ({ run: r, line: l })))
     : [];
@@ -298,14 +308,22 @@ export function Payroll() {
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Planilla</h2>
           <p className="text-sm text-text-secondary">Sueldos mensuales calculados desde los contratos: pensión, renta de 5.ª categoría, gratificaciones y aportes del empleador.</p>
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="w-64">
+            <label className="text-xs font-medium text-text-secondary">Empresa</label>
+            <select className={inputCls} value={genCompanyId} onChange={e => { setCompanyId(e.target.value); setMessage(null); }}>
+              {activeCompanies.length === 0 && <option value="">Sin empresas activas</option>}
+              {activeCompanies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </div>
           <div className="w-44">
             <label className="text-xs font-medium text-text-secondary">Mes</label>
             <input type="month" className={inputCls} value={period} max={periodOf(today)} onChange={e => { setPeriod(e.target.value); setMessage(null); }} />
           </div>
-          <Button variant="primary" className="gap-2" onClick={() => { const r = generatePayroll(period); report(r, `Planilla de ${periodLabel(period)} generada.`); if (r.ok) setOpenId(`PLA-${period}`); }} disabled={!can(PERM.payrollGenerate)}><Plus size={16} /> Generar planilla</Button>
+          <Button variant="primary" className="gap-2" onClick={() => { void report(generatePayroll(genCompanyId, period), `Planilla de ${periodLabel(period)} generada.`).then(r => { if (r.ok) setOpenId(runIdOf(period, genCompanyId)); }); }} disabled={!can(PERM.payrollGenerate) || !genCompanyId}><Plus size={16} /> Generar planilla</Button>
         </div>
       </div>
+      <ContractsDbNotice />
       {message && <p className={`text-sm ${message.ok ? 'text-success-text' : 'text-danger-text'}`}>{message.text}</p>}
 
       {member && (
@@ -337,15 +355,16 @@ export function Payroll() {
       <Card className="p-0 overflow-hidden">
         <table className="w-full text-sm text-left">
           <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
-            <tr><th className="px-4 py-3 font-medium">Mes</th><th className="px-4 py-3 font-medium">Estado</th><th className="px-4 py-3 font-medium text-right">Trabajadores</th><th className="px-4 py-3 font-medium text-right">Neto</th><th className="px-4 py-3 font-medium text-right">Costo del empleador</th><th className="px-4 py-3 font-medium text-right">Acciones</th></tr>
+            <tr><th className="px-4 py-3 font-medium">Mes</th><th className="px-4 py-3 font-medium">Empresa</th><th className="px-4 py-3 font-medium">Estado</th><th className="px-4 py-3 font-medium text-right">Trabajadores</th><th className="px-4 py-3 font-medium text-right">Neto</th><th className="px-4 py-3 font-medium text-right">Costo del empleador</th><th className="px-4 py-3 font-medium text-right">Acciones</th></tr>
           </thead>
           <tbody className="divide-y divide-border-soft">
-            {payrollRuns.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-text-muted">Todavía no hay planillas. Elija el mes y pulse «Generar planilla»; se arma con los contratos de ese mes (sugerido: {periodLabel(nextPeriod)}).</td></tr>}
+            {payrollRuns.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-text-muted">Todavía no hay planillas. Elija la empresa y el mes y pulse «Generar planilla»; se arma con los contratos de esa empresa en ese mes (sugerido: {periodLabel(nextPeriod)}).</td></tr>}
             {payrollRuns.map(r => {
               const t = totalsOf(payrollLinesOf(r).lines);
               return (
                 <tr key={r.id} className="hover:bg-surface-muted/50 cursor-pointer" onClick={() => { setOpenId(r.id); setMessage(null); }}>
                   <td className="px-4 py-3 font-medium text-text-primary">{periodLabel(r.period)}<div className="text-xs font-normal text-text-muted font-mono">{r.id}</div></td>
+                  <td className="px-4 py-3 text-text-secondary">{companyOf(r.companyId)}</td>
                   <td className="px-4 py-3"><Badge variant={STATUS_TONE[r.status]}>{r.status}</Badge></td>
                   <td className="px-4 py-3 text-right">{t.headcount}</td>
                   <td className="px-4 py-3 text-right font-semibold">{money(t.net)}</td>

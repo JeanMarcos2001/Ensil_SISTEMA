@@ -8,7 +8,7 @@ import {
 } from '../src/utils/payrollEngine';
 import { estimateNet, pensionRate } from '../src/utils/payroll';
 import {
-  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
+  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, runIdOf, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
 } from '../src/utils/payrollRun';
 import { accessCheck, defaultsFromStaff, deactivationNote, syncPatch, validateLinkedUser } from '../src/utils/staffAccess';
 
@@ -89,7 +89,7 @@ const staffList: Staff[] = [
   { id: '3', code: '3', docType: 'DNI', docNumber: '11111111', names: 'Luis', lastNameP: 'Rojas', lastNameM: 'Vega', status: 'Activo', phone: '900000001' } as Staff,
   { id: '4', code: '4', docType: 'DNI', docNumber: '22222222', names: 'Ana', lastNameP: 'Cruz', lastNameM: 'Soto', status: 'Inactivo', phone: '900000002' } as Staff,
 ];
-const contract = (id: string, staffId: string, t: ContractTerms, status = 'Vigente'): Contract => ({ id, staffId, status, shift: 'Full time', ...t } as Contract);
+const contract = (id: string, staffId: string, t: ContractTerms, status = 'Vigente', companyId = 'EMP-001'): Contract => ({ id, staffId, companyId, status, shift: 'Full time', ...t } as Contract);
 const contracts: Contract[] = [
   contract('C1', '1', juan),
   contract('C2', '2', maria),
@@ -98,32 +98,33 @@ const contracts: Contract[] = [
 const asg = (id: string, staffId: string, branch: string, o: Partial<Assignment> = {}): Assignment =>
   ({ id, staffId, branch, area: 'Psicopedagogía', hasAccess: true, startDate: '2023-01-01', isMain: true, status: 'Activa', ...o } as Assignment);
 const assignments: Assignment[] = [asg('A1', '1', 'Piura'), asg('A2', '2', 'Chiclayo', { area: 'Administración' }), asg('A3', '2', 'Piura', { isMain: false, area: 'Ventas' })];
-const ctx = { contracts, staff: staffList, assignments, runs: [] as PayrollRun[] };
+const companies = [{ id: 'EMP-001', name: 'SILEE E.I.R.L.', ruc: '20610010289' }, { id: 'EMP-002', name: 'ENSIL EVOLUTION S.R.L.', ruc: '20612459313' }];
+const ctx = { contracts, staff: staffList, assignments, runs: [] as PayrollRun[], companies };
 check('Contratos que cubren el mes (incluye el que cesó dentro de él)', contractsInPeriod(contracts, '2026-10').map(c => c.id).join() === 'C1,C2,C3' && contractsInPeriod(contracts, '2026-11').map(c => c.id).join() === 'C1,C2');
-const built = buildLines('2026-10', ctx, []);
+const built = buildLines('2026-10', 'EMP-001', ctx, []);
 check('Una línea por contrato, ordenadas por nombre', built.lines.map(l => l.staffName.split(' ')[0]).join() === 'Ana,Juan,María', built.lines.map(l => l.staffName).join());
 check('La línea trae sede, cargo y los días pagados', built.lines.find(l => l.staffId === '1')!.branch === 'Piura' && built.lines.find(l => l.staffId === '4')!.calc.days === 10);
-check('Aviso: personal activo sin contrato en el mes', built.warnings.some(w => w.staffId === '3' && /sin contrato/.test(w.text)));
+check('Aviso: personal activo sin contrato en el mes', built.warnings.some(w => /Luis Rojas Vega/.test(w.text) && /no tiene contrato/.test(w.text)));
 check('El cese a mitad de mes deja constancia en la línea', built.lines.find(l => l.staffId === '4')!.warnings.some(w => /10 de 31/.test(w)));
-const broken = buildLines('2026-10', { ...ctx, contracts: [contract('C9', '1', { type: 'Indeterminado', startDate: '2024-01-01', grossSalary: 3000 })] }, []);
+const broken = buildLines('2026-10', 'EMP-001', { ...ctx, contracts: [contract('C9', '1', { type: 'Indeterminado', startDate: '2024-01-01', grossSalary: 3000 })] }, []);
 check('Falta el sistema de pensiones: error que impide cerrar', broken.warnings.some(w => w.level === 'error') && validateClose({ status: 'Borrador', period: '2026-10' }, broken, '2026-10-24').length > 0);
-const expiring = buildLines('2026-10', { ...ctx, contracts: [contract('C8', '2', { ...maria, endDate: '2026-10-20' })] }, []);
+const expiring = buildLines('2026-10', 'EMP-001', { ...ctx, contracts: [contract('C8', '2', { ...maria, endDate: '2026-10-20' })] }, []);
 check('Aviso: contrato que vence dentro del mes', expiring.warnings.some(w => /vence el 2026-10-20/.test(w.text)));
 const adj: PayrollAdjustment = { id: 'AJU-001', staffId: '2', kind: 'Ingreso', concept: 'Bono por metas', amount: 500, taxable: true, reason: 'Metas de septiembre', by: 'u', at: '2026-10-20T10:00:00Z' };
-const withAdj = buildLines('2026-10', ctx, [adj]);
+const withAdj = buildLines('2026-10', 'EMP-001', ctx, [adj]);
 check('Un ajuste se aplica a la línea del trabajador', withAdj.lines.find(l => l.staffId === '2')!.calc.pensionBase === 3300 && withAdj.lines.find(l => l.staffId === '2')!.adjustments.length === 1);
 
 // Totales, filas y boleta
 const tot = totalsOf(built.lines);
 check('Totales: trabajadores, neto y costo del empleador', tot.headcount === 3 && near(tot.net, built.lines.reduce((s, l) => s + l.calc.net, 0)) && near(tot.employerCost, tot.income + tot.essalud));
 check('Filas para exportar', payrollRows(built.lines).length === 3 && payrollRows(built.lines)[0].length === PAYROLL_HEADERS.length);
-const slip = payslipHtml({ ...built.lines[1], staffName: 'Juan <b>Pérez</b>' }, '2026-10', 'ENSIL & Cía');
-check('La boleta escapa el HTML y muestra el neto', !slip.includes('<b>Pérez') && slip.includes('&lt;b&gt;') && slip.includes('NETO A PAGAR') && slip.includes('ENSIL &amp; Cía'));
+const slip = payslipHtml({ ...built.lines[1], staffName: 'Juan <b>Pérez</b>', companyName: 'ENSIL & Cía' }, '2026-10');
+check('La boleta escapa el HTML, muestra el neto y lleva la empresa del contrato con su RUC', !slip.includes('<b>Pérez') && slip.includes('&lt;b&gt;') && slip.includes('NETO A PAGAR') && slip.includes('ENSIL &amp; Cía') && slip.includes('RUC 20610010289'));
 
 // ---------------------------------------------------------------- Flujo
-const run = (id: string, period: string, status: PayrollRun['status'], lines?: PayrollRun['lines']): PayrollRun => ({ id, period, status, adjustments: [], lines, createdAt: 'x', createdBy: 'u', events: [] });
-check('Generar: formato, mes futuro y duplicado', validateGenerate('', [], '2026-10-24').length === 1 && validateGenerate('2026-11', [], '2026-10-24').length === 1 && validateGenerate('2026-10', [run('PLA-2026-10', '2026-10', 'Borrador')], '2026-10-24').length === 1 && validateGenerate('2026-10', [], '2026-10-24').length === 0);
-check('Generar: el mes anterior del año debe estar cerrado (la renta depende de él)', validateGenerate('2026-10', [run('PLA-2026-09', '2026-09', 'Borrador')], '2026-10-24').length === 1 && validateGenerate('2026-10', [run('PLA-2026-09', '2026-09', 'Cerrada', [])], '2026-10-24').length === 0 && validateGenerate('2026-01', [run('PLA-2025-12', '2025-12', 'Borrador')], '2026-01-31').length === 0);
+const run = (id: string, period: string, status: PayrollRun['status'], lines?: PayrollRun['lines'], companyId = 'EMP-001'): PayrollRun => ({ id, companyId, period, status, adjustments: [], lines, createdAt: 'x', createdBy: 'u', events: [] });
+check('Generar: formato, mes futuro y duplicado', validateGenerate('', 'EMP-001', [], '2026-10-24').length === 1 && validateGenerate('2026-11', 'EMP-001', [], '2026-10-24').length === 1 && validateGenerate('2026-10', 'EMP-001', [run('PLA-2026-10', '2026-10', 'Borrador')], '2026-10-24').length === 1 && validateGenerate('2026-10', 'EMP-001', [], '2026-10-24').length === 0);
+check('Generar: el mes anterior del año debe estar cerrado (la renta depende de él)', validateGenerate('2026-10', 'EMP-001', [run('PLA-2026-09', '2026-09', 'Borrador')], '2026-10-24').length === 1 && validateGenerate('2026-10', 'EMP-001', [run('PLA-2026-09', '2026-09', 'Cerrada', [])], '2026-10-24').length === 0 && validateGenerate('2026-01', 'EMP-001', [run('PLA-2025-12', '2025-12', 'Borrador')], '2026-01-31').length === 0);
 const okAdj = { kind: 'Ingreso', concept: 'Bono', amount: 100, reason: 'Metas del mes' };
 check('Ajuste: solo en borrador, con concepto, monto y motivo', validateAdjustment({ status: 'Borrador' }, okAdj, true).length === 0 && validateAdjustment({ status: 'Cerrada' }, okAdj, true).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, amount: 0 }, true).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, reason: 'x' }, true).length === 1 && validateAdjustment({ status: 'Borrador' }, okAdj, false).length === 1 && validateAdjustment({ status: 'Borrador' }, { ...okAdj, kind: 'Otro' }, true).length === 1);
 check('Cerrar: sin trabajadores o con errores no se cierra; sin errores sí', validateClose({ status: 'Borrador', period: '2026-10' }, { lines: [], warnings: [] }, '2026-10-24').length === 1 && validateClose({ status: 'Borrador', period: '2026-10' }, built, '2026-10-24').length === 0 && validateClose({ status: 'Cerrada', period: '2026-10' }, built, '2026-10-24').length === 1);
@@ -131,8 +132,28 @@ const closedSep = run('PLA-2026-09', '2026-09', 'Cerrada', []);
 const closedOct = run('PLA-2026-10', '2026-10', 'Cerrada', []);
 check('Reabrir: con motivo, y no si ya hay una posterior cerrada del año (no existe «pagada»: el sistema no registra pagos al personal)', validateReopen(closedOct, [closedSep, closedOct], 'Error en un bono').length === 0 && validateReopen(closedOct, [closedSep, closedOct], '').length === 1 && validateReopen(closedSep, [closedSep, closedOct], 'motivo largo').length === 1 && validateReopen(run('PLA-2026-11', '2026-11', 'Borrador', []), [], 'motivo largo').length === 1);
 
+// ---------------------------------------------------------------- Una planilla por empresa y mes (Lote 3)
+check('El código de una planilla es el del mes y la empresa', runIdOf('2026-10', 'EMP-003') === 'PLA-2026-10-EMP-003');
+check('Generar pide la empresa', validateGenerate('2026-10', '', [], '2026-10-24')[0] === 'Elija la empresa de la planilla.');
+check('Cada empresa tiene su planilla del mismo mes (el borrador de otra no estorba ni cuenta como duplicado)', validateGenerate('2026-10', 'EMP-002', [run('PLA-2026-10-EMP-001', '2026-10', 'Borrador')], '2026-10-24').length === 0
+  && validateGenerate('2026-10', 'EMP-001', [run('PLA-2026-10-EMP-001', '2026-10', 'Borrador')], '2026-10-24').some(m => /Ya existe/.test(m)));
+check('El mes anterior en borrador solo frena a la MISMA empresa', validateGenerate('2026-10', 'EMP-002', [run('PLA-2026-09-EMP-001', '2026-09', 'Borrador')], '2026-10-24').length === 0
+  && validateGenerate('2026-10', 'EMP-001', [run('PLA-2026-09-EMP-001', '2026-09', 'Borrador')], '2026-10-24').some(m => /Cierre primero/.test(m)));
+check('Reabrir: la planilla posterior cerrada que frena es la de la misma empresa', validateReopen(run('a', '2026-09', 'Cerrada', [], 'EMP-001'), [run('a', '2026-09', 'Cerrada', [], 'EMP-001'), run('b', '2026-10', 'Cerrada', [], 'EMP-002')], 'Corrección').length === 0
+  && validateReopen(run('a', '2026-09', 'Cerrada', [], 'EMP-001'), [run('a', '2026-09', 'Cerrada', [], 'EMP-001'), run('b', '2026-10', 'Cerrada', [], 'EMP-001')], 'Corrección').length === 1);
+const twoCompanies = [...contracts, contract('C5', '3', { type: 'Indeterminado', startDate: '2024-01-01', grossSalary: 2500, pensionSystem: 'ONP' }, 'Vigente', 'EMP-002')];
+const ctx2 = { ...ctx, contracts: twoCompanies };
+check('Solo entran los contratos de la empresa de la planilla', contractsInPeriod(twoCompanies, '2026-10', 'EMP-002').map(x => x.id).join() === 'C5' && contractsInPeriod(twoCompanies, '2026-10', 'EMP-001').map(x => x.id).join() === 'C1,C2,C3' && contractsInPeriod(twoCompanies, '2026-10').length === 4);
+const evo = buildLines('2026-10', 'EMP-002', ctx2, []);
+const silee = buildLines('2026-10', 'EMP-001', ctx2, []);
+check('La planilla de una empresa lleva solo a sus trabajadores, con el nombre y el RUC de esa empresa', evo.lines.length === 1 && evo.lines[0].staffId === '3' && evo.lines[0].companyId === 'EMP-002' && evo.lines[0].companyName === 'ENSIL EVOLUTION S.R.L.' && evo.lines[0].companyRuc === '20612459313'
+  && silee.lines.length === 3 && silee.lines.every(l => l.companyId === 'EMP-001' && l.companyName === 'SILEE E.I.R.L.'));
+check('Quien tiene contrato en otra empresa no figura «sin contrato» en ninguna planilla', !silee.warnings.some(w => /Luis/.test(w.text) && /contrato que cubra/.test(w.text)) && !evo.warnings.some(w => /Luis/.test(w.text) && /contrato que cubra/.test(w.text)));
+check('Sin contrato en ninguna empresa el aviso sale UNA vez por planilla, con su nombre, sin depender de la sede (la empresa que emplea a alguien no es la de su sede)', built.warnings.filter(w => /no tiene contrato|no tienen contrato/.test(w.text)).length === 1 && buildLines('2026-10', 'EMP-002', ctx, []).warnings.filter(w => /Luis/.test(w.text)).length === 1 && !built.warnings.some(w => w.staffId !== undefined && /sin contrato/.test(w.text)));
+check('Una planilla de una empresa sin contratos sale vacía (no se puede cerrar)', buildLines('2026-10', 'EMP-002', ctx, []).lines.length === 0 && validateClose({ status: 'Borrador', period: '2026-10' }, buildLines('2026-10', 'EMP-002', ctx, []), '2026-10-24').length > 0);
+
 // Lo cerrado alimenta la renta de los meses siguientes
-const sepLines = buildLines('2026-09', ctx, []).lines;
+const sepLines = buildLines('2026-09', 'EMP-001', ctx, []).lines;
 const closedRuns = [run('PLA-2026-09', '2026-09', 'Cerrada', sepLines), run('PLA-2026-10', '2026-10', 'Borrador')];
 const prev = priorMonths(closedRuns, '1', '2026-10');
 check('Los meses previos salen de las planillas cerradas del mismo año', prev.length === 1 && prev[0].period === '2026-09' && prev[0].income === sepLines.find(l => l.staffId === '1')!.calc.pensionBase && prev[0].withheld === sepLines.find(l => l.staffId === '1')!.calc.incomeTax);

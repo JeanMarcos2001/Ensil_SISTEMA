@@ -448,7 +448,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll'] },
     { action: 'create', label: 'Crear contrato', kind: 'crear', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['addContract'],
       counterparts: [cp('per-planilla:generate', 'any', 'advisory', 'Sin quien arme la planilla, el contrato no se pagará.')] },
-    { action: 'edit', label: 'Editar contrato (cambio de condiciones con motivo)', kind: 'editar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['updateContract', 'editContract'] },
+    { action: 'edit', label: 'Editar contrato (cambio de condiciones con motivo)', kind: 'editar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['editContract'] },
     { action: 'close', label: 'Cerrar contrato', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['contract', 'assignment'], actions: ['closeContract'] },
     { action: 'renew', label: 'Renovar contrato', kind: 'operar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['renewContract'] },
   ]),
@@ -611,6 +611,7 @@ export const NON_CAPABILITY_ACTIONS: Record<string, string> = {
   setIsEnrollmentWizardOpen: 'Estado de la interfaz (abrir el asistente de matrícula).',
   reloadOrgDirectory: 'Consulta (vuelve a leer las empresas y filiales de la base de datos).',
   reloadStaffDirectory: 'Consulta (vuelve a leer el personal y las asignaciones de la base de datos).',
+  reloadContractsPayroll: 'Consulta (vuelve a leer los contratos y las planillas de la base de datos).',
   selectBranch: 'Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).',
 };
 

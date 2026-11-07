@@ -35,7 +35,7 @@ export function StaffDbNotice() {
   return (
     <div className="mb-4 flex items-start gap-2 rounded-xl border border-info-text/15 bg-info-tint px-4 py-3 text-sm text-info-text">
       <Database size={16} className="mt-0.5 shrink-0" />
-      <span>El personal y las asignaciones están guardados en la base de datos. Contratos, planilla y el resto del sistema siguen usando datos de ejemplo hasta que se pasen.</span>
+      <span>El personal y las asignaciones están guardados en la base de datos, igual que los contratos y la planilla. La agenda y el resto del sistema siguen usando datos de ejemplo hasta que se pasen.</span>
     </div>
   );
 }
