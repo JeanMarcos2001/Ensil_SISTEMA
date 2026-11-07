@@ -26,7 +26,7 @@ const qOrNull = (v: string) => (v.trim() ? q(v.trim()) : 'null');
 
 function renderSql(): string {
   const empresas = EMPRESAS.filter(e => !e.inBase)
-    .map(e => `    (${q(e.ruc)}, ${q(e.name)})`).join(',\n');
+    .map(e => `    (${q(e.ruc)}, ${q(e.name)}, ${q(e.regime)})`).join(',\n');
   const sedes = SEDES.filter(s => !s.inBase)
     .map(s => `    (${[s.name, s.ruc, s.address, s.reference, s.department, s.province, s.district].map(q).join(', ')}, ${qOrNull(s.phoneFixed)}, ${qOrNull(s.phoneMobile)})`).join(',\n');
   const evolution = EMPRESAS.find(e => e.ruc === EVOLUTION)!;
@@ -35,7 +35,7 @@ function renderSql(): string {
 -- La tabla de consulta está en docs/DATOS_SEDES.md.
 --
 -- NO es una migración: se ejecuta a mano, una sola vez, en el SQL Editor del proyecto \`ensil-sistema\` (NO el de la web).
--- Antes: deben existir SILEE y Colegio Ensil de las Américas (Organización → Empresas) y las sedes Los Olivos y Piura.
+-- Antes: aplicar la migración 0009 (régimen laboral); deben existir SILEE y Colegio Ensil de las Américas (Organización → Empresas) y las sedes Los Olivos y Piura.
 -- Es seguro repetirlo: no vuelve a crear la empresa que ya tiene ese RUC ni la sede que ya tiene ese nombre.
 -- Los códigos (EMP-NNN y FIL-NNN) se asignan solos, a continuación del mayor que exista, en el orden de esta lista.
 -- Ilo (de la web) NO se carga todavía: aún no tiene empresa definida.
@@ -52,12 +52,12 @@ begin
   for e in
     select * from (values
 ${empresas}
-    ) as t(ruc, razon_social)
+    ) as t(ruc, razon_social, regimen_laboral)
   loop
     if not exists (select 1 from public.empresas where ruc = e.ruc) then
       select coalesce(max(substring(id from 5)::int), 0) + 1 into n from public.empresas;
-      insert into public.empresas (id, ruc, razon_social, estado, observaciones)
-      values ('EMP-' || lpad(n::text, 3, '0'), e.ruc, e.razon_social, 'Activo', ${q(EMPRESA_OBSERVACION)});
+      insert into public.empresas (id, ruc, razon_social, estado, observaciones, regimen_laboral)
+      values ('EMP-' || lpad(n::text, 3, '0'), e.ruc, e.razon_social, 'Activo', ${q(EMPRESA_OBSERVACION)}, e.regimen_laboral);
     end if;
   end loop;
 
@@ -99,7 +99,7 @@ const cell = (v: string) => (v.trim() ? v.replace(/\|/g, '\\|') : '—');
 function renderMd(): string {
   const empresaRows = EMPRESAS.map(e => {
     const own = SEDES.filter(s => s.ruc === e.ruc).map(s => s.name);
-    return `| \`${empresaCode(e.ruc)}\` | ${e.ruc} | ${e.name} | ${own.length ? own.join(', ') : '— (ninguna por ahora)'} |`;
+    return `| \`${empresaCode(e.ruc)}\` | ${e.ruc} | ${e.name} | ${e.regime} | ${own.length ? own.join(', ') : '— (ninguna por ahora)'} |`;
   }).join('\n');
   const sedeRows = SEDES.map(s =>
     `| \`${sedeCode(s.name)}\` | **${s.name}** | ${EMPRESAS.find(e => e.ruc === s.ruc)!.name} | ${s.department} | ${s.province} | ${s.district} | ${cell(s.address)} | ${cell(s.reference)} | ${cell(s.phoneFixed)} | ${cell(s.phoneMobile)} |`).join('\n');
@@ -118,11 +118,13 @@ Este archivo existe para **no volver a pedir estos datos**: es la referencia de 
 
 El almacén central pertenece a **SILEE**, igual que Los Olivos.
 
-| Código | RUC | Razón social | Sedes |
-|---|---|---|---|
+| Código | RUC | Razón social | Régimen laboral | Sedes |
+|---|---|---|---|---|
 ${empresaRows}
 
-> La razón social de las cuatro empresas nuevas se cargó **como la escribió el usuario**; falta confirmarla con la ficha RUC de SUNAT (por ejemplo, si SUNAT la escribe «ENSIL INT E.I.R.L.»). Se corrige en Organización → Empresas. Cada una lleva esa nota en «Observaciones».
+> La razón social de las cuatro empresas nuevas se cargó **como la escribió el usuario**; falta confirmarla con la ficha RUC de SUNAT. Se corrige en Organización → Empresas (la de ENSIL INT ya la corrigió el usuario: «ENSIL INT. E.I.R.L.»). Cada una lleva esa nota en «Observaciones».
+>
+> **Régimen laboral:** las 6 son **MYPE** (micro y pequeña empresa; ninguna pasa de pequeña), confirmado por el usuario el 2026-11-07. Es un dato de cada empresa (\`regimen_laboral\`): en MYPE la planilla referencial muestra solo lo ordinario y la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad.
 
 ## Sedes cargadas (${SEDES.length})
 

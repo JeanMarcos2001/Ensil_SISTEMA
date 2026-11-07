@@ -18,7 +18,7 @@ import { partsUSD } from '../utils/payments';
 import type { AssignmentForm, Place } from '../utils/assignments';
 import { useStaffDirectory, type StaffDirectoryStatus } from '../hooks/useStaffDirectory';
 import { useContractsPayroll, type ContractsPayrollStatus } from '../hooks/useContractsPayroll';
-import { NOT_YET_IN_DB, placesOf } from '../utils/staffDb';
+import { placesOf } from '../utils/staffDb';
 import { appUrl } from '../utils/appUrl';
 import { validateInactivation, validateReactivation } from '../utils/staffStatus';
 import { type ContractForm } from '../utils/payroll';
@@ -41,10 +41,10 @@ import {
   DEFAULT_POLICY, chargeMoraOn, parsePolicy, validateMoraCharge, validatePolicy, validateReminderLog, type CollectionPolicy, type Reminder, type ReminderLog,
 } from '../utils/collections';
 import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils/refinance';
-import type { ContractStatus, EnrollmentStatus, InstallmentStatus, PaymentStatus, PlanStatus } from '../utils/statuses';
+import type { ContractStatus, EnrollmentStatus, InstallmentStatus, LaborRegime, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
-import { seedAssignments, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers } from '../data/seedCatalog';
+import { seedLevels, seedPrograms, seedUsers } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
@@ -1039,6 +1039,8 @@ export interface PayrollLine {
   companyId: string;
   companyName: string;
   companyRuc: string;
+  /** Régimen laboral de la empresa al calcular la línea (en MYPE no hay gratificación, CTS ni aporte de salud del empleador). */
+  regime: LaborRegime;
   branch: string;
   role: string;
   pensionSystem?: string;
@@ -1101,6 +1103,8 @@ export interface Company {
   commercialName: string;
   status: 'Activo' | 'Inactivo';
   observaciones?: string;
+  /** Régimen laboral de la empresa: en MYPE la planilla referencial muestra solo lo ordinario. Sin dato se toma como General. */
+  laborRegime?: LaborRegime;
 }
 
 export interface Role {
@@ -1361,23 +1365,19 @@ interface DataContextType {
   deleteMonthlySchedule: (id: string) => void;
   capacityConfig: CapacityConfig;
   setCapacityConfig: (config: CapacityConfig) => void;
-  /** Personal de ejemplo (en memoria): lo siguen usando la agenda (asesorías, actividades, entrevistas) y las matrículas. Personas → Personal, Asignaciones, Contratos y Planilla usan `orgStaff` y `orgAssignments`. */
+  /** Personal guardado en la base de datos (Personas → Personal; de ahí salen las cuentas de usuario). UN solo personal: la agenda, la verificación y las matrículas leen a estas mismas personas. */
   staff: Staff[];
-  /** Personal y asignaciones guardados en la base de datos (Personas → Personal y Asignaciones; de ahí salen las cuentas de usuario). */
-  orgStaff: Staff[];
-  orgAssignments: Assignment[];
   /** Sedes y almacén como lugares de trabajo (para las asignaciones). */
   orgPlaces: Place[];
   staffDirectory: { status: StaffDirectoryStatus; error: string };
   reloadStaffDirectory: () => Promise<void>;
   /** Contratos guardados en la base de datos, cada uno con su empresa. Quien no tiene «Ver remuneraciones» los recibe SIN sueldo (lo decide la base). */
   contracts: Contract[];
-  /** Contratos de ejemplo de la agenda (en memoria): solo dicen quién del personal de ejemplo está de vacaciones o cesó. Se quitan cuando la agenda lea el personal de la base. */
-  agendaContracts: Contract[];
   contractsPayroll: { status: ContractsPayrollStatus; error: string };
   reloadContractsPayroll: () => Promise<void>;
   /** Registra un contrato (valida con el formulario, la empresa es obligatoria; el código lo asigna el sistema). */
   addContract: (form: ContractForm) => Promise<StockResult & { id?: string }>;
+  /** Asignaciones guardadas en la base de datos (dónde trabaja cada persona y en qué área). */
   assignments: Assignment[];
   /** Crea (o edita, con `editingId`) una asignación. La nueva principal desplaza a la anterior. */
   saveAssignment: (form: AssignmentForm, editingId?: string) => Promise<StockResult>;
@@ -1904,7 +1904,7 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     const moved = next.status !== 'Cancelado' && (next.date !== target.date || next.time !== target.time || next.responsible.trim() !== target.responsible.trim());
     // El responsable de una asesoría que se mueve o se reasigna debe trabajar ese día (no de vacaciones ni cesado)
     if (moved) {
-      const away = sessionResponsibleUnavailable(next.responsible, next.date, staff, agendaContracts);
+      const away = sessionResponsibleUnavailable(next.responsible, next.date, staff, contracts);
       if (away) return { ok: false, reason: away };
     }
     if (cancelling || moved) {
@@ -1984,7 +1984,7 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     if (!can(PERM.psiActivityLead)) return { ok: false, error: 'Su rol no puede asignar el responsable de una actividad.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
-    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, agendaContracts) });
+    const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, contracts) });
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const member = staffId ? staff.find(s => s.id === staffId) : undefined;
     patchActivity(a, x => ({ ...x, responsable: member ? staffLabel(member) : '', responsableId: member?.id }));
@@ -2167,13 +2167,7 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     return { ok: true };
   };
 
-  const [staff, setStaff] = useState<Staff[]>(() => seedStaff());
-
-  // Contratos de ejemplo de la agenda: solo para saber quién del personal de ejemplo está de vacaciones o cesó (la agenda aún lee ese personal).
-  // Los contratos y las planillas REALES viven en la base (`useContractsPayroll`, más abajo).
-  const [agendaContracts] = useState<Contract[]>(() => seedContracts());
-
-  const [assignments, setAssignments] = useState<Assignment[]>(() => seedAssignments());
+  // El personal, sus asignaciones y sus contratos son los de la base (`staffDir` y `cp`, más abajo): UN solo personal para todo el sistema.
 
   // Empresas, sedes y almacén: UNA sola fuente, la base de datos (se leen al iniciar sesión, `AccessGate`). Todo el sistema (Matrículas, Caja,
   // Stock, Envíos, Agenda…) usa estas mismas listas; Organización las cambia y el cambio se ve en todas partes. Quien no alcanza todas las
@@ -2206,6 +2200,11 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
   const cp = useContractsPayroll();
   const contracts = cp.contracts;
   const payrollRuns = cp.runs;
+  // UN solo personal: el de la base. La agenda (asesorías, actividades, entrevistas), la verificación y las matrículas leen a las mismas personas,
+  // asignaciones y contratos que Personas → Personal, Asignaciones y Contratos (quién puede ser responsable sale de ahí; las vacaciones y los ceses
+  // reales se respetan). Las asesorías y actividades en sí siguen siendo de ejemplo: guardan al responsable por su nombre.
+  const staff = staffDir.staff;
+  const assignments = staffDir.assignments;
   const rolesRepo = useMemo(() => createSupabaseRolesRepository(supabase), []);
   /** Vuelve a leer los roles de la base (después de un cambio que quedó a medias, para mostrar lo que de verdad quedó). */
   const resyncRoles = async () => {
@@ -3186,11 +3185,11 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
   const saveAssignment: DataContextType['saveAssignment'] = (form, editingId) => staffDir.saveAssignment(form, todayLocalISO(), editingId);
 
   const closeAssignment: DataContextType['closeAssignment'] = (id, date, reason) =>
-    staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities });
+    staffDir.closeAssignment(id, date, reason, currentUser.name, todayLocalISO(), { schedules, activities: allActivities(monthlySchedules) });
 
   const inactivateStaff: DataContextType['inactivateStaff'] = async (id, input) => {
-    // Los contratos son los de la base; la agenda de ejemplo no se cruza con las personas de la base (ver NOT_YET_IN_DB)
-    const ctx = { contracts, assignments: [], schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities, today: todayLocalISO() };
+    // Contratos, asesorías y actividades: los asignados a esta persona impiden darla de baja (primero se cierra el contrato y se reasigna)
+    const ctx = { contracts, assignments: [], schedules, activities: allActivities(monthlySchedules), today: todayLocalISO() };
     const hasActiveAccount = users.some(u => u.staffId === id && u.status === 'Activo');
     const res = await staffDir.inactivateStaff(id, input, currentUser.name, ctx, hasActiveAccount);
     return { ok: res.ok, error: res.error };
@@ -3202,9 +3201,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
   };
 
   // ---- Contratos y planilla (en la base de datos; las reglas puras están en utils/ y el orden en services/contractsPayroll.ts)
-  /** El personal de la base (el contrato es de una persona de Personal); la agenda de una persona de la base aún no existe (NOT_YET_IN_DB). */
+  /** El personal de la base (el contrato es de una persona de Personal) y su agenda: no se cesa ni se programan vacaciones sobre asesorías o actividades a su nombre. */
   const contractsBase = () => ({
-    staff: staffDir.staff, companies, today: todayLocalISO(), agenda: { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities },
+    staff: staffDir.staff, companies, today: todayLocalISO(), agenda: { schedules, activities: allActivities(monthlySchedules) },
   });
   const payrollContext = (): Omit<PayrollContext, 'runs'> => ({
     contracts, staff: staffDir.staff, assignments: staffDir.assignments, companies,
@@ -4003,7 +4002,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
       setCapacityConfig,
       staff,
       contracts,
-      agendaContracts,
       contractsPayroll: { status: cp.status, error: cp.error },
       reloadContractsPayroll: cp.reload,
       assignments,
@@ -4064,8 +4062,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
       addStaff,
       addContract,
       updateStaff,
-      orgStaff: staffDir.staff,
-      orgAssignments: staffDir.assignments,
       orgPlaces: places,
       staffDirectory: { status: staffDir.status, error: staffDir.error },
       reloadStaffDirectory: staffDir.reload,

@@ -14,17 +14,15 @@ import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { AssignmentFormModal } from './people/AssignmentFormModal';
 import { AREAS, closeImpact, isActive } from '../utils/assignments';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
-import { todayLocalISO } from '../utils/schedule';
-import { NOT_YET_IN_DB } from '../utils/staffDb';
+import { allActivities, todayLocalISO } from '../utils/schedule';
 import { StaffDbNotice } from '../components/people/StaffDbNotice';
 import { accountPlaceWarning } from '../utils/staffDb';
 import { userOfStaff } from '../utils/staffAccess';
 import { closeAssignmentIn } from '../utils/assignments';
 
 export function AssignmentsPage() {
-  const { orgAssignments: assignments, orgStaff: staff, orgPlaces: places, users, roles, permissions, closeAssignment, can } = useData();
-  // La agenda aún no está en la base: no se cruza con las personas de la base (ver NOT_YET_IN_DB)
-  const { schedules, activities } = NOT_YET_IN_DB;
+  const { assignments, staff, orgPlaces: places, users, roles, permissions, schedules, monthlySchedules, closeAssignment, can } = useData();
+  const activities = useMemo(() => allActivities(monthlySchedules), [monthlySchedules]);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const staffFilter = params.get('trabajador') ?? '';

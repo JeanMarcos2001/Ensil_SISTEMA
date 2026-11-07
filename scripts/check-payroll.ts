@@ -8,7 +8,7 @@ import {
 } from '../src/utils/payrollEngine';
 import { estimateNet, pensionRate } from '../src/utils/payroll';
 import {
-  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollRows, payslipHtml, priorMonths, runIdOf, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
+  PAYROLL_HEADERS, buildLines, contractsInPeriod, linesOf, payrollHeaders, payrollRows, payslipHtml, priorMonths, runIdOf, totalsOf, validateAdjustment, validateClose, validateGenerate, validateReopen,
 } from '../src/utils/payrollRun';
 import { accessCheck, defaultsFromStaff, deactivationNote, syncPatch, validateLinkedUser } from '../src/utils/staffAccess';
 
@@ -119,7 +119,8 @@ const tot = totalsOf(built.lines);
 check('Totales: trabajadores, neto y costo del empleador', tot.headcount === 3 && near(tot.net, built.lines.reduce((s, l) => s + l.calc.net, 0)) && near(tot.employerCost, tot.income + tot.essalud));
 check('Filas para exportar', payrollRows(built.lines).length === 3 && payrollRows(built.lines)[0].length === PAYROLL_HEADERS.length);
 const slip = payslipHtml({ ...built.lines[1], staffName: 'Juan <b>Pérez</b>', companyName: 'ENSIL & Cía' }, '2026-10');
-check('La boleta escapa el HTML, muestra el neto y lleva la empresa del contrato con su RUC', !slip.includes('<b>Pérez') && slip.includes('&lt;b&gt;') && slip.includes('NETO A PAGAR') && slip.includes('ENSIL &amp; Cía') && slip.includes('RUC 20610010289'));
+check('El detalle escapa el HTML, muestra el neto REFERENCIAL y lleva la empresa del contrato con su RUC', !slip.includes('<b>Pérez') && slip.includes('&lt;b&gt;') && slip.includes('NETO REFERENCIAL') && slip.includes('ENSIL &amp; Cía') && slip.includes('RUC 20610010289'));
+check('NO parece una boleta oficial: se llama «Detalle de remuneración (referencial)», sin casillas de firma y con «no reemplaza la boleta oficial»; el neto no es «a pagar»', slip.includes('Detalle de remuneración (referencial)') && !slip.includes('class="sign"') && !/Empleador<\/div>|Trabajador<\/div>/.test(slip) && slip.includes('no reemplaza la boleta oficial de pago') && !slip.includes('NETO A PAGAR') && !/<h1>Boleta|Boleta de pago/.test(slip) && !PAYROLL_HEADERS.includes('Neto a pagar'));
 
 // ---------------------------------------------------------------- Flujo
 const run = (id: string, period: string, status: PayrollRun['status'], lines?: PayrollRun['lines'], companyId = 'EMP-001'): PayrollRun => ({ id, companyId, period, status, adjustments: [], lines, createdAt: 'x', createdBy: 'u', events: [] });
@@ -151,6 +152,35 @@ check('La planilla de una empresa lleva solo a sus trabajadores, con el nombre y
 check('Quien tiene contrato en otra empresa no figura «sin contrato» en ninguna planilla', !silee.warnings.some(w => /Luis/.test(w.text) && /contrato que cubra/.test(w.text)) && !evo.warnings.some(w => /Luis/.test(w.text) && /contrato que cubra/.test(w.text)));
 check('Sin contrato en ninguna empresa el aviso sale UNA vez por planilla, con su nombre, sin depender de la sede (la empresa que emplea a alguien no es la de su sede)', built.warnings.filter(w => /no tiene contrato|no tienen contrato/.test(w.text)).length === 1 && buildLines('2026-10', 'EMP-002', ctx, []).warnings.filter(w => /Luis/.test(w.text)).length === 1 && !built.warnings.some(w => w.staffId !== undefined && /sin contrato/.test(w.text)));
 check('Una planilla de una empresa sin contratos sale vacía (no se puede cerrar)', buildLines('2026-10', 'EMP-002', ctx, []).lines.length === 0 && validateClose({ status: 'Borrador', period: '2026-10' }, buildLines('2026-10', 'EMP-002', ctx, []), '2026-10-24').length > 0);
+
+// ---------------------------------------------------------------- Régimen laboral de la empresa: en MYPE solo lo ordinario
+const mypeJulio = computeLine({ contract: { ...juan, regime: 'MYPE' }, staff: { hasChildren: true }, period: '2026-07' });
+const generalJulio = computeLine({ contract: { ...juan, regime: 'General' }, staff: { hasChildren: true }, period: '2026-07' });
+check('Sin régimen se calcula como General (como antes de existir el campo)', jul.gratification === generalJulio.gratification && jul.essalud === generalJulio.essalud && jul.net === generalJulio.net);
+check('MYPE: sin gratificación, bonificación, CTS ni aporte de salud del empleador (los calcula contabilidad)', mypeJulio.gratification === 0 && mypeJulio.gratificationBonus === 0 && mypeJulio.essalud === 0
+  && computeLine({ contract: { ...juan, regime: 'MYPE' }, staff: { hasChildren: true }, period: '2026-05' }).ctsDeposit === 0 && computeLine({ contract: { ...juan, regime: 'MYPE' }, staff: { hasChildren: true }, period: '2026-12' }).gratification === 0);
+check('MYPE: lo ordinario no cambia (sueldo, asignación familiar, pensión) y el neto de julio es el de un mes regular', mypeJulio.basic === generalJulio.basic && mypeJulio.familyAllowance === generalJulio.familyAllowance && mypeJulio.pension === 466.8 && mypeJulio.totalIncome === 3613 && mypeJulio.net === round(mypeJulio.totalIncome - mypeJulio.pension - mypeJulio.incomeTax), JSON.stringify(mypeJulio));
+check('MYPE: la renta de 5.ª se proyecta sin gratificaciones (retiene menos que en General)', mypeJulio.incomeTax < generalJulio.incomeTax && mypeJulio.fifth!.annualIncome < generalJulio.fifth!.annualIncome);
+check('MYPE: el neto del contrato sale del mismo motor y respeta el régimen (contrato = planilla)', (() => {
+  const mype = estimateNet(3500, 'Indeterminado', 'AFP', 'Integra', { hasChildren: true }, 2026, false, 'MYPE')!;
+  const mypeMarch = computeLine({ contract: { ...juan, startDate: '2026-01-01', regime: 'MYPE' }, staff: { hasChildren: true }, period: '2026-03' });
+  const general = estimateNet(3500, 'Indeterminado', 'AFP', 'Integra', { hasChildren: true }, 2026, false, 'General')!;
+  return mype.net === mypeMarch.net && mype.incomeTax === mypeMarch.incomeTax && mype.incomeTax < general.incomeTax && mype.net > general.net;
+})());
+check('La locación de servicios no cambia con el régimen (nunca tuvo beneficios)', computeLine({ contract: { ...loc(4000), regime: 'MYPE' }, staff: {}, period: '2026-07' }).net === computeLine({ contract: loc(4000), staff: {}, period: '2026-07' }).net);
+const mypeCtx = { ...ctx2, companies: companies.map(x => ({ ...x, laborRegime: 'MYPE' as const })) };
+const mypeBuilt = buildLines('2026-07', 'EMP-001', mypeCtx, []);
+const generalBuilt = buildLines('2026-07', 'EMP-001', { ...ctx2, companies: companies.map(x => ({ ...x, laborRegime: 'General' as const })) }, []);
+check('La línea guarda el régimen de su empresa (foto) y en MYPE no trae gratificación ni aporte de salud', mypeBuilt.lines.every(l => l.regime === 'MYPE' && l.calc.gratification === 0 && l.calc.essalud === 0 && l.calc.ctsDeposit === 0) && generalBuilt.lines.every(l => l.regime === 'General') && generalBuilt.lines.some(l => l.calc.gratification > 0));
+check('El régimen es de cada empresa: en la misma planilla de julio una empresa MYPE y otra General', (() => {
+  const mixed = { ...ctx2, companies: [{ ...companies[0], laborRegime: 'MYPE' as const }, { ...companies[1], laborRegime: 'General' as const }] };
+  return buildLines('2026-07', 'EMP-001', mixed, []).lines.every(l => l.calc.gratification === 0) && buildLines('2026-07', 'EMP-002', mixed, []).lines.every(l => l.calc.gratification > 0);
+})());
+check('Las columnas de gratificación, aporte de salud y CTS no salen en MYPE (ni en el CSV ni en el PDF) y sí en General', payrollHeaders('MYPE').length === PAYROLL_HEADERS.length - 3 && !payrollHeaders('MYPE').some(h => /Gratificación|EsSalud|CTS/.test(h)) && payrollHeaders('General').length === PAYROLL_HEADERS.length
+  && payrollRows(mypeBuilt.lines, 'MYPE')[0].length === payrollHeaders('MYPE').length && payrollRows(generalBuilt.lines, 'General')[0].length === PAYROLL_HEADERS.length);
+const mypeSlip = payslipHtml(mypeBuilt.lines[0], '2026-07');
+const generalSlip = payslipHtml(generalBuilt.lines[0], '2026-07');
+check('El detalle de una empresa MYPE avisa que contabilidad calcula la gratificación, la CTS y el aporte de salud; el de General muestra el aporte del empleador', /Régimen MYPE: no se calculan aquí/.test(mypeSlip) && !/EsSalud \(9 %\)/.test(mypeSlip) && /EsSalud \(9 %\)/.test(generalSlip) && !/Régimen MYPE/.test(generalSlip));
 
 // Lo cerrado alimenta la renta de los meses siguientes
 const sepLines = buildLines('2026-09', 'EMP-001', ctx, []).lines;

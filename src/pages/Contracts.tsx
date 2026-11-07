@@ -21,7 +21,7 @@ import { PERM } from '../utils/authority';
 import { ContractsDbNotice } from '../components/people/ContractsDbNotice';
 
 export function ContractsPage() {
-  const { contracts, orgStaff: staff, companies, closeContract, renewContract, payrollRuns, can } = useData();
+  const { contracts, staff, companies, closeContract, renewContract, payrollRuns, can } = useData();
   // Los importes solo los ve quien tiene «Ver remuneraciones y costo de planilla»
   const showPay = can(PERM.payView);
   const navigate = useNavigate();
@@ -359,7 +359,7 @@ export function ContractsPage() {
 
             {/* Vacations */}
             <section>
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Vacaciones</h3>
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider mb-4 border-b border-border-soft pb-2">Vacaciones programadas (solo para la agenda)</h3>
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <label className="text-xs text-text-muted uppercase tracking-wider">Inicio</label>
@@ -403,6 +403,7 @@ export function ContractsPage() {
               <section className="bg-destructive/5 p-4 rounded-xl border border-destructive/10">
                 <label className="text-xs text-destructive font-semibold uppercase tracking-wider">Motivo de Cese</label>
                 <p className="text-sm text-text-primary mt-1">{selectedContract.terminationReason}</p>
+                <p className="text-xs text-text-muted mt-2">La liquidación de beneficios la prepara contabilidad; aquí queda el cese (fecha y motivo).</p>
               </section>
             )}
           </div>
@@ -496,6 +497,7 @@ export function ContractsPage() {
             <p className="text-sm text-text-secondary">
               Se cerrará el contrato {toClose.type.toLowerCase()} de <span className="font-medium text-text-primary">{getStaffName(toClose.staffId)}</span>. Después se podrá registrar uno nuevo.
             </p>
+            <p className="text-sm text-text-secondary bg-surface-muted rounded-xl px-3 py-2.5">La liquidación de beneficios la prepara contabilidad; aquí queda el cese (fecha y motivo).</p>
             {closeError && <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">{closeError}</div>}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-text-secondary">Fecha de cese <span className="text-error">*</span></label>

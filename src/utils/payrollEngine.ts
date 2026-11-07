@@ -16,12 +16,15 @@
  *  - Locación de servicios: sin pensión, sin 5.ª ni beneficios; retención de 4.ª categoría (8 %) si el honorario del mes pasa
  *    de S/ 3 300 y el prestador no presentó suspensión de retenciones.
  *  - EsSalud (9 %) lo paga el empleador: no baja el neto, pero sí es costo.
+ *  - Régimen laboral de la EMPRESA: lo anterior de gratificación, bonificación, CTS y EsSalud es del régimen GENERAL. En MYPE (micro y pequeña empresa)
+ *    esos cuatro conceptos NO se calculan (los calcula contabilidad según su régimen) y la planilla muestra solo lo ordinario.
  *
  * SUPUESTOS (el sistema no conoce más): se proyecta con el sueldo y los beneficios del contrato; no se consideran ingresos
  * de otros empleadores, deducciones adicionales de 3 UIT ni créditos de meses previos que no estén en planillas cerradas
  * (esos meses se suponen pagados con la misma regularidad). Es una retención referencial: la declaración la valida contabilidad.
  */
 import type { Contract } from '../context/DataContext';
+import type { LaborRegime } from './statuses';
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -69,6 +72,8 @@ export interface ContractTerms {
   pensionFund?: string;
   /** Prestador de locación con suspensión de retenciones de 4.ª categoría. */
   suspension4ta?: boolean;
+  /** Régimen laboral de la empresa del contrato; sin dato se calcula como General. */
+  regime?: LaborRegime;
 }
 
 /** Días del mes que cubre el contrato (0 si no lo toca). */
@@ -188,6 +193,8 @@ export function pensionRateOf(c: Pick<ContractTerms, 'type' | 'pensionSystem' | 
 }
 
 const hasBenefits = (c: Pick<ContractTerms, 'type'>) => !isFreelance(c.type);
+/** Gratificación, bonificación, CTS y EsSalud: solo en régimen general (en MYPE los calcula contabilidad). */
+const regimeBenefits = (c: Pick<ContractTerms, 'type' | 'regime'>) => hasBenefits(c) && (c.regime ?? 'General') === 'General';
 const familyOf = (c: ContractTerms, staff: { hasChildren?: boolean }) => (hasBenefits(c) && staff.hasChildren ? round2(RMV * FAMILY_ALLOWANCE_RATE) : 0);
 
 /** Remuneración computable (base de gratificación y CTS): sueldo + asignación familiar de un mes completo. */
@@ -195,7 +202,7 @@ const computable = (c: ContractTerms, staff: { hasChildren?: boolean }) => (c.gr
 
 /** Gratificación (sin bonificación) que corresponde pagar en julio o diciembre. */
 function gratificationFor(c: ContractTerms, staff: { hasChildren?: boolean }, year: number, month: 7 | 12): number {
-  if (!hasBenefits(c)) return 0;
+  if (!regimeBenefits(c)) return 0;
   const from = `${year}-${month === 7 ? '01' : '07'}`;
   const to = `${year}-${month === 7 ? '06' : '12'}`;
   const n = fullMonths(c, from, to);
@@ -204,7 +211,7 @@ function gratificationFor(c: ContractTerms, staff: { hasChildren?: boolean }, ye
 
 /** CTS a depositar en mayo (nov–abr) o noviembre (may–oct). */
 function ctsFor(c: ContractTerms, staff: { hasChildren?: boolean }, year: number, month: number): number {
-  if (!hasBenefits(c) || (month !== 5 && month !== 11)) return 0;
+  if (!regimeBenefits(c) || (month !== 5 && month !== 11)) return 0;
   const [from, to] = month === 5 ? [`${year - 1}-11`, `${year}-04`] : [`${year}-05`, `${year}-10`];
   const n = fullMonths(c, from, to);
   const base = computable(c, staff);
@@ -299,7 +306,7 @@ export function computeLine(input: LineInput): LineCalc {
 
   const totalIncome = round2(basic + familyAllowance + gratification + gratificationBonus + extraTaxable + extraNonTaxable);
   const totalDeductions = round2(pension + incomeTax + otherDeductions);
-  const essalud = benefits ? round2(pensionBase * ESSALUD_RATE) : 0;
+  const essalud = regimeBenefits(c) ? round2(pensionBase * ESSALUD_RATE) : 0;
   return {
     days, daysInMonth: total, basic, familyAllowance, gratification, gratificationBonus, extraTaxable, extraNonTaxable, totalIncome,
     pensionBase, pension, incomeTax, taxKind, otherDeductions, totalDeductions, net: round2(totalIncome - totalDeductions), essalud,

@@ -57,7 +57,8 @@ check('La carga incluye cada sede nueva con su dirección, empresa (por RUC) y t
   const positions = newBranches.map(b => sql.indexOf(`('${b.name}', '${b.ruc}', '${b.address.replace(/'/g, "''")}'`));
   return positions.every(p => p > 0) && positions.every((p, i) => i === 0 || p > positions[i - 1]);
 })());
-check('La carga incluye las 4 empresas nuevas con su RUC y no repite las que ya estaban', REAL_COMPANIES.filter(c => !c.inBase).every(c => sql.includes(`('${c.ruc}', '${c.name}')`)) && REAL_COMPANIES.filter(c => c.inBase).every(c => !sql.includes(`('${c.ruc}', '`)));
+check('La carga incluye las 4 empresas nuevas con su RUC y no repite las que ya estaban', REAL_COMPANIES.filter(c => !c.inBase).every(c => sql.includes(`('${c.ruc}', '${c.name}', '${c.regime}')`)) && REAL_COMPANIES.filter(c => c.inBase).every(c => !sql.includes(`('${c.ruc}', '`)));
+check('Las 6 empresas son MYPE (el usuario lo confirmó) y la carga y la tabla de consulta lo dicen', REAL_COMPANIES.every(c => c.regime === 'MYPE') && sql.includes('regimen_laboral') && /\| MYPE \|/.test(md));
 check('La carga corrige la empresa de Piura y NO carga Ilo', /update public\.sedes set empresa_id = eid where lower\(nombre\) = 'piura'/.test(sql) && !/'Ilo'/.test(sql));
 check('La carga es repetible y todo o nada (busca por RUC y por nombre antes de crear)', sql.includes('if not exists (select 1 from public.empresas where ruc = e.ruc)') && sql.includes('if not exists (select 1 from public.sedes where lower(nombre) = lower(s.nombre))') && sql.includes('do $$'));
 check('La tabla de consulta lista cada sede con su código, empresa y dirección', REAL_BRANCHES.every(b => md.includes(`\`${realBranchId(b.name)}\` | **${b.name}**`) && md.includes(b.address)) && REAL_COMPANIES.every(c => md.includes(c.ruc)));

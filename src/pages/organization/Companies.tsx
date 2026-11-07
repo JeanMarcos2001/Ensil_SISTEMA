@@ -9,6 +9,7 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { OrgDbNotice } from '../../components/organization/OrgDbNotice';
 import { companyFieldErrors, hasLinkedBranches as companyHasBranches } from '../../utils/orgDirectory';
+import { LABOR_REGIMES, type LaborRegime } from '../../utils/statuses';
 
 interface CompaniesProps {
   onNavigate?: (item: string) => void;
@@ -55,6 +56,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
     razonSocial: '',
     nombreCorto: '',
     estado: 'activo',
+    regimen: 'MYPE',
     observaciones: ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -76,6 +78,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
         razonSocial: company?.name || '',
         nombreCorto: company?.commercialName || '',
         estado: company?.status.toLowerCase() || 'activo',
+        regimen: company?.laborRegime ?? 'MYPE',
         observaciones: company?.observaciones || ''
       });
     } else {
@@ -84,6 +87,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
         razonSocial: '',
         nombreCorto: '',
         estado: 'activo',
+        regimen: 'MYPE',
         observaciones: ''
       });
     }
@@ -113,6 +117,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
       commercialName: formData.nombreCorto,
       status: (formData.estado === 'activo' ? 'Activo' : 'Inactivo') as 'Activo' | 'Inactivo',
       observaciones: formData.observaciones,
+      laborRegime: formData.regimen as LaborRegime,
     };
     setSaving(true);
     const result = selectedCompany ? await updateCompany(selectedCompany, data) : await addCompany(data);
@@ -197,6 +202,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                 <th className="px-6 py-3 font-medium">RUC</th>
                 <th className="px-6 py-3 font-medium">Razón Social</th>
                 <th className="px-6 py-3 font-medium">Nombre Corto / Sigla</th>
+                <th className="px-6 py-3 font-medium">Régimen laboral</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -207,6 +213,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
                   <td className="px-6 py-3 font-medium text-text-primary">{row.ruc}</td>
                   <td className="px-6 py-3 font-medium text-text-primary">{row.name}</td>
                   <td className="px-6 py-3 text-text-secondary">{row.commercialName}</td>
+                  <td className="px-6 py-3 text-text-secondary">{row.laborRegime ?? 'General'}</td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
                   </td>
@@ -312,6 +319,12 @@ export function Companies({ onNavigate }: CompaniesProps) {
             </div>
           </div>
 
+          <div className="space-y-1">
+            <span className="text-xs text-text-muted uppercase tracking-wider">Régimen laboral</span>
+            <p className="text-sm font-medium text-text-primary">{selectedCompanyData?.laborRegime ?? 'General'}</p>
+            <p className="text-xs text-text-muted">MYPE (micro y pequeña empresa): la planilla referencial muestra solo lo ordinario; la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad. General: el sistema los estima.</p>
+          </div>
+
           {selectedCompanyData?.observaciones && (
             <div className="border-t border-border-soft pt-4">
               <h4 className="text-sm font-bold text-text-primary mb-3">Observaciones</h4>
@@ -398,6 +411,18 @@ export function Companies({ onNavigate }: CompaniesProps) {
           <div className="border-t border-border-soft pt-6">
             <h4 className="text-sm font-medium text-text-primary mb-4">Control interno</h4>
             <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-text-primary">Régimen laboral <span className="text-error">*</span></label>
+                <select
+                  value={formData.regimen}
+                  onChange={(e) => setFormData({ ...formData, regimen: e.target.value })}
+                  className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-colors"
+                >
+                  {LABOR_REGIMES.map(r => <option key={r} value={r}>{r === 'MYPE' ? 'MYPE (micro y pequeña empresa)' : 'General'}</option>)}
+                </select>
+                <p className="text-xs text-text-muted">MYPE (micro y pequeña empresa): la planilla referencial muestra solo lo ordinario; la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad. General: el sistema los estima. Lo confirma contabilidad.</p>
+              </div>
+
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-text-primary">
                   Estado <span className="text-error">*</span>

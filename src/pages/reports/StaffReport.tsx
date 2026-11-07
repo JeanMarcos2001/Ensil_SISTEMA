@@ -15,7 +15,7 @@ const HEADERS = ['Trabajador', 'Documento', 'Sede', 'Área', 'Cargo', 'Estado', 
 
 /** Reportes → Personal: la plantilla, quién tiene contrato y cuenta, qué contratos vencen y cuánto costó la última planilla. */
 export function StaffReport() {
-  const { orgStaff: staff, contracts, orgAssignments: assignments, users, branches, payrollRuns, can } = useData();
+  const { staff, contracts, assignments, users, branches, payrollRuns, can } = useData();
   const navigate = useNavigate();
   const today = todayLocalISO();
   const { range, preset, setPreset, setRange } = useRange('anio');
@@ -52,7 +52,7 @@ export function StaffReport() {
         <Kpi label="Bajas del período" value={String(kpis.leavers)} hint={period} />
         <Kpi label="Con cuenta de acceso" value={String(kpis.withAccount)} hint={`${kpis.withoutAccount} sin cuenta activa`} />
         <Kpi label="Sin asignación" value={String(kpis.withoutAssignment)} tone={kpis.withoutAssignment > 0 ? 'text-warning-text' : undefined} hint="No figuran en ninguna sede" />
-        {report.payroll && can(PERM.payView) && <Kpi label={`Planilla ${periodLabel(report.payroll.period)}`} value={money(report.payroll.employerCost, 'PEN')} hint={`Costo del empleador · neto ${money(report.payroll.net, 'PEN')} · ${report.payroll.status}`} />}
+        {report.payroll && can(PERM.payView) && <Kpi label={`Planilla ${periodLabel(report.payroll.period)}`} value={money(report.payroll.employerCost, 'PEN')} hint={`Costo referencial · neto referencial ${money(report.payroll.net, 'PEN')} · ${report.payroll.status}`} />}
       </div>
 
       <TableCard
@@ -84,7 +84,7 @@ export function StaffReport() {
       {report.payroll && can(PERM.payView) && (
         <TableCard
           title={`Costo de la planilla de ${periodLabel(report.payroll.period)} por sede`}
-          headers={['Sede', 'Trabajadores', 'Neto', 'Costo del empleador']}
+          headers={['Sede', 'Trabajadores', 'Neto referencial', 'Costo referencial de planilla']}
           right={[1, 2, 3]}
           rows={report.payroll.byBranch.map(b => [b.name, b.headcount, money(b.net, 'PEN'), money(b.employerCost, 'PEN')])}
           action={<button type="button" className="text-xs text-primary-accent hover:underline" onClick={() => navigate('/personas/planilla')}>Ir a Planilla</button>}

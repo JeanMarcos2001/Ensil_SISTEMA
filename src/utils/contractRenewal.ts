@@ -15,6 +15,7 @@ import { periodOf } from './payrollEngine';
 import { buildContract, contractStatus, emptyContractForm, needsEndDate, validateContractForm, type ContractForm } from './payroll';
 import { EXPIRY_DAYS } from './reportStaff';
 import { addDaysISO } from './schedule';
+import type { LaborRegime } from './statuses';
 
 export interface RenewalInput {
   /** Nueva fecha de fin. */
@@ -67,8 +68,8 @@ export function validateRenewal(c: Contract, input: RenewalInput, contracts: Con
 }
 
 /** El contrato nuevo, listo para guardar. */
-export function buildRenewal(c: Contract, input: RenewalInput, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear()): Omit<Contract, 'id'> {
-  return { ...buildContract(renewalForm(c, input), staff, year), renewsId: c.id, observations: `Renovación de ${c.id}: ${input.reason.trim()}` };
+export function buildRenewal(c: Contract, input: RenewalInput, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), regime?: LaborRegime): Omit<Contract, 'id'> {
+  return { ...buildContract(renewalForm(c, input), staff, year, regime), renewsId: c.id, observations: `Renovación de ${c.id}: ${input.reason.trim()}` };
 }
 
 /** El contrato anterior, ya renovado. */

@@ -458,7 +458,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'close', label: 'Cerrar una asignación', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['assignment'], actions: ['closeAssignment'] },
   ]),
   f('per-planilla', 'Planilla', 'mod-personas', [
-    { action: 'view', label: 'Ver planillas y boletas', kind: 'ver', requires: ['per-remuneracion:view'], menu: menu('personas', 'Planilla'), reads: ['payroll', 'contract', 'staff'], sensitive: 'remuneracion' },
+    { action: 'view', label: 'Ver planillas y detalles de remuneración (referenciales)', kind: 'ver', requires: ['per-remuneracion:view'], menu: menu('personas', 'Planilla'), reads: ['payroll', 'contract', 'staff'], sensitive: 'remuneracion' },
     { action: 'generate', label: 'Generar y eliminar borradores de planilla', kind: 'crear', requires: ['view'], sensitive: 'remuneracion', reads: ['contract'], writes: ['payroll'], actions: ['generatePayroll', 'deletePayrollDraft'],
       counterparts: [cp('per-planilla:close', 'any', 'advisory', 'Sin quien cierre la planilla, quedará en borrador.')] },
     { action: 'adjust', label: 'Agregar ajustes (bonos, descuentos)', kind: 'editar', requires: ['view'], sensitive: 'remuneracion', writes: ['payroll'], actions: ['addPayrollAdjustment', 'removePayrollAdjustment'] },

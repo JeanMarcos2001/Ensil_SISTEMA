@@ -254,11 +254,11 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver planillas y boletas** 👁‍🗨 sueldos · menú «Planilla»<br><code>per-planilla:view</code> | ver | Ver remuneraciones y costo de planilla | — | Planilla, Contrato de trabajo, Personal → — | — |
-| **Generar y eliminar borradores de planilla** 👁‍🗨 sueldos<br><code>per-planilla:generate</code> | crear | Ver planillas y boletas | Cerrar planilla en cualquier sede (recomendada) | Contrato de trabajo → Planilla | — |
-| **Agregar ajustes (bonos, descuentos)** 👁‍🗨 sueldos<br><code>per-planilla:adjust</code> | editar | Ver planillas y boletas | — | — → Planilla | — |
-| **Cerrar planilla** 🛡 control<br><code>per-planilla:close</code> | operar | Ver planillas y boletas | — | — → Planilla | — |
-| **Reabrir planilla cerrada** 🛡 control<br><code>per-planilla:reopen</code> | operar | Ver planillas y boletas | — | — → Planilla | — |
+| **Ver planillas y detalles de remuneración (referenciales)** 👁‍🗨 sueldos · menú «Planilla»<br><code>per-planilla:view</code> | ver | Ver remuneraciones y costo de planilla | — | Planilla, Contrato de trabajo, Personal → — | — |
+| **Generar y eliminar borradores de planilla** 👁‍🗨 sueldos<br><code>per-planilla:generate</code> | crear | Ver planillas y detalles de remuneración (referenciales) | Cerrar planilla en cualquier sede (recomendada) | Contrato de trabajo → Planilla | — |
+| **Agregar ajustes (bonos, descuentos)** 👁‍🗨 sueldos<br><code>per-planilla:adjust</code> | editar | Ver planillas y detalles de remuneración (referenciales) | — | — → Planilla | — |
+| **Cerrar planilla** 🛡 control<br><code>per-planilla:close</code> | operar | Ver planillas y detalles de remuneración (referenciales) | — | — → Planilla | — |
+| **Reabrir planilla cerrada** 🛡 control<br><code>per-planilla:reopen</code> | operar | Ver planillas y detalles de remuneración (referenciales) | — | — → Planilla | — |
 
 ### Remuneraciones `per-remuneracion`
 

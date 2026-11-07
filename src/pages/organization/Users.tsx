@@ -28,7 +28,7 @@ export function Users() {
   const [activationNote, setActivationNote] = useState<string | null>(null);
 
   // Las sedes y los almacenes de las cuentas son los guardados en la base de datos (Organización → Filiales y Almacenes)
-  const { users, branches, warehouses, orgStaff: staff, orgAssignments: assignments, orgPlaces: places, permissions, roles, addUser, updateUser, resendAccess, can, currentUser } = useData();
+  const { users, branches, warehouses, staff, assignments, orgPlaces: places, permissions, roles, addUser, updateUser, resendAccess, can, currentUser } = useData();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [serverError, setServerError] = useState<string | null>(null);

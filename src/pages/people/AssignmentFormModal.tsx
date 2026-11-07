@@ -38,7 +38,7 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
  * Psicopedagogía) y los verificadores de cada sede. Cada trabajador tiene UNA principal.
  */
 export function AssignmentFormModal({ isOpen, onClose, editing, presetStaffId }: Props) {
-  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, roles, permissions, saveAssignment, currentUser, sessionScope } = useData();
+  const { staff, assignments, orgPlaces: places, users, roles, permissions, saveAssignment, currentUser, sessionScope } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<AssignmentForm>(emptyAssignmentForm(today));
   const [submitted, setSubmitted] = useState(false);

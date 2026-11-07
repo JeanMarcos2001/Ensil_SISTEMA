@@ -4,8 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { DateInput } from '../../components/ui/DateInput';
 import { Modal } from '../../components/ui/Modal';
 import { useData, type Contract } from '../../context/DataContext';
-import { todayLocalISO } from '../../utils/schedule';
-import { NOT_YET_IN_DB } from '../../utils/staffDb';
+import { allActivities, todayLocalISO } from '../../utils/schedule';
 import {
   AFP_FUNDS,
   CONTRACT_TYPES,
@@ -31,9 +30,6 @@ interface Props {
   editing?: Contract | null;
 }
 
-/** La agenda de una persona de la base aún no existe (ver NOT_YET_IN_DB): no hay asesorías ni actividades que cruzar con sus vacaciones. */
-const AGENDA = { schedules: NOT_YET_IN_DB.schedules, activities: NOT_YET_IN_DB.activities };
-
 const money = (n: number) => `S/ ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text-sm focus:outline-none focus:border-primary-accent resize-none';
 
@@ -43,7 +39,7 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
  * Al editar, el trabajador no se cambia, se pide el motivo y queda la constancia de lo que cambió.
  */
 export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
-  const { orgStaff: staff, contracts, companies, addContract, editContract } = useData();
+  const { staff, contracts, companies, schedules, monthlySchedules, addContract, editContract } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<ContractForm>(emptyContractForm());
   const [submitted, setSubmitted] = useState(false);
@@ -60,10 +56,12 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
   }, [isOpen, editing]);
 
   const member = staff.find(s => s.id === form.staffId);
-  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id, AGENDA, companies), [form, contracts, staff, today, editing?.id, companies]);
+  // Las vacaciones no pueden cruzarse con asesorías ni actividades a nombre de la persona (primero se reasignan)
+  const agenda = useMemo(() => ({ schedules, activities: allActivities(monthlySchedules) }), [schedules, monthlySchedules]);
+  const errors = useMemo(() => validateContractForm(form, contracts, staff, today, editing?.id, agenda, companies), [form, contracts, staff, today, editing?.id, agenda, companies]);
 
   const changes = useMemo(
-    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {}), id => companies.find(x => x.id === id)?.name ?? id ?? '') : []),
+    () => (editing && Object.keys(errors).length === 0 ? diffContract(editing, buildContractPatch(form, member ?? {}, new Date().getFullYear(), companies.find(x => x.id === form.companyId)?.laborRegime), id => companies.find(x => x.id === id)?.name ?? id ?? '') : []),
     [editing, errors, form, member, companies]
   );
   const set = (patch: Partial<ContractForm>) => { setForm(f => ({ ...f, ...patch })); setServerError(null); };
@@ -71,7 +69,9 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
   const cls = (k: keyof ContractForm) => `${inputCls} ${err(k) ? errorCls : ''}`;
 
   const pension = hasPension(form.type) && !!form.type;
-  const estimate = estimateNet(Number(form.grossSalary), form.type, form.pensionSystem, form.pensionFund, member ?? {}, new Date().getFullYear(), form.suspension4ta);
+  // El neto sale del mismo motor que la planilla y respeta el régimen laboral de la empresa del contrato
+  const company = companies.find(x => x.id === form.companyId);
+  const estimate = estimateNet(Number(form.grossSalary), form.type, form.pensionSystem, form.pensionFund, member ?? {}, new Date().getFullYear(), form.suspension4ta, company?.laborRegime);
 
   const changeType = (type: string) => {
     // Al cambiar de tipo se limpian los datos que ya no aplican
@@ -177,7 +177,7 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
             >
               <input type="number" min={0} step="0.01" className={cls('grossSalary')} value={form.grossSalary} onChange={e => set({ grossSalary: e.target.value })} placeholder="Ej: 3500" />
             </Field>
-            <Field label="Sueldo neto de un mes regular (S/)" hint="Se calcula solo con las reglas de la planilla: sueldo y asignación familiar menos aportes y renta. Las gratificaciones y descuentos eventuales aparecen en la planilla del mes.">
+            <Field label="Sueldo neto de un mes regular (S/)" hint={company?.laborRegime === 'MYPE' ? 'Referencial: sueldo y asignación familiar menos aportes y renta. La empresa es MYPE: la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad.' : 'Referencial: sueldo y asignación familiar menos aportes y renta. Las gratificaciones y descuentos eventuales aparecen en la planilla del mes.'}>
               <div className="w-full h-10 bg-surface-muted border border-border-soft rounded-xl px-3 text-sm flex items-center font-semibold text-primary-accent">
                 {estimate ? money(estimate.net) : <span className="font-normal text-text-muted">—</span>}
               </div>
@@ -223,7 +223,7 @@ export function ContractFormModal({ isOpen, onClose, editing = null }: Props) {
 
         {hasVacations(form.type) && (
           <section className="space-y-4 border-t border-border-soft pt-6">
-            <h4 className="text-sm font-bold text-text-primary uppercase tracking-wider">Vacaciones programadas (opcional)</h4>
+            <h4 className="text-sm font-bold text-text-primary uppercase tracking-wider">Vacaciones programadas (opcional · solo para la agenda: no se llevan saldos ni días acumulados)</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <Field label="Fecha de inicio" required={!!form.vacationEnd} error={err('vacationStart')}>
                 <DateInput min={form.startDate || undefined} value={form.vacationStart} onChange={e => set({ vacationStart: e.target.value })} />

@@ -11,16 +11,18 @@ Este archivo existe para **no volver a pedir estos datos**: es la referencia de 
 
 El almacén central pertenece a **SILEE**, igual que Los Olivos.
 
-| Código | RUC | Razón social | Sedes |
-|---|---|---|---|
-| `EMP-001` | 20610010289 | SILEE E.I.R.L. | Los Olivos, Trujillo |
-| `EMP-002` | 20611694092 | COLEGIO ENSIL DE LAS AMERICAS E.I.R.L. | — (ninguna por ahora) |
-| `EMP-003` | 20533093133 | EDITORIAL ENSIL DE LAS AMERICAS TACNA | Cusco Marcavalle, Tacna |
-| `EMP-004` | 20612421243 | ENSIL INT EIRL | Huancayo, Puno, Huaraz, Ica, Ayacucho |
-| `EMP-005` | 20612459313 | ENSIL EVOLUTION S.R.L. | Piura, Chiclayo, Cajamarca, San Isidro, Juliaca, Arequipa |
-| `EMP-006` | 20614185229 | ENSIL REVOLUTION S.A.C. | Cusco Magisterio |
+| Código | RUC | Razón social | Régimen laboral | Sedes |
+|---|---|---|---|---|
+| `EMP-001` | 20610010289 | SILEE E.I.R.L. | MYPE | Los Olivos, Trujillo |
+| `EMP-002` | 20611694092 | COLEGIO ENSIL DE LAS AMERICAS E.I.R.L. | MYPE | — (ninguna por ahora) |
+| `EMP-003` | 20533093133 | EDITORIAL ENSIL DE LAS AMERICAS TACNA | MYPE | Cusco Marcavalle, Tacna |
+| `EMP-004` | 20612421243 | ENSIL INT. E.I.R.L. | MYPE | Huancayo, Puno, Huaraz, Ica, Ayacucho |
+| `EMP-005` | 20612459313 | ENSIL EVOLUTION S.R.L. | MYPE | Piura, Chiclayo, Cajamarca, San Isidro, Juliaca, Arequipa |
+| `EMP-006` | 20614185229 | ENSIL REVOLUTION S.A.C. | MYPE | Cusco Magisterio |
 
-> La razón social de las cuatro empresas nuevas se cargó **como la escribió el usuario**; falta confirmarla con la ficha RUC de SUNAT (por ejemplo, si SUNAT la escribe «ENSIL INT E.I.R.L.»). Se corrige en Organización → Empresas. Cada una lleva esa nota en «Observaciones».
+> La razón social de las cuatro empresas nuevas se cargó **como la escribió el usuario**; falta confirmarla con la ficha RUC de SUNAT. Se corrige en Organización → Empresas (la de ENSIL INT ya la corrigió el usuario: «ENSIL INT. E.I.R.L.»). Cada una lleva esa nota en «Observaciones».
+>
+> **Régimen laboral:** las 6 son **MYPE** (micro y pequeña empresa; ninguna pasa de pequeña), confirmado por el usuario el 2026-11-07. Es un dato de cada empresa (`regimen_laboral`): en MYPE la planilla referencial muestra solo lo ordinario y la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad.
 
 ## Sedes cargadas (16)
 
@@ -34,16 +36,16 @@ El código `FIL-NNN` lo asigna el sistema a continuación del mayor que exista (
 | `FIL-004` | **Cajamarca** | ENSIL EVOLUTION S.R.L. | Cajamarca | Cajamarca | Cajamarca | Jr. Guadalupe #466 | Huánuco y Silva Santiesteban | 076-772573 | 933722476 |
 | `FIL-005` | **Trujillo** | SILEE E.I.R.L. | La Libertad | Trujillo | Trujillo | San Martín #150 | Frente al Club Libertad | — | 928140527 |
 | `FIL-006` | **San Isidro** | ENSIL EVOLUTION S.R.L. | Lima | Lima | San Isidro | Calle Francisco de Zela #2575 | 1/2 cdra. del Touring | — | 960508686 |
-| `FIL-007` | **Huancayo** | ENSIL INT EIRL | Junín | Huancayo | El Tambo | Jr. Arequipa #218 | Complejo Salesiano Sta. Rosa | 064-419923 | 992195898 |
-| `FIL-008` | **Puno** | ENSIL INT EIRL | Puno | Puno | Puno | Jr. Moquegua #422 (2° piso) | Frente al Restaurante Tamis | 051-352969 | 961274101 |
+| `FIL-007` | **Huancayo** | ENSIL INT. E.I.R.L. | Junín | Huancayo | El Tambo | Jr. Arequipa #218 | Complejo Salesiano Sta. Rosa | 064-419923 | 992195898 |
+| `FIL-008` | **Puno** | ENSIL INT. E.I.R.L. | Puno | Puno | Puno | Jr. Moquegua #422 (2° piso) | Frente al Restaurante Tamis | 051-352969 | 961274101 |
 | `FIL-009` | **Juliaca** | ENSIL EVOLUTION S.R.L. | Puno | San Román | Juliaca | Jr. Bolívar #329 | Costado del Mía Market | — | 913632393 |
 | `FIL-010` | **Arequipa** | ENSIL EVOLUTION S.R.L. | Arequipa | Arequipa | Cayma | Urbanización León XIII M 60 - A, CAYMA | A media cuadra de la Clínica García Braganini | 054-325886 | 980756620 |
 | `FIL-011` | **Cusco Magisterio** | ENSIL REVOLUTION S.A.C. | Cusco | Cusco | Cusco | Parque Amauta #210 Urb. Magisterio | A 2 casas de Caprichos | 084-782957 | 953802527 |
 | `FIL-012` | **Cusco Marcavalle** | EDITORIAL ENSIL DE LAS AMERICAS TACNA | Cusco | Cusco | Wanchaq | Emilio Balcay #27 Urb. Cerveceros | Paradero Marcavalle | — | 922477489 |
 | `FIL-013` | **Tacna** | EDITORIAL ENSIL DE LAS AMERICAS TACNA | Tacna | Tacna | Tacna | Av. Venezuela # 144 | Frente al Parque Villa Hermosa | 052-638072 | 933746179 |
-| `FIL-014` | **Huaraz** | ENSIL INT EIRL | Áncash | Huaraz | Huaraz | Jr. Larrea y Laredo #796 | Frente al Parque El Encuentro | — | 933741997 |
-| `FIL-015` | **Ica** | ENSIL INT EIRL | Ica | Ica | Ica | Av. San Martín #507 | Al costado de Serpost | — | 936770444 |
-| `FIL-016` | **Ayacucho** | ENSIL INT EIRL | Ayacucho | Huamanga | Ayacucho | Jr. Las Gardenias Mz K Teniente 14 | Urb. Mariscal Cáceres | — | 925846402 |
+| `FIL-014` | **Huaraz** | ENSIL INT. E.I.R.L. | Áncash | Huaraz | Huaraz | Jr. Larrea y Laredo #796 | Frente al Parque El Encuentro | — | 933741997 |
+| `FIL-015` | **Ica** | ENSIL INT. E.I.R.L. | Ica | Ica | Ica | Av. San Martín #507 | Al costado de Serpost | — | 936770444 |
+| `FIL-016` | **Ayacucho** | ENSIL INT. E.I.R.L. | Ayacucho | Huamanga | Ayacucho | Jr. Las Gardenias Mz K Teniente 14 | Urb. Mariscal Cáceres | — | 925846402 |
 
 ## Sede pendiente: NO cargar todavía
 

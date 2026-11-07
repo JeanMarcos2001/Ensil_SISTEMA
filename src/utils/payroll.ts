@@ -10,6 +10,7 @@
  */
 import type { Company, Contract, ContractRevisionChange, Staff } from '../context/DataContext';
 import { vacationAgendaError, type AgendaContext } from './staffAvailability';
+import type { LaborRegime } from './statuses';
 import { AFP_RATES as ENGINE_AFP_RATES, ONP_RATE as ENGINE_ONP_RATE, RMV, regularMonth, type RegularMonth } from './payrollEngine';
 
 export const CONTRACT_TYPES = ['Indeterminado', 'Plazo Fijo', 'Locación de servicios'] as const;
@@ -53,9 +54,9 @@ export interface NetEstimate {
 /** Neto de un mes regular. null si falta el sueldo o el sistema de pensiones lo exige. */
 export function estimateNet(
   gross: number, type: string, system: string, fund: string,
-  staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), suspension4ta = false
+  staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), suspension4ta = false, regime?: LaborRegime
 ): NetEstimate | null {
-  const r = regularMonth({ type, startDate: `${year}-01-01`, grossSalary: gross, pensionSystem: system, pensionFund: fund, suspension4ta }, staff, year);
+  const r = regularMonth({ type, startDate: `${year}-01-01`, grossSalary: gross, pensionSystem: system, pensionFund: fund, suspension4ta, regime }, staff, year);
   return r ? { rate: r.rate, contribution: r.pension, incomeTax: r.incomeTax, taxKind: r.taxKind, familyAllowance: r.familyAllowance, net: r.net } : null;
 }
 
@@ -166,9 +167,9 @@ export function validateContractForm(
 }
 
 /** Contrato listo para guardar (el neto y los aportes se calculan; nunca se escriben a mano). */
-export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear()): Omit<Contract, 'id'> {
+export function buildContract(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), regime?: LaborRegime): Omit<Contract, 'id'> {
   const gross = Number(f.grossSalary);
-  const est = estimateNet(gross, f.type, f.pensionSystem, f.pensionFund, staff, year, f.suspension4ta);
+  const est = estimateNet(gross, f.type, f.pensionSystem, f.pensionFund, staff, year, f.suspension4ta, regime);
   return {
     staffId: f.staffId,
     companyId: f.companyId || undefined,
@@ -201,8 +202,8 @@ export const contractToForm = (c: Contract): ContractForm => ({
 });
 
 /** Cambios que se guardan al editar (no toca al trabajador ni el estado del contrato; la empresa sí puede cambiar). */
-export function buildContractPatch(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear()): Partial<Omit<Contract, 'id'>> {
-  const { staffId: _staffId, status: _status, ...patch } = buildContract(f, staff, year);
+export function buildContractPatch(f: ContractForm, staff: { hasChildren?: boolean } = {}, year: number = new Date().getFullYear(), regime?: LaborRegime): Partial<Omit<Contract, 'id'>> {
+  const { staffId: _staffId, status: _status, ...patch } = buildContract(f, staff, year, regime);
   return patch;
 }
 

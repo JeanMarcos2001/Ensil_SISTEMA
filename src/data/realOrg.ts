@@ -11,12 +11,13 @@
  * ya se cargó; lo nuevo va al final.
  */
 import { branchFieldErrors, companyFieldErrors, firstError } from '../utils/orgDirectory';
+import type { LaborRegime } from '../utils/statuses';
 
 export const PHOTO_BASE = 'https://jtrugvxgztnxbhwjtiou.supabase.co/storage/v1/object/public/Filiales/';
 
 // ------------------------------------------------------------------------------------------------------------------ Empresas
 
-export interface RealCompany { ruc: string; name: string; inBase: boolean }
+export interface RealCompany { ruc: string; name: string; inBase: boolean; regime: LaborRegime }
 
 export const RUC = {
   silee: '20610010289',
@@ -27,14 +28,17 @@ export const RUC = {
   revolution: '20614185229',
 } as const;
 
-/** Las dos primeras ya estaban en la base antes de la carga; las demás las crea `empresas_y_sedes_reales.sql`. */
+/**
+ * Las dos primeras ya estaban en la base antes de la carga; las demás las crea `empresas_y_sedes_reales.sql`. Todas son MYPE (micro y pequeña empresa; ninguna pasa
+ * de pequeña): lo confirmó el usuario el 2026-11-07. La razón social de ENSIL INT la corrigió el usuario en pantalla («ENSIL INT. E.I.R.L.»).
+ */
 export const REAL_COMPANIES: RealCompany[] = [
-  { ruc: RUC.silee, name: 'SILEE E.I.R.L.', inBase: true },
-  { ruc: RUC.colegio, name: 'COLEGIO ENSIL DE LAS AMERICAS E.I.R.L.', inBase: true },
-  { ruc: RUC.editorial, name: 'EDITORIAL ENSIL DE LAS AMERICAS TACNA', inBase: false },
-  { ruc: RUC.int, name: 'ENSIL INT EIRL', inBase: false },
-  { ruc: RUC.evolution, name: 'ENSIL EVOLUTION S.R.L.', inBase: false },
-  { ruc: RUC.revolution, name: 'ENSIL REVOLUTION S.A.C.', inBase: false },
+  { ruc: RUC.silee, name: 'SILEE E.I.R.L.', inBase: true, regime: 'MYPE' },
+  { ruc: RUC.colegio, name: 'COLEGIO ENSIL DE LAS AMERICAS E.I.R.L.', inBase: true, regime: 'MYPE' },
+  { ruc: RUC.editorial, name: 'EDITORIAL ENSIL DE LAS AMERICAS TACNA', inBase: false, regime: 'MYPE' },
+  { ruc: RUC.int, name: 'ENSIL INT. E.I.R.L.', inBase: false, regime: 'MYPE' },
+  { ruc: RUC.evolution, name: 'ENSIL EVOLUTION S.R.L.', inBase: false, regime: 'MYPE' },
+  { ruc: RUC.revolution, name: 'ENSIL REVOLUTION S.A.C.', inBase: false, regime: 'MYPE' },
 ];
 
 // ------------------------------------------------------------------------------------------------------------------ Sedes

@@ -176,7 +176,7 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 ### 6.6 Contratos y planilla  *(Lote 3)*
 
 - ☑ **Contratos y planilla en la base** (2026-11-07, migración 0007): cada contrato lleva su **empresa** (obligatoria, independiente de la sede donde trabaja; se puede cambiar con motivo y resguardos) y su cargo; la planilla es **de una empresa y un mes** (cada RUC cierra la suya, con boleta a su nombre y RUC) y al cerrar guarda la foto de las líneas; vacaciones y ajustes incluidos. Nadie escribe las tablas directo (solo funciones de la base que validan y dejan quién y cuándo); los **sueldos van en una tabla aparte** que solo lee quien tiene «Ver remuneraciones». Probado en una copia local de Postgres (121 casos) y con `check-contracts-db.ts`. Migraciones **0007 y 0008** (empresa editable) aplicadas el 2026-11-07. *(L)*
-- ☐ 🤖 **Lo que queda de esto:** la agenda (Psicopedagogía, entrevistas, matrículas) todavía lee el personal y los contratos **de ejemplo** (`agendaContracts`): quien está de vacaciones o cesó en la base aún no se refleja ahí; pasa a la base con la agenda (6.7). La liquidación de beneficios al cese sigue sin hacerse. *(M)*
+- ☑ **El puente de la agenda** (2026-11-07): la agenda, la verificación y las matrículas leen el personal, las asignaciones y los contratos de la base (ya no hay personal de ejemplo); las asesorías y actividades siguen de ejemplo hasta que pasen los alumnos y las matrículas (6.7). *(M)*
 - ☐ 🧑 **Validar con contabilidad** las tasas (AFP/ONP, UIT, RMV) y las reglas de renta de 5.ª categoría: hoy son referenciales y viven en `utils/payrollEngine.ts`. *(M)*
 
 ### 6.7 Psicopedagogía y verificación
@@ -216,7 +216,7 @@ El sistema guarda **datos de menores** (alumnos) y de sus apoderados. **Consulta
 
 ### 7.4 Planilla
 
-- ☐ 🧑 **Liquidación de beneficios al cese** (gratificación, CTS, vacaciones truncas) y archivos para **PLAME / T-Registro**: definir con contabilidad si el sistema los genera o solo informa. *(decisión)* → 🤖 si se hace. *(L)*
+- ☑ **Liquidación de beneficios al cese, PLAME / T-Registro y pagos de sueldos:** decidido el 2026-11-07 que **quedan fuera del sistema** (no se calculan ni se registran; la planilla es referencial). **No es un pendiente**: solo se retoma si el usuario lo pide.
 
 ---
 
@@ -294,7 +294,7 @@ Hoy los recordatorios de cobranza se **preparan y se registran**, pero no se env
 | 7 | Revisión legal (contrato, privacidad, datos de menores) | Empezar ya con un asesor | Fase 4 |
 | 8 | Canal de mensajes: ¿WhatsApp oficial o manual al inicio? | Manual al inicio; WhatsApp oficial después | Fase 5 |
 | 9 | Sede piloto | Los Olivos | Fase 7 |
-| 10 | Planilla: ¿el sistema genera PLAME/T-Registro y liquidaciones? | Informar primero; generar después | Fase 4 |
+| 10 | Planilla: ¿el sistema genera PLAME/T-Registro y liquidaciones? | ✅ Decidido (2026-11-07): no; ni liquidaciones ni PLAME / T-Registro ni pagos. La planilla es referencial | Fase 4 |
 
 ---
 

@@ -52,7 +52,7 @@ export interface ContractsContext {
   contracts: Contract[];
   /** El personal de la base (el contrato es de una persona de Personal). */
   staff: Staff[];
-  companies: Pick<Company, 'id' | 'name' | 'status'>[];
+  companies: Pick<Company, 'id' | 'name' | 'status' | 'laborRegime'>[];
   runs: PayrollRun[];
   /** Asesorías y actividades futuras de la persona (los datos de ejemplo de la agenda; una persona de la base aún no tiene). */
   agenda: AgendaContext;
@@ -63,7 +63,9 @@ export interface ContractsContext {
 export async function createContract(repo: ContractsPayrollRepository, ctx: ContractsContext, form: ContractForm): Promise<OpResult<{ id: string }>> {
   const problem = Object.values(validateContractForm(form, ctx.contracts, ctx.staff, ctx.today, undefined, ctx.agenda, ctx.companies))[0];
   if (problem) return fail(problem);
-  const built = buildContract(form, ctx.staff.find(s => s.id === form.staffId) ?? {}, Number(ctx.today.slice(0, 4)));
+  // El neto del contrato sale del mismo motor que la planilla, así que respeta el régimen laboral de su empresa
+  const regime = ctx.companies.find(x => x.id === form.companyId)?.laborRegime;
+  const built = buildContract(form, ctx.staff.find(s => s.id === form.staffId) ?? {}, Number(ctx.today.slice(0, 4)), regime);
   const taken = ctx.contracts.map(c => c.id);
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
     const id = nextSequentialId(ID_PREFIX.contrato, taken);
@@ -92,7 +94,7 @@ export async function editContract(repo: ContractsPayrollRepository, ctx: Contra
     const pending = ctx.runs.filter(r => r.status === 'Borrador' && r.companyId === current.companyId).reduce((n, r) => n + r.adjustments.filter(a => a.staffId === current.staffId).length, 0);
     if (pending > 0) return fail(`Tiene ${pending} ajuste(s) en la planilla en borrador de su empresa actual: quítelos o elimine ese borrador antes de cambiar la empresa.`);
   }
-  const patch = buildContractPatch(form, ctx.staff.find(s => s.id === current.staffId) ?? {}, Number(ctx.today.slice(0, 4)));
+  const patch = buildContractPatch(form, ctx.staff.find(s => s.id === current.staffId) ?? {}, Number(ctx.today.slice(0, 4)), ctx.companies.find(x => x.id === form.companyId)?.laborRegime);
   const changes = diffContract(current, patch, id => ctx.companies.find(x => x.id === id)?.name ?? id ?? '');
   const blocked = validateContractEdit(current, changes, reason)[0];
   if (blocked) return fail(blocked);
@@ -125,7 +127,7 @@ export async function renewContract(repo: ContractsPayrollRepository, ctx: Contr
   const problem = validateRenewal(old, input, ctx.contracts, ctx.staff, ctx.runs, ctx.today)[0];
   if (problem) return fail(problem);
   const member = ctx.staff.find(s => s.id === old.staffId);
-  const built = buildRenewal(old, input, member ?? {}, Number(ctx.today.slice(0, 4)));
+  const built = buildRenewal(old, input, member ?? {}, Number(ctx.today.slice(0, 4)), ctx.companies.find(x => x.id === old.companyId)?.laborRegime);
   const taken = ctx.contracts.map(x => x.id);
   for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
     const newId = nextSequentialId(ID_PREFIX.contrato, taken);

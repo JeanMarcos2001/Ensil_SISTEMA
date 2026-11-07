@@ -11,7 +11,8 @@ import { useData, type PayrollLine, type PayrollRun } from '../../context/DataCo
 import { PERM } from '../../utils/authority';
 import { csvFileName, downloadCsv } from '../../utils/exportCsv';
 import { addPeriods, periodLabel, periodOf } from '../../utils/payrollEngine';
-import { PAYROLL_HEADERS, payrollRows, payslipHtml, runIdOf, totalsOf } from '../../utils/payrollRun';
+import { payrollHeaders, payrollRows, payslipHtml, runIdOf, totalsOf } from '../../utils/payrollRun';
+import type { LaborRegime } from '../../utils/statuses';
 import { printHtml, printTable } from '../../utils/printTable';
 import { todayLocalISO } from '../../utils/schedule';
 import { Field, inputCls } from '../enrollment/fields';
@@ -32,12 +33,13 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint?
 }
 
 /**
- * Personas → Planilla: la planilla de cada mes sale de los contratos (sueldo, pensión, renta de 5.ª, gratificación…),
- * se ajusta en borrador (bonos y descuentos con motivo), se cierra como foto, se marca como pagada y emite boletas.
+ * Personas → Planilla: detalle REFERENCIAL de las remuneraciones de cada empresa y mes, calculado desde los contratos (sueldo, pensión, renta de 5.ª;
+ * en régimen general también gratificación y aportes del empleador). Se ajusta en borrador (bonos y descuentos con motivo) y se cierra como foto. NO paga,
+ * no registra pagos ni emite la boleta oficial: contabilidad valida y paga fuera del sistema.
  */
 export function Payroll() {
   const {
-    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, reopenPayroll, companies, orgStaff: staff, can,
+    payrollRuns, payrollLinesOf, generatePayroll, deletePayrollDraft, addPayrollAdjustment, removePayrollAdjustment, closePayroll, reopenPayroll, companies, staff, can,
   } = useData();
   const today = todayLocalISO();
   const [params, setParams] = useSearchParams();
@@ -62,6 +64,8 @@ export function Payroll() {
   const genCompanyId = companyId || activeCompanies[0]?.id || '';
   const companyOf = (id: string) => companies.find(c => c.id === id)?.name ?? id;
   const company = run ? (built.lines[0]?.companyName || companyOf(run.companyId)) : '';
+  // Régimen laboral de la empresa de la planilla (en una cerrada, el de la foto): en MYPE no hay gratificación, CTS ni aporte de salud
+  const regime: LaborRegime = run ? (built.lines[0]?.regime ?? companies.find(x => x.id === run.companyId)?.laborRegime ?? 'General') : 'General';
   const member = staffFilter ? staff.find(s => s.id === staffFilter) : undefined;
 
   if (!can(PERM.payrollView)) {
@@ -85,8 +89,8 @@ export function Payroll() {
     setMessage({ ok: true, text: 'Ajuste agregado: la planilla se recalculó.' });
   };
 
-  const exportRun = () => run && downloadCsv(csvFileName(`Planilla ${run.period}`, today), PAYROLL_HEADERS, payrollRows(built.lines));
-  const printRun = () => run && printTable(`Planilla de ${periodLabel(run.period)}`, `${company} · ${built.lines.length} trabajador(es) · neto ${money(totals.net)}`, PAYROLL_HEADERS, payrollRows(built.lines));
+  const exportRun = () => run && downloadCsv(csvFileName(`Planilla ${run.period}`, today), payrollHeaders(regime), payrollRows(built.lines, regime));
+  const printRun = () => run && printTable(`Planilla de ${periodLabel(run.period)}`, `${company} · ${built.lines.length} trabajador(es) · neto referencial ${money(totals.net)}`, payrollHeaders(regime), payrollRows(built.lines, regime));
   const printSlip = (l: PayrollLine) => run && printHtml(payslipHtml(l, run.period));
 
   // ---------------------------------------------------------------- Detalle de una planilla
@@ -120,11 +124,17 @@ export function Payroll() {
           <Kpi label="Trabajadores" value={String(totals.headcount)} hint={`${built.lines.length} línea(s) de contrato`} />
           <Kpi label="Total ingresos" value={money(totals.income)} />
           <Kpi label="Descuentos" value={money(totals.pension + totals.incomeTax + totals.otherDeductions)} hint={`Pensión ${money(totals.pension)} · Renta ${money(totals.incomeTax)}`} />
-          <Kpi label="Neto a pagar" value={money(totals.net)} tone="text-primary-accent" />
-          <Kpi label="EsSalud (empleador)" value={money(totals.essalud)} />
-          <Kpi label="Costo del empleador" value={money(totals.employerCost)} hint="Ingresos + EsSalud" />
-          <Kpi label="CTS a depositar" value={money(totals.cts)} hint="Mayo y noviembre; no es parte del neto" />
+          <Kpi label="Neto referencial" value={money(totals.net)} tone="text-primary-accent" hint="No es un pago: contabilidad valida" />
+          {regime === 'General' && <Kpi label="EsSalud (empleador)" value={money(totals.essalud)} />}
+          <Kpi label="Costo referencial de planilla" value={money(totals.employerCost)} hint={regime === 'General' ? 'Ingresos + EsSalud' : 'Solo la remuneración ordinaria'} />
+          {regime === 'General' && <Kpi label="CTS estimada" value={money(totals.cts)} hint="Mayo y noviembre; el depósito se hace fuera del sistema" />}
         </div>
+
+        {regime === 'MYPE' && (
+          <div className="bg-info-tint border border-info-text/15 rounded-xl p-3 text-sm text-info-text">
+            Empresa en régimen MYPE: esta planilla muestra solo la remuneración ordinaria (sueldo, asignación familiar, aportes de pensión, renta y ajustes). La gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad según el régimen de la empresa. Todo lo de aquí es referencial.
+          </div>
+        )}
 
         {(errors.length > 0 || notices.length > 0) && (
           <div className="space-y-2">
@@ -161,7 +171,7 @@ export function Payroll() {
                     <td className="px-4 py-3 text-right font-semibold text-text-primary">{money(l.calc.net)}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <Button variant="ghost" size="sm" onClick={() => setLineOpen(l.contractId)}>Detalle</Button>
-                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => printSlip(l)}><FileText size={14} /> Boleta</Button>
+                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => printSlip(l)}><FileText size={14} /> Imprimir</Button>
                     </td>
                   </tr>
                 ))}
@@ -180,7 +190,7 @@ export function Payroll() {
         </Card>
 
         {/* Detalle de una línea */}
-        <Modal isOpen={!!line} onClose={() => setLineOpen(null)} title={line ? `${line.staffName} · ${periodLabel(run.period)}` : ''} size="2xl" footer={<div className="flex justify-end gap-3 w-full">{line && <Button variant="secondary" className="gap-2" onClick={() => printSlip(line)}><FileText size={16} /> Boleta</Button>}<Button variant="ghost" onClick={() => setLineOpen(null)}>Cerrar</Button></div>}>
+        <Modal isOpen={!!line} onClose={() => setLineOpen(null)} title={line ? `${line.staffName} · ${periodLabel(run.period)}` : ''} size="2xl" footer={<div className="flex justify-end gap-3 w-full">{line && <Button variant="secondary" className="gap-2" onClick={() => printSlip(line)}><FileText size={16} /> Imprimir detalle</Button>}<Button variant="ghost" onClick={() => setLineOpen(null)}>Cerrar</Button></div>}>
           {line && (
             <div className="space-y-5 pb-2 text-sm">
               <p className="text-text-secondary">{line.contractType} · {line.docType} {line.docNumber}{line.pensionSystem ? ` · ${line.pensionSystem}${line.pensionFund ? ` ${line.pensionFund}` : ''}` : ''} · sueldo del contrato {money(line.grossSalary)}</p>
@@ -197,7 +207,7 @@ export function Payroll() {
                   <table className="w-full"><tbody className="divide-y divide-border-soft">
                     {([[line.pensionSystem === 'ONP' ? 'ONP' : 'Aporte AFP', line.calc.pension], [`Renta de ${line.calc.taxKind ?? '5.ª categoría'}`, line.calc.incomeTax], ['Otros descuentos', line.calc.otherDeductions]] as [string, number][]).filter(([, v]) => v > 0).map(([k, v]) => <tr key={k}><td className="py-1.5 text-text-secondary">{k}</td><td className="py-1.5 text-right">{money(v)}</td></tr>)}
                     <tr><td className="py-1.5 font-semibold">Total descuentos</td><td className="py-1.5 text-right font-semibold">{money(line.calc.totalDeductions)}</td></tr>
-                    <tr><td className="py-2 font-bold text-primary-accent">Neto a pagar</td><td className="py-2 text-right font-bold text-primary-accent">{money(line.calc.net)}</td></tr>
+                    <tr><td className="py-2 font-bold text-primary-accent">Neto referencial</td><td className="py-2 text-right font-bold text-primary-accent">{money(line.calc.net)}</td></tr>
                   </tbody></table>
                 </div>
               </div>
@@ -208,7 +218,9 @@ export function Payroll() {
                   <p className="text-xs text-text-muted mt-1">Proyección con el sueldo del contrato; los meses previos salen de las planillas cerradas (o se suponen regulares). La valida contabilidad.</p>
                 </div>
               )}
-              <p className="text-text-secondary">EsSalud (empleador): {money(line.calc.essalud)}{line.calc.ctsDeposit > 0 ? ` · CTS a depositar: ${money(line.calc.ctsDeposit)}` : ''}</p>
+              {line.regime === 'General'
+                ? <p className="text-text-secondary">EsSalud (empleador): {money(line.calc.essalud)}{line.calc.ctsDeposit > 0 ? ` · CTS estimada: ${money(line.calc.ctsDeposit)} (se deposita fuera del sistema)` : ''}</p>
+                : <p className="text-text-muted">Régimen MYPE: la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad.</p>}
               {line.warnings.length > 0 && <ul className="list-disc pl-5 text-text-muted">{line.warnings.map(w => <li key={w}>{w}</li>)}</ul>}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -306,7 +318,7 @@ export function Payroll() {
       <div className="flex flex-wrap justify-between items-start gap-3">
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Planilla</h2>
-          <p className="text-sm text-text-secondary">Sueldos mensuales calculados desde los contratos: pensión, renta de 5.ª categoría, gratificaciones y aportes del empleador.</p>
+          <p className="text-sm text-text-secondary">Detalle referencial de las remuneraciones de cada empresa y mes, calculado desde los contratos. No paga ni liquida: contabilidad valida.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="w-64">

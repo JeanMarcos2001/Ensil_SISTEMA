@@ -174,6 +174,11 @@ Hoy el almacén central **es la filial Los Olivos** marcada con `isWarehouse`, y
 - **Cada contrato tiene su empresa** (`contratos.empresa_id`, obligatoria; no depende de la sede donde trabaja) y **cada planilla es de una empresa y un mes** (`PLA-AAAA-MM-EMP-NNN`): con las 6 empresas, cada RUC cierra la suya.
 - **Migración 0008** (`supabase/migrations/20261107150000_contrato_cambiar_empresa.sql`; para deshacer, `supabase/deshacer/20261107150000_contrato_cambiar_empresa.down.sql`): la empresa de un contrato **se puede cambiar** al editarlo (con motivo), salvo que una planilla cerrada incluya el contrato o haya ajustes en el borrador de su empresa actual; y un contrato conserva su empresa aunque se inactive después. Solo reemplaza dos funciones (`editar_contrato` y `app.contrato_validar`). Probada contra Postgres en memoria (21 casos). **Aplicada y registrada el 2026-11-07.**
 
+## Régimen laboral de las empresas (2026-11-07)
+
+- **Migración 0009** (`supabase/migrations/20261107170000_empresas_regimen_laboral.sql`; para deshacer, `supabase/deshacer/20261107170000_empresas_regimen_laboral.down.sql`): agrega `empresas.regimen_laboral` (`MYPE` o `General`, por defecto `MYPE`). Las 6 empresas actuales son MYPE (confirmado por el usuario). Probada contra Postgres en memoria (7 casos). **Aplicada y registrada el 2026-11-07.**
+- Solo orienta la planilla **referencial**: en MYPE la planilla muestra únicamente lo ordinario (sueldo, asignación familiar, aportes de pensión, renta y ajustes) y la gratificación, la CTS y el aporte de salud del empleador los calcula contabilidad. El sistema no paga ni liquida al personal.
+
 ## Despliegue en Vercel y enlaces de los correos (2026-11-06)
 
 - **Vercel** publica `main` del repositorio `JeanMarcos2001/Ensil_SISTEMA` (proyecto `ensil-sistema`, dirección provisional `https://ensil-sistema.vercel.app`; el dominio propio vendrá después). `vercel.json` reenvía todas las rutas a `index.html` (el sistema es de una sola página: sin esto, recargar `/organizacion/usuarios` daría 404).

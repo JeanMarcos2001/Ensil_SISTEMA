@@ -34,7 +34,7 @@ check('El patrón del código: FIL- y al menos tres dígitos', ['FIL-001', 'FIL-
 check('La base no deja repetir código ni nombre de filial sin distinguir mayúsculas', sql.includes('sedes_id_unico on public.sedes (lower(id))') && sql.includes('sedes_nombre_unico on public.sedes (lower(nombre))'));
 
 // ------------------------------------------------------------------------------------------------ Datos de partida
-const emp = (id: string, ruc: string, name: string, estado: 'Activo' | 'Inactivo' = 'Activo'): Company => ({ id, ruc, name, commercialName: '', status: estado, observaciones: '' });
+const emp = (id: string, ruc: string, name: string, estado: 'Activo' | 'Inactivo' = 'Activo'): Company => ({ id, ruc, name, commercialName: '', status: estado, observaciones: '', laborRegime: 'MYPE' });
 const sede = (patch: Partial<Branch> = {}): Branch => ({
   id: 'FIL-001', name: 'Piura', company: '', companyId: 'EMP-001', status: 'Activo', address: 'Av. Grau 100', reference: '', department: 'Piura', province: 'Piura', district: 'Piura',
   phoneFixed: '', phoneMobile: '', email: '', observations: '', ...patch,
@@ -47,6 +47,9 @@ const company = { ...emp('EMP-001', '20123456789', 'Colegio Ensil De Las Améric
 const row = companyToRow(company);
 check('Los textos vacíos de una empresa se guardan como nulos y se leen como vacíos', row.nombre_comercial === null && row.observaciones === null && companyFromRow(row).commercialName === '');
 check('Empresa: ida y vuelta sin pérdida', JSON.stringify(companyFromRow(companyToRow(emp('EMP-002', '20987654321', 'SILEE EIRL')))) === JSON.stringify(emp('EMP-002', '20987654321', 'SILEE EIRL')));
+check('Régimen laboral: una empresa sin dato se guarda como MYPE (como el valor por defecto de la base), General se conserva y un valor raro se lee como MYPE', companyToRow({ ...emp('EMP-009', '20999999999', 'X'), laborRegime: undefined }).regimen_laboral === 'MYPE'
+  && companyToRow({ ...emp('EMP-009', '20999999999', 'X'), laborRegime: 'General' }).regimen_laboral === 'General' && companyFromRow({ ...companyToRow(emp('EMP-009', '20999999999', 'X')), regimen_laboral: 'General' }).laborRegime === 'General'
+  && companyFromRow({ ...companyToRow(emp('EMP-009', '20999999999', 'X')), regimen_laboral: 'otro' }).laborRegime === 'MYPE' && companyPatchToRow({ laborRegime: 'General' }).regimen_laboral === 'General' && !('regimen_laboral' in companyPatchToRow({ status: 'Inactivo' })));
 check('Un cambio de empresa solo envía los campos que cambian y nunca el id', JSON.stringify(companyPatchToRow({ id: 'X', status: 'Inactivo' })) === '{"estado":"Inactivo"}');
 const b = sede({ reference: ' frente al parque ', phoneMobile: '999 888 777', email: 'piura@ensilperu.com' });
 const srow = branchToRow(b);

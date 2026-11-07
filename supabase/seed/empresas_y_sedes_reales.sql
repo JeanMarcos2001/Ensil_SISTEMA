@@ -3,7 +3,7 @@
 -- La tabla de consulta está en docs/DATOS_SEDES.md.
 --
 -- NO es una migración: se ejecuta a mano, una sola vez, en el SQL Editor del proyecto `ensil-sistema` (NO el de la web).
--- Antes: deben existir SILEE y Colegio Ensil de las Américas (Organización → Empresas) y las sedes Los Olivos y Piura.
+-- Antes: aplicar la migración 0009 (régimen laboral); deben existir SILEE y Colegio Ensil de las Américas (Organización → Empresas) y las sedes Los Olivos y Piura.
 -- Es seguro repetirlo: no vuelve a crear la empresa que ya tiene ese RUC ni la sede que ya tiene ese nombre.
 -- Los códigos (EMP-NNN y FIL-NNN) se asignan solos, a continuación del mayor que exista, en el orden de esta lista.
 -- Ilo (de la web) NO se carga todavía: aún no tiene empresa definida.
@@ -19,16 +19,16 @@ begin
   -- 1) Empresas nuevas (la razón social va como la informó el usuario: confirmarla con la ficha RUC de SUNAT).
   for e in
     select * from (values
-    ('20533093133', 'EDITORIAL ENSIL DE LAS AMERICAS TACNA'),
-    ('20612421243', 'ENSIL INT EIRL'),
-    ('20612459313', 'ENSIL EVOLUTION S.R.L.'),
-    ('20614185229', 'ENSIL REVOLUTION S.A.C.')
-    ) as t(ruc, razon_social)
+    ('20533093133', 'EDITORIAL ENSIL DE LAS AMERICAS TACNA', 'MYPE'),
+    ('20612421243', 'ENSIL INT. E.I.R.L.', 'MYPE'),
+    ('20612459313', 'ENSIL EVOLUTION S.R.L.', 'MYPE'),
+    ('20614185229', 'ENSIL REVOLUTION S.A.C.', 'MYPE')
+    ) as t(ruc, razon_social, regimen_laboral)
   loop
     if not exists (select 1 from public.empresas where ruc = e.ruc) then
       select coalesce(max(substring(id from 5)::int), 0) + 1 into n from public.empresas;
-      insert into public.empresas (id, ruc, razon_social, estado, observaciones)
-      values ('EMP-' || lpad(n::text, 3, '0'), e.ruc, e.razon_social, 'Activo', 'Razón social informada el 2026-11-07: confirmar con la ficha RUC de SUNAT.');
+      insert into public.empresas (id, ruc, razon_social, estado, observaciones, regimen_laboral)
+      values ('EMP-' || lpad(n::text, 3, '0'), e.ruc, e.razon_social, 'Activo', 'Razón social informada el 2026-11-07: confirmar con la ficha RUC de SUNAT.', e.regimen_laboral);
     end if;
   end loop;
 

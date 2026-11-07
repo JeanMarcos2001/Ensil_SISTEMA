@@ -25,6 +25,7 @@ export interface EmpresaRow {
   nombre_comercial: string | null;
   estado: string;
   observaciones: string | null;
+  regimen_laboral: string;
 }
 
 export interface SedeRow {
@@ -61,10 +62,11 @@ const status = (v: string): 'Activo' | 'Inactivo' => (v === 'Inactivo' ? 'Inacti
 
 export const companyFromRow = (r: EmpresaRow): Company => ({
   id: r.id, ruc: r.ruc, name: r.razon_social, commercialName: r.nombre_comercial ?? '', status: status(r.estado), observaciones: r.observaciones ?? '',
+  laborRegime: r.regimen_laboral === 'General' ? 'General' : 'MYPE',
 });
 
 export const companyToRow = (c: Company): EmpresaRow => ({
-  id: c.id, ruc: c.ruc.trim(), razon_social: c.name.trim(), nombre_comercial: orNull(c.commercialName), estado: c.status, observaciones: orNull(c.observaciones),
+  id: c.id, ruc: c.ruc.trim(), razon_social: c.name.trim(), nombre_comercial: orNull(c.commercialName), estado: c.status, observaciones: orNull(c.observaciones), regimen_laboral: c.laborRegime ?? 'MYPE',
 });
 
 /** Solo los campos que cambian (el id no se toca). */
@@ -75,6 +77,7 @@ export function companyPatchToRow(p: Partial<Company>): Partial<EmpresaRow> {
   if (p.commercialName !== undefined) row.nombre_comercial = orNull(p.commercialName);
   if (p.status !== undefined) row.estado = p.status;
   if (p.observaciones !== undefined) row.observaciones = orNull(p.observaciones);
+  if (p.laborRegime !== undefined) row.regimen_laboral = p.laborRegime;
   return row;
 }
 

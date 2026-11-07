@@ -32,7 +32,7 @@ const textareaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 
 
 /** Alta y edición de un trabajador. No hay correo institucional; los campos con asterisco son obligatorios. */
 export function StaffFormModal({ isOpen, onClose, editing }: Props) {
-  const { orgStaff: staff, addStaff, updateStaff, users } = useData();
+  const { staff, addStaff, updateStaff, users } = useData();
   const today = todayLocalISO();
   const [form, setForm] = useState<StaffForm>(emptyStaffForm());
   const [submitted, setSubmitted] = useState(false);

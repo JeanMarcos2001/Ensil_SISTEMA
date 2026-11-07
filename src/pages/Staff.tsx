@@ -10,7 +10,7 @@ import { useTablePagination } from '../hooks/useTablePagination';
 import { Modal } from '../components/ui/Modal';
 import { StaffFormModal } from './people/StaffFormModal';
 import { contractStatus, positionOf } from '../utils/payroll';
-import { todayLocalISO } from '../utils/schedule';
+import { allActivities, todayLocalISO } from '../utils/schedule';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { ReasonDialog } from '../components/ui/ReasonDialog';
 import { csvFileName, downloadCsv } from '../utils/exportCsv';
@@ -20,12 +20,10 @@ import { StaffDbNotice } from '../components/people/StaffDbNotice';
 import { PERM } from '../utils/authority';
 import { formatDisplayDate } from '../utils/tariffs';
 import { ageText, staffAge } from '../utils/identity';
-import { NOT_YET_IN_DB } from '../utils/staffDb';
 
 export function StaffPage() {
-  const { orgStaff: staff, orgAssignments: assignments, orgPlaces: places, users, contracts, inactivateStaff, reactivateStaff, can } = useData();
-  // Los contratos son los de la base; la agenda aún no está en la base: no se cruza con las personas de la base (ver NOT_YET_IN_DB)
-  const { schedules, activities } = NOT_YET_IN_DB;
+  const { staff, assignments, orgPlaces: places, users, contracts, schedules, monthlySchedules, inactivateStaff, reactivateStaff, can } = useData();
+  const activities = useMemo(() => allActivities(monthlySchedules), [monthlySchedules]);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [toInactivate, setToInactivate] = useState<Staff | null>(null);
