@@ -76,7 +76,7 @@ check('Plan 2 partes: parte 1 con tope = total, parte 2 en 0 hasta cobrar', plan
 
 // --- Disponibilidad ---
 const allTypes = Object.values(PT);
-const ctx = { programId: 'kids', branchId: 'FIL-PIU', date: '2026-06-01' };
+const ctx = { programId: 'kids', branchId: 'FIL-002', date: '2026-06-01' };
 const names = (r: ReturnType<typeof getAvailablePaymentTypes>) => r.map(x => x.paymentType.id).sort().join(',');
 
 check('Solo aparecen tipos con tarifario vigente', names(getAvailablePaymentTypes([tc, t2], allTypes, ctx)) === 'c2p,contado');
@@ -87,7 +87,7 @@ check('Tarifario aún no vigente no disponible', names(getAvailablePaymentTypes(
 check('Tarifario con nivel solo aplica a ese nivel',
   names(getAvailablePaymentTypes([{ ...tc, levelId: 'L2' }], allTypes, { ...ctx, levelId: 'L1' })) === '' &&
   names(getAvailablePaymentTypes([{ ...tc, levelId: 'L2' }], allTypes, { ...ctx, levelId: 'L2' })) === 'contado');
-check('Tarifario de otra sede no aplica', names(getAvailablePaymentTypes([{ ...tc, branchId: 'FIL-CHI' }], allTypes, ctx)) === '');
+check('Tarifario de otra sede no aplica', names(getAvailablePaymentTypes([{ ...tc, branchId: 'FIL-003' }], allTypes, ctx)) === '');
 
 // --- Partes de un pago contado (no son cuotas) ---
 const parts = [

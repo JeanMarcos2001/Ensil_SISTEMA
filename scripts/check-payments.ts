@@ -99,13 +99,13 @@ check('Sin TC no hay equivalente', partsUSD([part({ currency: 'PEN', amount: 100
 const built = buildPaymentRecord({
   id: 'PAG-010', date: '20 Oct 2026', student: 'Mateo', concept: 'Pago de Cuota 1', amountUSD: 200,
   parts: [part({ method: 'Yape', currency: 'PEN', amount: 380, exchangeRate: 3.8, operationNumber: 'Y1', evidence: 'c.png' }), part({ amount: 100 })],
-  document: doc({ serie: 'b001', number: '777' }), cashConcept: 'Ingreso cuota', cashReference: 'PLN-1 / Mateo', branchId: 'FIL-PIU', enrollmentIds: ['MAT-1'], user: 'Caja', note: 'ok',
+  document: doc({ serie: 'b001', number: '777' }), cashConcept: 'Ingreso cuota', cashReference: 'PLN-1 / Mateo', branchId: 'FIL-002', enrollmentIds: ['MAT-1'], user: 'Caja', note: 'ok',
 });
 check('El comprobante queda estructurado y como texto', built.payment.receipt === 'B001-777' && built.payment.document?.serie === 'B001');
 check('Medios distintos del pago en una sola línea', built.payment.method === 'Yape / Efectivo');
 check('Un movimiento de caja por parte, cada uno en su moneda', built.cashMovements.length === 2 && built.cashMovements[0].currency === 'PEN' && built.cashMovements[0].amount === 380 && built.cashMovements[1].currency === 'USD');
 check('La suma en USD de caja coincide con el pago', Math.abs(built.cashMovements.reduce((a, m) => a + m.amountUSD, 0) - 200) < 0.005);
-check('La operación y la sede viajan a caja', built.cashMovements[0].operationNumber === 'Y1' && built.cashMovements.every(m => m.branchId === 'FIL-PIU' && m.paymentId === 'PAG-010'));
+check('La operación y la sede viajan a caja', built.cashMovements[0].operationNumber === 'Y1' && built.cashMovements.every(m => m.branchId === 'FIL-002' && m.paymentId === 'PAG-010'));
 check('La nota queda como comentario', built.payment.comment === 'ok' && built.payment.user === 'Caja');
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

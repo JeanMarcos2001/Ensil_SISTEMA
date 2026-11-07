@@ -77,11 +77,11 @@ export function buildPeopleSeed(today: string): PeopleSeed {
   });
   const dates = [d(-50), d(-65), d(-95), d(-2), addDaysISO(expiringStart, -3)];
   const enrollments: Enrollment[] = [
-    enrollment(1, students[0], '1', 'Kids', '1', 'Nivel 1', 'FIL-PIU', 'Piura', dates[0], 1200, '4', 'Plan 6'),
-    enrollment(2, students[1], '1', 'Kids', '2', 'Nivel 2', 'FIL-CHI', 'Chiclayo', dates[1], 1200, '4', 'Plan 6'),
-    { ...enrollment(3, students[2], '1', 'Kids', '3', 'Nivel 3', 'FIL-PIU', 'Piura', dates[2], 2100, '4', 'Plan 6', 'Caída'), dropDate: d(-20), dropRequestId: 'CAI-001' },
-    enrollment(4, students[3], '2', 'Pre-Kids', '4', 'Nivel 1', 'FIL-CHI', 'Chiclayo', dates[3], 1000, '1', 'Contado'),
-    enrollment(5, students[4], '1', 'Kids', '1', 'Nivel 1', 'FIL-PIU', 'Piura', dates[4], 1500, '1', 'Contado'),
+    enrollment(1, students[0], '1', 'Kids', '1', 'Nivel 1', 'FIL-002', 'Piura', dates[0], 1200, '4', 'Plan 6'),
+    enrollment(2, students[1], '1', 'Kids', '2', 'Nivel 2', 'FIL-003', 'Chiclayo', dates[1], 1200, '4', 'Plan 6'),
+    { ...enrollment(3, students[2], '1', 'Kids', '3', 'Nivel 3', 'FIL-002', 'Piura', dates[2], 2100, '4', 'Plan 6', 'Caída'), dropDate: d(-20), dropRequestId: 'CAI-001' },
+    enrollment(4, students[3], '2', 'Pre-Kids', '4', 'Nivel 1', 'FIL-003', 'Chiclayo', dates[3], 1000, '1', 'Contado'),
+    enrollment(5, students[4], '1', 'Kids', '1', 'Nivel 1', 'FIL-002', 'Piura', dates[4], 1500, '1', 'Contado'),
   ];
 
   // ------------------------------------------------------------ Cobros: de cada uno salen el pago, su caja y el cobro de la cuota
@@ -93,16 +93,16 @@ export function buildPeopleSeed(today: string): PeopleSeed {
   const cash = (id: string, usd: number): PaymentPart[] => [{ id, currency: 'PEN', amount: Math.round(usd * TC * 100) / 100, exchangeRate: TC, method: 'Efectivo' }];
   const yape = (id: string, usd: number, op: string): PaymentPart[] => [{ id, currency: 'PEN', amount: Math.round(usd * TC * 100) / 100, exchangeRate: TC, method: 'Yape', operationNumber: op, evidence: `${op}.jpg` }];
   const collections: Collection[] = [
-    { id: 'PAG-001', enrollment: 1, installment: 1, usd: 200, date: dates[0], user: 'Ana G.', parts: bank('PT1', 200, 'OP-4471'), serie: 'B001', number: '000123', branchId: 'FIL-PIU' },
-    { id: 'PAG-002', enrollment: 1, installment: 2, usd: 200, date: d(-22), user: 'Carlos R.', parts: cash('PT2', 200), serie: 'B001', number: '000124', branchId: 'FIL-PIU' },
-    { id: 'PAG-003', enrollment: 2, installment: 1, usd: 200, date: dates[1], user: 'Ana G.', parts: bank('PT3', 200, 'OP-4502'), serie: 'B001', number: '000125', branchId: 'FIL-CHI' },
-    { id: 'PAG-004', enrollment: 2, installment: 2, usd: 200, date: d(-37), user: 'Carlos R.', parts: cash('PT4', 200), serie: 'B001', number: '000126', branchId: 'FIL-CHI' },
-    { id: 'PAG-005', enrollment: 2, installment: 3, usd: 100, date: d(-8), user: 'Ana G.', parts: yape('PT5', 100, 'YP-8830'), serie: 'B001', number: '000127', branchId: 'FIL-CHI' },
-    { id: 'PAG-006', enrollment: 3, installment: 1, usd: 350, date: dates[2], user: 'Ana G.', parts: bank('PT6', 350, 'OP-3911'), serie: 'F001', number: '000890', branchId: 'FIL-PIU' },
-    { id: 'PAG-007', enrollment: 3, installment: 2, usd: 350, date: d(-67), user: 'Carlos R.', parts: bank('PT7', 350, 'OP-3975'), serie: 'F001', number: '000912', branchId: 'FIL-PIU' },
-    { id: 'PAG-008', enrollment: 3, installment: 3, usd: 200, date: d(-38), user: 'Ana G.', parts: yape('PT8', 200, 'YP-7204'), serie: 'B001', number: '000501', branchId: 'FIL-PIU' },
-    { id: 'PAG-009', enrollment: 4, usd: 1000, date: dates[3], user: 'Ana G.', parts: bank('PT9', 1000, 'OP-5120'), serie: 'B001', number: '000128', branchId: 'FIL-CHI' },
-    { id: 'PAG-010', enrollment: 5, usd: 1500, date: dates[4], user: 'Carlos R.', parts: cash('PT10', 1500), serie: 'B001', number: '000129', branchId: 'FIL-PIU' },
+    { id: 'PAG-001', enrollment: 1, installment: 1, usd: 200, date: dates[0], user: 'Ana G.', parts: bank('PT1', 200, 'OP-4471'), serie: 'B001', number: '000123', branchId: 'FIL-002' },
+    { id: 'PAG-002', enrollment: 1, installment: 2, usd: 200, date: d(-22), user: 'Carlos R.', parts: cash('PT2', 200), serie: 'B001', number: '000124', branchId: 'FIL-002' },
+    { id: 'PAG-003', enrollment: 2, installment: 1, usd: 200, date: dates[1], user: 'Ana G.', parts: bank('PT3', 200, 'OP-4502'), serie: 'B001', number: '000125', branchId: 'FIL-003' },
+    { id: 'PAG-004', enrollment: 2, installment: 2, usd: 200, date: d(-37), user: 'Carlos R.', parts: cash('PT4', 200), serie: 'B001', number: '000126', branchId: 'FIL-003' },
+    { id: 'PAG-005', enrollment: 2, installment: 3, usd: 100, date: d(-8), user: 'Ana G.', parts: yape('PT5', 100, 'YP-8830'), serie: 'B001', number: '000127', branchId: 'FIL-003' },
+    { id: 'PAG-006', enrollment: 3, installment: 1, usd: 350, date: dates[2], user: 'Ana G.', parts: bank('PT6', 350, 'OP-3911'), serie: 'F001', number: '000890', branchId: 'FIL-002' },
+    { id: 'PAG-007', enrollment: 3, installment: 2, usd: 350, date: d(-67), user: 'Carlos R.', parts: bank('PT7', 350, 'OP-3975'), serie: 'F001', number: '000912', branchId: 'FIL-002' },
+    { id: 'PAG-008', enrollment: 3, installment: 3, usd: 200, date: d(-38), user: 'Ana G.', parts: yape('PT8', 200, 'YP-7204'), serie: 'B001', number: '000501', branchId: 'FIL-002' },
+    { id: 'PAG-009', enrollment: 4, usd: 1000, date: dates[3], user: 'Ana G.', parts: bank('PT9', 1000, 'OP-5120'), serie: 'B001', number: '000128', branchId: 'FIL-003' },
+    { id: 'PAG-010', enrollment: 5, usd: 1500, date: dates[4], user: 'Carlos R.', parts: cash('PT10', 1500), serie: 'B001', number: '000129', branchId: 'FIL-002' },
   ];
 
   const payments: Payment[] = [];
@@ -121,7 +121,7 @@ export function buildPeopleSeed(today: string): PeopleSeed {
   // Egreso manual de la caja en soles (no viene de un pago)
   cashMovements.push({
     id: `CJ-${String(cashMovements.length + 1).padStart(3, '0')}`, date: at(d(-3), '17:45'), kind: 'Egreso', concept: 'Egreso', reference: 'Pago Proveedor Limpieza',
-    currency: 'PEN', amount: 350, amountUSD: Math.round((350 / TC) * 100) / 100, exchangeRate: TC, branchId: 'FIL-PIU', method: 'Efectivo', user: 'Admin', status: 'Aplicado',
+    currency: 'PEN', amount: 350, amountUSD: Math.round((350 / TC) * 100) / 100, exchangeRate: TC, branchId: 'FIL-002', method: 'Efectivo', user: 'Admin', status: 'Aplicado',
   });
 
   // ------------------------------------------------------------ Planes: cuotas con su cobro; el saldo y el estado los escribe recomputePlan
@@ -171,12 +171,12 @@ export const seedDay = (offset: number): string => {
 
 /** Asesorías de ejemplo: la primera de Mateo es hoy, la de Valentina en 2 días y la de Diego fue hace casi 3 meses. */
 export const buildScheduleSeed = (people: PeopleSeed): Schedule[] => [
-    { id: 'SES-001', student: people.students[0].name, studentId: people.students[0].id, branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-1', enrollmentId: people.enrollments[0].id },
-    { id: 'SES-002', student: people.students[1].name, studentId: people.students[1].id, branchId: 'FIL-CHI', program: 'Kids', level: 'Nivel 2', date: seedDay(0), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado' },
-    { id: 'SES-003', student: people.students[2].name, studentId: people.students[2].id, branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 3', date: seedDay(1), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Cancelado' },
-    { id: 'SES-004', student: people.students[3].name, studentId: people.students[3].id, branchId: 'FIL-CHI', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true, registrationId: 'REG-SEED-2', enrollmentId: people.enrollments[3].id },
-    { id: 'SES-005', student: people.students[4].name, studentId: people.students[4].id, branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: seedDay(3), time: '18:00', duration: 60, responsible: 'Lic. María Torres', status: 'Reservado' },
-    { id: 'SES-006', student: people.students[4].name, studentId: people.students[4].id, branchId: 'FIL-PIU', program: 'Kids', level: 'Nivel 1', date: people.expiringStart, time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-3', enrollmentId: people.enrollments[4].id },
+    { id: 'SES-001', student: people.students[0].name, studentId: people.students[0].id, branchId: 'FIL-002', program: 'Kids', level: 'Nivel 1', date: seedDay(0), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-1', enrollmentId: people.enrollments[0].id },
+    { id: 'SES-002', student: people.students[1].name, studentId: people.students[1].id, branchId: 'FIL-003', program: 'Kids', level: 'Nivel 2', date: seedDay(0), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado' },
+    { id: 'SES-003', student: people.students[2].name, studentId: people.students[2].id, branchId: 'FIL-002', program: 'Kids', level: 'Nivel 3', date: seedDay(1), time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Cancelado' },
+    { id: 'SES-004', student: people.students[3].name, studentId: people.students[3].id, branchId: 'FIL-003', program: 'Pre-Kids', level: 'Nivel 1', date: seedDay(2), time: '17:00', duration: 60, responsible: 'Lic. Juan Pérez', status: 'Reservado', isFirst: true, registrationId: 'REG-SEED-2', enrollmentId: people.enrollments[3].id },
+    { id: 'SES-005', student: people.students[4].name, studentId: people.students[4].id, branchId: 'FIL-002', program: 'Kids', level: 'Nivel 1', date: seedDay(3), time: '18:00', duration: 60, responsible: 'Lic. María Torres', status: 'Reservado' },
+    { id: 'SES-006', student: people.students[4].name, studentId: people.students[4].id, branchId: 'FIL-002', program: 'Kids', level: 'Nivel 1', date: people.expiringStart, time: '16:00', duration: 60, responsible: 'Lic. María Torres', status: 'Asistió', isFirst: true, registrationId: 'REG-SEED-3', enrollmentId: people.enrollments[4].id },
   ];
 
 /** Sesiones registradas de ejemplo (seguimiento de los alumnos). */

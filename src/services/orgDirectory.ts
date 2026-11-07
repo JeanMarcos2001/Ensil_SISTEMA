@@ -43,6 +43,21 @@ export interface OpResult<T = undefined> {
 const fail = (error: string): OpResult<never> => ({ ok: false, error });
 const MAX_ID_ATTEMPTS = 3;
 
+/** Las empresas, filiales y almacenes tal como los guarda la base (cada filial y almacén con el nombre de su empresa ya completado). */
+export interface OrgDirectoryData { companies: Company[]; branches: Branch[]; warehouses: Warehouse[] }
+
+/**
+ * Lee de la base las empresas, filiales y almacenes que la cuenta puede ver (la política de seguridad decide cuáles). Es la ÚNICA fuente
+ * de sedes, empresas y almacén de todo el sistema: se lee al iniciar sesión, antes de montar las pantallas (`AccessGate`), y lo que
+ * Organización cambie se aplica sobre esa misma lista (`useOrgDirectory`).
+ */
+export async function loadOrgDirectory(repo: OrgRepository): Promise<OpResult<OrgDirectoryData>> {
+  const [c, b, w] = await Promise.all([repo.listCompanies(), repo.listBranches(), repo.listWarehouses()]);
+  if (!c.ok || !b.ok || !w.ok) return fail(c.error ?? b.error ?? w.error ?? 'No se pudieron cargar las empresas, filiales y almacenes.');
+  const companies = c.data ?? [];
+  return { ok: true, value: { companies, branches: withCompanyNames(b.data ?? [], companies), warehouses: withCompanyNames(w.data ?? [], companies) } };
+}
+
 export async function createCompany(repo: OrgRepository, companies: Company[], input: Omit<Company, 'id'>): Promise<OpResult<Company>> {
   const problem = firstError(companyFieldErrors(input, companies));
   if (problem) return fail(problem);

@@ -17,7 +17,7 @@ import { OrgDbNotice } from '../../components/organization/OrgDbNotice';
 import { branchFieldErrors } from '../../utils/orgDirectory';
 
 export function Branches() {
-  const { orgBranches: branches, orgCompanies: companies, orgDirectory, addBranch, updateBranch, can } = useData();
+  const { branches, companies, orgDirectory, addBranch, updateBranch, can } = useData();
   const [saving, setSaving] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);

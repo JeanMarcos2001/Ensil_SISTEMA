@@ -11,7 +11,7 @@ import {
   warehousePatchToRow, warehouseToRow, withCompanyNames, type AlmacenRow, type DbErrorLike, type EmpresaRow, type SedeRow,
 } from '../src/utils/orgDirectory';
 import {
-  createBranch, createCompany, createWarehouse, editBranch, editCompany, editWarehouse, removeBranch, removeCompany, type OrgRepository, type RepoResult,
+  createBranch, createCompany, createWarehouse, editBranch, editCompany, editWarehouse, loadOrgDirectory, removeBranch, removeCompany, type OrgRepository, type RepoResult,
 } from '../src/services/orgDirectory';
 
 let failed = 0;
@@ -295,6 +295,21 @@ function memoryRepo(initialCompanies: Company[] = [], initialBranches: Branch[] 
   check('No se elimina una empresa con un almacén vinculado', !d9.ok && /almacenes/.test(d9.error!) && m9.emps.length === 1);
   const i9 = await editCompany(m9.repo, c9, w9, 'EMP-001', { status: 'Inactivo' });
   check('Ni se inactiva', !i9.ok && /almacenes/.test(i9.error!));
+
+  // Lectura inicial (única fuente de sedes, empresas y almacén de todo el sistema: se lee al iniciar sesión, antes de montar las pantallas)
+  const m10 = memoryRepo([emp('EMP-001', '20610010289', 'SILEE E.I.R.L.'), emp('EMP-002', '20612459313', 'ENSIL EVOLUTION S.R.L.')], [sede({ id: 'FIL-001', name: 'Los Olivos', companyId: 'EMP-001' }), sede({ id: 'FIL-002', name: 'Piura', companyId: 'EMP-002' })], {}, [alm({ companyId: 'EMP-001' })]);
+  const loaded = await loadOrgDirectory(m10.repo);
+  check('La lectura inicial trae las empresas, las filiales y el almacén', loaded.ok && loaded.value?.companies.length === 2 && loaded.value?.branches.length === 2 && loaded.value?.warehouses.length === 1, JSON.stringify(loaded));
+  check('Cada filial y el almacén llegan con el nombre de su empresa (lo derivable no se guarda)', loaded.value?.branches.map(b => b.company).join('|') === 'SILEE E.I.R.L.|ENSIL EVOLUTION S.R.L.' && loaded.value?.warehouses[0].company === 'SILEE E.I.R.L.');
+  check('Una cuenta que no ve nada (la base lo oculta) recibe listas vacías, no un error', await (async () => {
+    const r = await loadOrgDirectory(memoryRepo().repo);
+    return r.ok && r.value?.branches.length === 0 && r.value?.companies.length === 0 && r.value?.warehouses.length === 0;
+  })());
+  check('Si una de las tres lecturas falla, no se monta el sistema a medias: se devuelve el error', await (async () => {
+    const broken: OrgRepository = { ...m10.repo, listBranches: async () => ({ ok: false, error: 'Sin conexión.' }) };
+    const r = await loadOrgDirectory(broken);
+    return !r.ok && r.error === 'Sin conexión.' && r.value === undefined;
+  })());
 
   if (failed > 0) {
     console.log(`\n${failed} comprobaciones fallaron.`);

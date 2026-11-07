@@ -37,11 +37,11 @@ const kids: Program = { id: '1', code: 'K', name: 'Kids', hasLevels: true, durat
 const prof: Program = { id: '5', code: 'P', name: 'Profesional', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' };
 const noWarranty: Program = { ...kids, id: '9', warranty: 0 };
 const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({
-  id, dateISO: '2026-01-01', student: 'Mateo', studentId: 'ALU-1', guardianIds: [], program: 'Kids', programId: '1', level: 'N1', branchId: 'FIL-PIU', status: 'Activa', ...over,
+  id, dateISO: '2026-01-01', student: 'Mateo', studentId: 'ALU-1', guardianIds: [], program: 'Kids', programId: '1', level: 'N1', branchId: 'FIL-002', status: 'Activa', ...over,
 });
 const first = (enrollmentId: string, date: string, over: Partial<Schedule> = {}): Schedule => ({
   id: `S-${enrollmentId}-${date}`, student: 'Mateo', studentId: 'ALU-1', program: 'Kids', level: 'N1', date, time: '16:00', duration: 60,
-  responsible: 'Ana', status: 'Asistió', branchId: 'FIL-PIU', isFirst: true, registrationId: 'REG', enrollmentId, ...over,
+  responsible: 'Ana', status: 'Asistió', branchId: 'FIL-002', isFirst: true, registrationId: 'REG', enrollmentId, ...over,
 });
 const V = (e: Enrollment, program: Program | undefined, schedules: Schedule[], today: string) => enrollmentValidity(e, program, schedules, today);
 

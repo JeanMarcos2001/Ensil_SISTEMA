@@ -10,10 +10,10 @@
 | Laura Martínez | Administrador de sede | Piura | 57 | 30 | 23 | 6 | 7 |
 | Marco Salas | Administrador de sede | Los Olivos | 57 | 30 | 23 | 6 | 7 |
 | Juan Pérez | Psicopedagogía | Piura | 15 | 6 | 8 | 0 | 1 |
-| Rosa Quispe | Almacén central | todas (9) | 24 | 12 | 9 | 1 | 6 |
-| Admin Sistema | Administración general | todas (9) | 87 | 48 | 31 | 5 | 13 |
-| Elena Ramos | Contabilidad | todas (9) | 17 | 1 | 11 | 2 | 1 |
-| Superadmin | Superusuario | todas (9) | 184 | 122 | 48 | 7 | todos (soporte) |
+| Rosa Quispe | Almacén central | todas (16) | 24 | 12 | 9 | 1 | 6 |
+| Admin Sistema | Administración general | todas (16) | 87 | 48 | 31 | 5 | 13 |
+| Elena Ramos | Contabilidad | todas (16) | 17 | 1 | 11 | 2 | 1 |
+| Superadmin | Superusuario | todas (16) | 184 | 122 | 48 | 7 | todos (soporte) |
 
 ## 2. Acciones clave
 

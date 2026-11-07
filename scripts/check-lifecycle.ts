@@ -37,7 +37,7 @@ check('El vencimiento de una cuota se guarda solo en ISO; el texto se arma al mo
 // ================================================================ Datos
 const enrollment = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({
   id, dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', guardianIds: ['G1'], program: 'Kids', programId: '1', level: 'Nivel 1', status: 'Activa',
-  branchId: 'FIL-PIU', origenId: '1', origen: 'Facebook', asesorId: 'E1', asesor: 'Ana Quispe', ...over,
+  branchId: 'FIL-002', origenId: '1', origen: 'Facebook', asesorId: 'E1', asesor: 'Ana Quispe', ...over,
 });
 const inst = (id: string, amount: number, balance: number, due: string, status: InstallmentStatus, payments: any[] = [], extra: Partial<Installment> = {}): Installment => ({
   id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDateISO: due, status, payments, ...extra,
@@ -57,10 +57,10 @@ const payment = (id: string, over: Partial<Payment> = {}): Payment => ({
 });
 const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'], ...over });
 const sch = (id: string, over: Partial<Schedule> = {}): Schedule => ({
-  id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over,
+  id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-002', ...over,
 });
 const monthly = (): MonthlySchedule[] => [{
-  id: 'M1', branchId: 'FIL-PIU', sede: 'Piura', mes: 'Octubre', anio: 2026, titulo: 'x', observaciones: '',
+  id: 'M1', branchId: 'FIL-002', sede: 'Piura', mes: 'Octubre', anio: 2026, titulo: 'x', observaciones: '',
   actividades: [
     { id: 'a1', actividad: 'Maratón', fecha: '2026-10-30', horaInicio: '16:00', horaFin: '18:00', responsable: '', orden: 1, cupo: null, inscritos: ['ALU-1', 'ALU-2'] },
     { id: 'a2', actividad: 'Taller pasado', fecha: '2026-10-10', horaInicio: '16:00', horaFin: '18:00', responsable: '', orden: 2, cupo: null, inscritos: ['ALU-1'] },

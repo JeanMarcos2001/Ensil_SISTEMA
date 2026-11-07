@@ -55,23 +55,23 @@ const price = (id: string, branchId: string, amount: number, validFrom: string, 
 const prices: ItemPrice[] = [
   price('1', 'all', 35, '2026-01-01', '2026-10-31'),
   price('2', 'all', 40, '2026-11-01'),
-  price('3', 'FIL-JUL', 32, '2026-01-01'),
+  price('3', 'FIL-009', 32, '2026-01-01'),
 ];
-check('Precio general vigente (octubre) = 35', getCurrentPrice(prices, 'HER-C', 'FIL-PIU', '2026-10-15')?.amount === 35);
-check('Nueva vigencia (noviembre) = 40 sin sobrescribir el histórico', getCurrentPrice(prices, 'HER-C', 'FIL-PIU', '2026-11-02')?.amount === 40);
-check('Excepción por sede gana al precio general', getCurrentPrice(prices, 'HER-C', 'FIL-JUL', '2026-11-02')?.amount === 32);
-check('Antes de la primera vigencia no hay precio', getCurrentPrice(prices, 'HER-C', 'FIL-PIU', '2025-12-31') === undefined);
+check('Precio general vigente (octubre) = 35', getCurrentPrice(prices, 'HER-C', 'FIL-002', '2026-10-15')?.amount === 35);
+check('Nueva vigencia (noviembre) = 40 sin sobrescribir el histórico', getCurrentPrice(prices, 'HER-C', 'FIL-002', '2026-11-02')?.amount === 40);
+check('Excepción por sede gana al precio general', getCurrentPrice(prices, 'HER-C', 'FIL-009', '2026-11-02')?.amount === 32);
+check('Antes de la primera vigencia no hay precio', getCurrentPrice(prices, 'HER-C', 'FIL-002', '2025-12-31') === undefined);
 check('El historial conserva los 3 registros', getPriceHistory(prices, 'HER-C').length === 3);
 
 // --- Stock y entrega (Verificación) ---
 const stock: StockItem[] = [
-  { id: 's1', itemId: 'PACK-8', branchId: 'FIL-JUL', stock: 7, minStock: 2 },
-  { id: 's2', itemId: 'MAT-K2', branchId: 'FIL-JUL', stock: 0, minStock: 2 },
+  { id: 's1', itemId: 'PACK-8', branchId: 'FIL-009', stock: 7, minStock: 2 },
+  { id: 's2', itemId: 'MAT-K2', branchId: 'FIL-009', stock: 0, minStock: 2 },
 ];
-check('Stock de la sede', availableStock(stock, 'FIL-JUL', 'PACK-8') === 7);
-check('Con stock se puede entregar (1 paquete sellado = 1 unidad)', canDeliver(stock, 'FIL-JUL', 'PACK-8', 1));
-check('Sin stock NO se puede entregar (gris en Verificación)', !canDeliver(stock, 'FIL-JUL', 'MAT-K2', 1));
-check('Artículo sin registro de stock en la sede → no entregable', !canDeliver(stock, 'FIL-CHI', 'PACK-8', 1));
+check('Stock de la sede', availableStock(stock, 'FIL-009', 'PACK-8') === 7);
+check('Con stock se puede entregar (1 paquete sellado = 1 unidad)', canDeliver(stock, 'FIL-009', 'PACK-8', 1));
+check('Sin stock NO se puede entregar (gris en Verificación)', !canDeliver(stock, 'FIL-009', 'MAT-K2', 1));
+check('Artículo sin registro de stock en la sede → no entregable', !canDeliver(stock, 'FIL-003', 'PACK-8', 1));
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);
 process.exit(failed === 0 ? 0 : 1);

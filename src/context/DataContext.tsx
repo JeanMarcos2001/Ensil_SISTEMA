@@ -43,14 +43,14 @@ import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
-import { seedAssignments, seedBranches, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers, seedWarehouses } from '../data/seedCatalog';
+import { seedAssignments, seedContracts, seedLevels, seedPrograms, seedStaff, seedUsers } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 import { availability, buildHolders, type Availability } from '../utils/capabilities';
 import { availabilityForViewer, denialMessage, guardActions, unmetClause, userChangeNeeds } from '../utils/guards';
 import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
-import type { OpResult } from '../services/orgDirectory';
+import type { OpResult, OrgDirectoryData } from '../services/orgDirectory';
 import { supabase } from '../lib/supabase';
 import { loadAccessRoles, loadUsers, persistNewRole, persistPermissions, persistRoleDelete, persistRoleUpdate, type AccessData } from '../services/accessRoles';
 import { createSupabaseAccountsRepository } from '../services/accountsRepository';
@@ -1401,12 +1401,8 @@ interface DataContextType {
   renewContract: (id: string, input: RenewalInput) => StockResult;
   permissions: Permission[];
   savePermissions: (roleId: string, newPermissions: string[], reasons?: Record<string, string>) => Promise<OpResult>;
-  /** Empresas de ejemplo (en memoria): las siguen usando las pantallas que aún no pasaron a la base. Organización → Empresas usa `orgCompanies`. */
+  /** Empresas, filiales y almacenes: los de la base de datos (única fuente de todo el sistema; ver `useOrgDirectory`). */
   companies: Company[];
-  /** Empresas y filiales guardadas en la base de datos (Organización → Empresas y Filiales). */
-  orgCompanies: Company[];
-  orgBranches: Branch[];
-  orgWarehouses: Warehouse[];
   orgDirectory: { status: OrgDirectoryStatus; error: string };
   reloadOrgDirectory: () => Promise<void>;
   addCompany: (company: Omit<Company, 'id'>) => Promise<OpResult<Company> & { id?: string }>;
@@ -1571,8 +1567,11 @@ export const DataContext = createContext<DataContextType | undefined>(undefined)
 /** Semilla de personas, matrículas, planes, pagos y caja (se arma una vez al abrir la página, con fechas relativas a hoy). */
 const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 
-/** `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `accountId` = la cuenta con la que se ingresó. */
-export function DataProvider({ children, access, accountId }: { children: ReactNode; access: AccessData; accountId: string }) {
+/**
+ * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
+ * almacén, leídos de la base en ese mismo momento; `accountId` = la cuenta con la que se ingresó.
+ */
+export function DataProvider({ children, access, accountId, org: orgData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
@@ -1702,16 +1701,16 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
   ]);
 
   const [stockItems, setStockItems] = useState<StockItem[]>([
-    { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-PIU', stock: 100, minStock: 50 },
-    { id: 'STK-002', itemId: 'ITM-MAT-01', branchId: 'FIL-PIU', stock: 50, minStock: 30 },
-    { id: 'STK-003', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-PIU', stock: 25, minStock: 5 },
-    { id: 'STK-004', itemId: 'ITM-HER-01', branchId: 'FIL-PIU', stock: 40, minStock: 10 },
-    { id: 'STK-005', itemId: 'ITM-HER-02', branchId: 'FIL-PIU', stock: 40, minStock: 5 },
-    { id: 'STK-006', itemId: 'ITM-LIB-K1', branchId: 'FIL-CHI', stock: 85, minStock: 40 },
-    { id: 'STK-007', itemId: 'ITM-HER-01', branchId: 'FIL-CHI', stock: 5, minStock: 5 },
-    { id: 'STK-008', itemId: 'ITM-MAT-01', branchId: 'FIL-CHI', stock: 15, minStock: 10 },
-    { id: 'STK-009', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-CHI', stock: 8, minStock: 3 },
-    { id: 'STK-010', itemId: 'ITM-HER-02', branchId: 'FIL-CHI', stock: 10, minStock: 5 },
+    { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-002', stock: 100, minStock: 50 },
+    { id: 'STK-002', itemId: 'ITM-MAT-01', branchId: 'FIL-002', stock: 50, minStock: 30 },
+    { id: 'STK-003', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-002', stock: 25, minStock: 5 },
+    { id: 'STK-004', itemId: 'ITM-HER-01', branchId: 'FIL-002', stock: 40, minStock: 10 },
+    { id: 'STK-005', itemId: 'ITM-HER-02', branchId: 'FIL-002', stock: 40, minStock: 5 },
+    { id: 'STK-006', itemId: 'ITM-LIB-K1', branchId: 'FIL-003', stock: 85, minStock: 40 },
+    { id: 'STK-007', itemId: 'ITM-HER-01', branchId: 'FIL-003', stock: 5, minStock: 5 },
+    { id: 'STK-008', itemId: 'ITM-MAT-01', branchId: 'FIL-003', stock: 15, minStock: 10 },
+    { id: 'STK-009', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-003', stock: 8, minStock: 3 },
+    { id: 'STK-010', itemId: 'ITM-HER-02', branchId: 'FIL-003', stock: 10, minStock: 5 },
     // Almacén central (aparte de las sedes): de aquí salen los envíos a todas las filiales
     { id: 'STK-011', itemId: 'ITM-LIB-K1', branchId: 'ALM-001', stock: 400, minStock: 100 },
     { id: 'STK-012', itemId: 'ITM-MAT-01', branchId: 'ALM-001', stock: 250, minStock: 60 },
@@ -1719,11 +1718,11 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
     { id: 'STK-014', itemId: 'ITM-HER-01', branchId: 'ALM-001', stock: 150, minStock: 30 },
     { id: 'STK-015', itemId: 'ITM-HER-02', branchId: 'ALM-001', stock: 150, minStock: 30 },
     // Los Olivos es una sede como las demás: stock de venta propio
-    { id: 'STK-016', itemId: 'ITM-LIB-K1', branchId: 'FIL-LOL', stock: 60, minStock: 30 },
-    { id: 'STK-017', itemId: 'ITM-MAT-01', branchId: 'FIL-LOL', stock: 40, minStock: 20 },
-    { id: 'STK-018', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-LOL', stock: 12, minStock: 5 },
-    { id: 'STK-019', itemId: 'ITM-HER-01', branchId: 'FIL-LOL', stock: 25, minStock: 10 },
-    { id: 'STK-020', itemId: 'ITM-HER-02', branchId: 'FIL-LOL', stock: 25, minStock: 5 },
+    { id: 'STK-016', itemId: 'ITM-LIB-K1', branchId: 'FIL-001', stock: 60, minStock: 30 },
+    { id: 'STK-017', itemId: 'ITM-MAT-01', branchId: 'FIL-001', stock: 40, minStock: 20 },
+    { id: 'STK-018', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-001', stock: 12, minStock: 5 },
+    { id: 'STK-019', itemId: 'ITM-HER-01', branchId: 'FIL-001', stock: 25, minStock: 10 },
+    { id: 'STK-020', itemId: 'ITM-HER-02', branchId: 'FIL-001', stock: 25, minStock: 5 },
   ]);
 
   const [kardex, setKardex] = useState<KardexEntry[]>([
@@ -1742,7 +1741,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
       id: 'TRF-2024-001', 
       date: '2024-03-15', 
       originId: 'ALM-001', 
-      destinationId: 'FIL-CHI', 
+      destinationId: 'FIL-003', 
       status: 'En tránsito', 
       eta: '2024-03-20',
       items: [
@@ -1757,7 +1756,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
     { 
       id: 'TRF-2024-002', 
       date: '2024-03-14', 
-      originId: 'FIL-CHI', 
+      originId: 'FIL-003', 
       destinationId: 'ALM-001', 
       status: 'Borrador', 
       items: [
@@ -1771,7 +1770,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
       id: 'TRF-2024-003', 
       date: '2024-03-10', 
       originId: 'ALM-001', 
-      destinationId: 'FIL-CHI', 
+      destinationId: 'FIL-003', 
       status: 'Recibida', 
       receptionDate: '2024-03-10',
       receivedBy: 'María Torres',
@@ -1789,7 +1788,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
       id: 'ENV-2024-001',
       date: '2024-03-15',
       originId: 'ALM-001', // Almacén central
-      destinationId: 'FIL-CHI', // Chiclayo
+      destinationId: 'FIL-003', // Chiclayo
       status: 'En tránsito',
       boxes: [
         {
@@ -1912,7 +1911,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
   const [monthlySchedules, setMonthlySchedules] = useState<MonthlySchedule[]>([
     {
       id: '1',
-      branchId: 'FIL-PIU',
+      branchId: 'FIL-002',
       sede: 'Piura',
       ...seedMonth(seedDay(5)),
       titulo: 'Cronograma de Actividades - Piura',
@@ -1933,7 +1932,7 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
     },
     {
       id: '2',
-      branchId: 'FIL-CHI',
+      branchId: 'FIL-003',
       sede: 'Chiclayo',
       ...seedMonth(seedDay(3)),
       titulo: 'Actividades Psicopedagógicas Chiclayo',
@@ -2161,16 +2160,13 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => seedAssignments());
 
-  const [companies] = useState<Company[]>([
-    { id: '1', ruc: '20123456789', name: 'Educación y Cultura S.A.C.', commercialName: 'ENSIL Central', status: 'Activo' },
-    { id: '2', ruc: '20987654321', name: 'Instituto de Idiomas del Norte S.A.', commercialName: 'ENSIL Norte', status: 'Activo' },
-  ]);
-
-  const [branches] = useState<Branch[]>(() => seedBranches());
-  // Empresas y Filiales de Organización viven en la base de datos; las de ejemplo de arriba siguen alimentando el resto del sistema.
-  const org = useOrgDirectory();
-
-  const [warehouses] = useState<Warehouse[]>(() => seedWarehouses());
+  // Empresas, sedes y almacén: UNA sola fuente, la base de datos (se leen al iniciar sesión, `AccessGate`). Todo el sistema (Matrículas, Caja,
+  // Stock, Envíos, Agenda…) usa estas mismas listas; Organización las cambia y el cambio se ve en todas partes. Quien no alcanza todas las
+  // sedes ni tiene «Ver filiales» recibe solo las suyas (lo decide la política de la base).
+  const org = useOrgDirectory(orgData);
+  const companies = org.companies;
+  const branches = org.branches;
+  const warehouses = org.warehouses;
   const locations = useMemo(() => stockLocations(branches, warehouses), [branches, warehouses]);
   /** Nombre de una ubicación de stock (almacén o sede); si ya no existe, su id. */
   const locationName = (id: string | undefined): string => locations.find(l => l.id === id)?.name ?? id ?? '';
@@ -4057,9 +4053,6 @@ export function DataProvider({ children, access, accountId }: { children: ReactN
       inactivateStaff,
       reactivateStaff,
       companies,
-      orgCompanies: org.companies,
-      orgBranches: org.branches,
-      orgWarehouses: org.warehouses,
       orgDirectory: { status: org.status, error: org.error },
       reloadOrgDirectory: org.reload,
       addCompany: org.addCompany,

@@ -104,12 +104,12 @@ check('recomputePlan: saldo y estado; la próxima cuota se calcula de las cuotas
 
 // ================================================================ Reactivación, cambio de programa, traslado, renovación
 const branches: Branch[] = [
-  { id: 'FIL-PIU', name: 'Piura', company: 'Empresa S.A.C.', status: 'Activo', address: 'Av. Sullana 280', district: 'Piura', province: 'Piura', department: 'Piura' } as Branch,
-  { id: 'FIL-CHI', name: 'Chiclayo', company: 'Empresa S.A.C.', status: 'Activo', address: 'Av. Balta 100', district: 'Chiclayo', province: 'Chiclayo', department: 'Lambayeque' } as Branch,
+  { id: 'FIL-002', name: 'Piura', company: 'Empresa S.A.C.', status: 'Activo', address: 'Av. Sullana 280', district: 'Piura', province: 'Piura', department: 'Piura' } as Branch,
+  { id: 'FIL-003', name: 'Chiclayo', company: 'Empresa S.A.C.', status: 'Activo', address: 'Av. Balta 100', district: 'Chiclayo', province: 'Chiclayo', department: 'Lambayeque' } as Branch,
 ];
 const programs: Program[] = [
   { id: 'P-K', code: 'K', name: 'Kids', hasLevels: true, durationBase: 6, warranty: 3, allBranches: true, status: 'Activo' },
-  { id: 'P-T', code: 'T', name: 'Teens', hasLevels: true, durationBase: 4, warranty: 0, allBranches: false, enabledBranches: ['FIL-PIU'], status: 'Activo' },
+  { id: 'P-T', code: 'T', name: 'Teens', hasLevels: true, durationBase: 4, warranty: 0, allBranches: false, enabledBranches: ['FIL-002'], status: 'Activo' },
   { id: 'P-A', code: 'A', name: 'Adultos', hasLevels: false, durationBase: 3, warranty: 0, allBranches: true, status: 'Activo' },
 ];
 const levels: Level[] = [
@@ -124,11 +124,11 @@ const tariffs = [tariff('T-K1', 'P-K', 'L-K1', 800), tariff('T-K2', 'P-K', 'L-K2
 const student = (over: Partial<Student> = {}): Student => ({ id: 'ALU-1', doc: '12345678', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'], ...over });
 const enrollment = (over: Partial<Enrollment> = {}): Enrollment => ({
   id: 'MAT-1', dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', programId: 'P-K', level: 'Nivel 1', levelId: 'L-K1', status: 'Activa', guardianIds: ['G1'],
-  branchId: 'FIL-PIU', sede: 'Piura', paymentTypeId: 'PT-4', paymentTypeName: 'Plan 4 cuotas', assignedPrice: 800, planId: 'PLN-1', verificationStatus: 'Pendiente', ...over,
+  branchId: 'FIL-002', sede: 'Piura', paymentTypeId: 'PT-4', paymentTypeName: 'Plan 4 cuotas', assignedPrice: 800, planId: 'PLN-1', verificationStatus: 'Pendiente', ...over,
 });
-const schedule = (id: string, over: Partial<Schedule> = {}): Schedule => ({ id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-PIU', ...over });
+const schedule = (id: string, over: Partial<Schedule> = {}): Schedule => ({ id, student: 'Mateo Ruiz', studentId: 'ALU-1', program: 'Kids', level: 'Nivel 1', date: '2026-10-28', time: '16:00', duration: 60, responsible: 'Ana', status: 'Reservado', branchId: 'FIL-002', ...over });
 const ctxOf = (over: Partial<ChangeContext> = {}): ChangeContext => ({
-  enrollments: [enrollment()], plans: [basePlan()], students: [student()], schedules: [], monthly: [], programs, levels, tariffs, paymentTypes, branches, payments: [], groups: [], requests: [], responsibles: { 'FIL-CHI': ['Rosa Díaz'], 'FIL-PIU': ['Ana'] }, today: TODAY, ...over,
+  enrollments: [enrollment()], plans: [basePlan()], students: [student()], schedules: [], monthly: [], programs, levels, tariffs, paymentTypes, branches, payments: [], groups: [], requests: [], responsibles: { 'FIL-003': ['Rosa Díaz'], 'FIL-002': ['Ana'] }, today: TODAY, ...over,
 });
 
 // --- Reactivación
@@ -143,7 +143,7 @@ check('Reactivar: se puede dentro del plazo', reactivationProblems(dropped(), rc
 check('Reactivar: solo matrículas caídas', reactivationProblems(enrollment(), ctxOf()).length === 1);
 check('Reactivar: fuera de plazo corresponde renovar', /renovación/.test(reactivationProblems(dropped({ dropDate: '2026-06-01' }), rc(dropped({ dropDate: '2026-06-01' }), droppedPlan())).join(' ')) && REACTIVATION_WINDOW_DAYS === 90);
 check('Reactivar: otra matrícula activa del mismo programa lo impide', reactivationProblems(dropped(), ctxOf({ enrollments: [dropped(), enrollment({ id: 'MAT-2' })], plans: [droppedPlan()] })).some(p => /otra matrícula activa/.test(p)));
-check('Reactivar: programa no habilitado en la sede lo impide', reactivationProblems(dropped({ programId: 'P-T', program: 'Teens', branchId: 'FIL-CHI' }), ctxOf({ enrollments: [dropped({ programId: 'P-T', program: 'Teens', branchId: 'FIL-CHI' })], plans: [droppedPlan()] })).some(p => /no está disponible/.test(p)));
+check('Reactivar: programa no habilitado en la sede lo impide', reactivationProblems(dropped({ programId: 'P-T', program: 'Teens', branchId: 'FIL-003' }), ctxOf({ enrollments: [dropped({ programId: 'P-T', program: 'Teens', branchId: 'FIL-003' })], plans: [droppedPlan()] })).some(p => /no está disponible/.test(p)));
 check('Reactivar: no si hay una solicitud pendiente', reactivationProblems(dropped(), ctxOf({ enrollments: [dropped()], plans: [droppedPlan()], requests: [{ id: 'SOL-1', enrollmentId: 'MAT-1', status: 'Pendiente' } as ChangeRequest] })).some(p => /solicitud pendiente/.test(p)));
 check('Reactivar: validación de fecha y motivo', (() => {
   const c = rc(dropped(), droppedPlan());
@@ -172,7 +172,7 @@ const pcInput = (over = {}) => ({ programId: 'P-K', levelId: 'L-K2', reason: 'Ni
 check('Cambio de nivel: válido con tarifario del mismo tipo de pago', programChangeProblems(enrollment(), pcInput(), ctxOf()).length === 0 && validateProgramChangeRequest(enrollment(), pcInput(), ctxOf()).length === 0);
 check('Cambio: igual al actual, sin nivel o sin tarifario', programChangeProblems(enrollment(), pcInput({ levelId: 'L-K1' }), ctxOf()).length === 1 && programChangeProblems(enrollment(), pcInput({ levelId: '' }), ctxOf()).length >= 1
   && programChangeProblems(enrollment(), pcInput({ programId: 'P-A', levelId: '' }), ctxOf({ tariffs: tariffs.filter(t => t.id !== 'T-A') })).some(p => /tarifario vigente/.test(p)));
-check('Cambio: programa no habilitado en la sede', programChangeProblems(enrollment({ branchId: 'FIL-CHI' }), pcInput({ programId: 'P-T', levelId: 'L-T1' }), ctxOf({ enrollments: [enrollment({ branchId: 'FIL-CHI' })] })).some(p => /no está habilitado/.test(p)));
+check('Cambio: programa no habilitado en la sede', programChangeProblems(enrollment({ branchId: 'FIL-003' }), pcInput({ programId: 'P-T', levelId: 'L-T1' }), ctxOf({ enrollments: [enrollment({ branchId: 'FIL-003' })] })).some(p => /no está habilitado/.test(p)));
 check('Cambio: no en grupo promocional, ni caída, ni cronograma variable', programChangeProblems(enrollment({ promotionGroupId: 'PGR-1' }), pcInput(), ctxOf({ enrollments: [enrollment({ promotionGroupId: 'PGR-1' })] })).some(p => /grupo promocional/.test(p))
   && programChangeProblems(dropped(), pcInput(), ctxOf()).length === 1 && programChangeProblems(enrollment(), pcInput(), ctxOf({ plans: [basePlan({ installments: basePlan().installments.map(i => ({ ...i, variable: true })) })] })).some(p => /monto variable/.test(p)));
 check('Cambio: lo cobrado se abona y el saldo se reparte en las cuotas libres', (() => {
@@ -209,21 +209,21 @@ check('Cambio: con precio igual al cobrado, las cuotas libres se anulan', (() =>
 check('Cambio: una verificación hecha vuelve a pendiente', previewProgramChange(enrollment({ verificationStatus: 'Verificado Completo' }), pcInput(), ctxOf())!.verificationReset && !previewProgramChange(enrollment(), pcInput(), ctxOf())!.verificationReset);
 
 // --- Traslado de sede
-const tInput = (over = {}) => ({ branchId: 'FIL-CHI', firstDate: '', firstTime: '', reason: 'Cambio de domicilio', detail: 'La familia se mudó a Chiclayo', ...over });
+const tInput = (over = {}) => ({ branchId: 'FIL-003', firstDate: '', firstTime: '', reason: 'Cambio de domicilio', detail: 'La familia se mudó a Chiclayo', ...over });
 const firstS = schedule('S3', { isFirst: true, enrollmentId: 'MAT-1', date: '2026-10-30' });
 const withFirst = (over: Partial<ChangeContext> = {}) => ctxOf({ schedules: [firstS], ...over });
 check('Traslado: sin primera asesoría pendiente no se pide horario (ya no hay horario de clases)', transferProblems(enrollment(), tInput(), ctxOf()).length === 0 && validateTransferRequest(enrollment(), tInput(), ctxOf()).length === 0);
 check('Traslado: si se cancela su primera asesoría hay que elegir la nueva fecha y hora en la sede destino', transferProblems(enrollment(), tInput(), withFirst()).some(p => /Elija la fecha de la nueva primera asesoría/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-03' }), withFirst()).some(p => /Elija el horario/.test(p)));
 check('Traslado: con fecha y horario libres de la sede destino es válido', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst()).length === 0 && validateTransferRequest(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst()).length === 0);
 check('Traslado: no el pasado ni los domingos ni una hora fuera de la atención', transferProblems(enrollment(), tInput({ firstDate: '2026-10-20', firstTime: '16:00' }), withFirst()).some(p => /anterior a hoy/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-01', firstTime: '16:00' }), withFirst()).some(p => /domingos/.test(p)) && transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '03:00' }), withFirst()).some(p => /no está disponible/.test(p)));
-check('Traslado: el bloque de la sede destino debe estar vacío (ni asesorías ni otra primera asesoría)', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ schedules: [firstS, schedule('X1', { studentId: 'ALU-9', student: 'Otro', branchId: 'FIL-CHI', date: '2026-11-03', time: '16:00' })] })).some(p => /ya tiene asesorías/.test(p)));
+check('Traslado: el bloque de la sede destino debe estar vacío (ni asesorías ni otra primera asesoría)', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ schedules: [firstS, schedule('X1', { studentId: 'ALU-9', student: 'Otro', branchId: 'FIL-003', date: '2026-11-03', time: '16:00' })] })).some(p => /ya tiene asesorías/.test(p)));
 check('Traslado: la agenda que se cancela no estorba a la nueva (mismo día y hora en la sede anterior)', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ schedules: [firstS, schedule('S1', { date: '2026-11-03', time: '16:00' })] })).length === 0);
-check('Traslado: sin personal de Psicopedagogía en la sede destino no se traslada su primera asesoría', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ responsibles: { 'FIL-CHI': [] } })).some(p => /No hay personal de Psicopedagogía/.test(p)));
+check('Traslado: sin personal de Psicopedagogía en la sede destino no se traslada su primera asesoría', transferProblems(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst({ responsibles: { 'FIL-003': [] } })).some(p => /No hay personal de Psicopedagogía/.test(p)));
 check('Traslado: la vista previa dice cuál será la nueva primera asesoría', (() => { const pv = previewTransfer(enrollment(), tInput({ firstDate: '2026-11-03', firstTime: '16:00' }), withFirst())!; return pv.firstSessionLost && pv.newFirst?.date === '2026-11-03' && pv.notes.some(n => /se programa la nueva en Chiclayo/.test(n)) && !pv.notes.some(n => /\.\./.test(n)); })());
 check('Traslado: sin primera asesoría pendiente no hay nueva primera asesoría', previewTransfer(enrollment(), tInput(), ctxOf())!.newFirst === undefined);
-check('Traslado: no a la misma sede, ni a una sede donde el programa no está', transferProblems(enrollment(), tInput({ branchId: 'FIL-PIU' }), ctxOf()).some(p => /misma/.test(p)) && transferProblems(enrollment({ programId: 'P-T', program: 'Teens' }), tInput(), ctxOf({ enrollments: [enrollment({ programId: 'P-T', program: 'Teens' })] })).some(p => /no está habilitado/.test(p)));
+check('Traslado: no a la misma sede, ni a una sede donde el programa no está', transferProblems(enrollment(), tInput({ branchId: 'FIL-002' }), ctxOf()).some(p => /misma/.test(p)) && transferProblems(enrollment({ programId: 'P-T', program: 'Teens' }), tInput(), ctxOf({ enrollments: [enrollment({ programId: 'P-T', program: 'Teens' })] })).some(p => /no está habilitado/.test(p)));
 check('Traslado: se cancelan las asesorías y actividades futuras de la sede anterior', (() => {
-  const monthly = [{ id: 'M1', branchId: 'FIL-PIU', actividades: [{ id: 'A1', fecha: '2026-11-05', inscritos: ['ALU-1'] }, { id: 'A2', fecha: '2026-09-05', inscritos: ['ALU-1'] }] }, { id: 'M2', branchId: 'FIL-CHI', actividades: [{ id: 'A3', fecha: '2026-11-05', inscritos: ['ALU-1'] }] }] as any;
+  const monthly = [{ id: 'M1', branchId: 'FIL-002', actividades: [{ id: 'A1', fecha: '2026-11-05', inscritos: ['ALU-1'] }, { id: 'A2', fecha: '2026-09-05', inscritos: ['ALU-1'] }] }, { id: 'M2', branchId: 'FIL-003', actividades: [{ id: 'A3', fecha: '2026-11-05', inscritos: ['ALU-1'] }] }] as any;
   const pv = previewTransfer(enrollment(), tInput(), ctxOf({ schedules: [schedule('S1'), schedule('S2', { date: '2026-09-01', status: 'Asistió' }), schedule('S3', { isFirst: true, enrollmentId: 'MAT-1', date: '2026-10-30' })], monthly }))!;
   return pv.scheduleIds.sort().join() === 'S1,S3' && pv.activityRemovals.length === 1 && pv.activityRemovals[0].activityId === 'A1' && pv.firstSessionLost;
 })());
@@ -243,7 +243,7 @@ check('Renovar: el borrador trae alumno, titular, nivel siguiente y tipo de pago
   const g = { id: 'G1', name: 'Juan Ruiz', doc: '45678901', phone: '999888777', email: 'j@x.pe', direccion: 'Calle 1', names: 'Juan', lastNameP: 'Ruiz', lastNameM: 'Soto', students: 1, enrollments: 1, balance: '$0' } as Guardian;
   const e = enrollment();
   const draft = buildRenewalDraft(e, renewalCheck(e, renewCtx(e)), [student({ names: 'Mateo', lastNameP: 'Ruiz', lastNameM: 'Soto' })], [g], TODAY)!;
-  return draft.mode === 'apoderado' && draft.holders[0].existingId === 'G1' && draft.students[0].person.existingId === 'ALU-1' && draft.students[0].levelId === 'L-K2' && draft.students[0].paymentTypeId === 'PT-4' && draft.renewsId === 'MAT-1' && draft.context.branchId === 'FIL-PIU' && /Renovación/.test(draft.context.observation);
+  return draft.mode === 'apoderado' && draft.holders[0].existingId === 'G1' && draft.students[0].person.existingId === 'ALU-1' && draft.students[0].levelId === 'L-K2' && draft.students[0].paymentTypeId === 'PT-4' && draft.renewsId === 'MAT-1' && draft.context.branchId === 'FIL-002' && /Renovación/.test(draft.context.observation);
 })());
 check('Renovar: un alumno independiente se renueva como independiente', (() => {
   const e = enrollment({ guardianIds: [] });
@@ -361,7 +361,7 @@ const pf = remCtx([
   basePlan({ id: 'PLN-2', mat: 'MAT-2', installments: [inst('C1', 300, 300, '2026-07-01', 'Pendiente'), inst('C2', 300, 300, '2026-11-20', 'Pendiente')] }),
   basePlan({ id: 'PLN-3', mat: 'MAT-3', status: 'Completado', installments: [] }),
   basePlan({ id: 'PLN-4', mat: 'MAT-4', status: 'Caída', installments: [inst('C1', 100, 100, '2026-08-01', 'Pendiente'), inst('C2', 100, 100, '2026-12-01', 'Anulada')] }),
-], [enrollment(), enrollment({ id: 'MAT-2', student: 'Ana Silva', studentId: 'ALU-2', branchId: 'FIL-CHI', sede: 'Chiclayo' }), enrollment({ id: 'MAT-3' }), enrollment({ id: 'MAT-4', status: 'Caída' })]);
+], [enrollment(), enrollment({ id: 'MAT-2', student: 'Ana Silva', studentId: 'ALU-2', branchId: 'FIL-003', sede: 'Chiclayo' }), enrollment({ id: 'MAT-3' }), enrollment({ id: 'MAT-4', status: 'Caída' })]);
 const rows = portfolioRows(pf, TODAY);
 check('Cartera: cuotas abiertas de activas y solo la deuda vencida de las caídas', rows.length === 5 && rows.filter(r => r.enrollmentId === 'MAT-4').length === 1 && !rows.some(r => r.enrollmentId === 'MAT-3'));
 check('Cartera: antigüedad por tramos', bucketOf(0) === 'Por vencer' && bucketOf(1) === '1 a 30 días' && bucketOf(30) === '1 a 30 días' && bucketOf(31) === '31 a 60 días' && bucketOf(91) === 'Más de 90 días');

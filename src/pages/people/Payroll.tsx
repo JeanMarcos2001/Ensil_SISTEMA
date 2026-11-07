@@ -55,7 +55,9 @@ export function Payroll() {
   const run = payrollRuns.find(r => r.id === openId);
   const built = useMemo(() => (run ? payrollLinesOf(run) : { lines: [] as PayrollLine[], warnings: [] }), [run, payrollLinesOf]);
   const totals = totalsOf(built.lines);
-  const company = companies[0]?.commercialName || companies[0]?.name || 'ENSIL';
+  // El contrato todavía no sabe de qué empresa es (Lote 3): con varias empresas no se adivina una, se rotula «ENSIL».
+  const onlyCompany = companies.filter(c => c.status === 'Activo').length === 1 ? companies.find(c => c.status === 'Activo') : undefined;
+  const company = onlyCompany?.commercialName || onlyCompany?.name || 'ENSIL';
   const member = staffFilter ? staff.find(s => s.id === staffFilter) : undefined;
 
   if (!can(PERM.payrollView)) {

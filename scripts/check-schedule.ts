@@ -122,7 +122,7 @@ check('Sesión activa a menos de 24 h queda bloqueada para cambios; una con asis
 // ---------------------------------------------------------------- Conflictos del alumno
 const base: Schedule = {
   id: '1', student: 'Mateo Ruiz', studentId: 'ALU-001', program: 'Kids', level: 'Nivel 1',
-  date: '2026-10-20', time: '16:00', duration: 60, responsible: 'María Torres', status: 'Asistió', branchId: 'FIL-PIU',
+  date: '2026-10-20', time: '16:00', duration: 60, responsible: 'María Torres', status: 'Asistió', branchId: 'FIL-002',
 };
 const list = [base];
 const cand = (o: Partial<Parameters<typeof findScheduleConflict>[1]> = {}) =>
@@ -156,49 +156,49 @@ check('Sin responsable → rechazada', /responsable/i.test(validateSchedule({ ..
 
 // ---------------------------------------------------------------- Cupo por horario
 const cfg: CapacityConfig = { defaultCapacity: 6, byBranch: {}, overrides: [] };
-check('Cupo general', capacityFor(cfg, 'FIL-PIU', '2026-10-20', '16:00') === 6);
-const cfgB = setBranchCapacity(cfg, 'FIL-CHI', 8);
-check('Cupo propio de la sede prevalece sobre el general', capacityFor(cfgB, 'FIL-CHI', '2026-10-20', '16:00') === 8 && capacityFor(cfgB, 'FIL-PIU', '2026-10-20', '16:00') === 6);
-check('Una sede puede quedar sin límite', capacityFor(setBranchCapacity(cfg, 'FIL-PIU', null), 'FIL-PIU', '2026-10-20', '16:00') === null);
-check('Quitar el cupo propio vuelve al general', capacityFor(setBranchCapacity(cfgB, 'FIL-CHI', undefined), 'FIL-CHI', '2026-10-20', '16:00') === 6);
-const cfgO = upsertOverride(cfgB, { branchId: 'FIL-CHI', date: '2026-10-20', time: '16:00', capacity: 5 });
-check('La excepción por fecha y horario prevalece', capacityFor(cfgO, 'FIL-CHI', '2026-10-20', '16:00') === 5 && capacityFor(cfgO, 'FIL-CHI', '2026-10-20', '17:00') === 8);
-check('Una excepción puede ser «sin límite»', capacityFor(upsertOverride(cfgO, { branchId: 'FIL-CHI', date: '2026-10-20', time: '16:00', capacity: null }), 'FIL-CHI', '2026-10-20', '16:00') === null);
-check('Repetir la excepción la reemplaza (no se duplica)', upsertOverride(cfgO, { branchId: 'FIL-CHI', date: '2026-10-20', time: '16:00', capacity: 7 }).overrides.length === 1);
-check('Quitar la excepción vuelve al cupo de la sede', capacityFor(removeOverride(cfgO, cfgO.overrides[0].id), 'FIL-CHI', '2026-10-20', '16:00') === 8);
+check('Cupo general', capacityFor(cfg, 'FIL-002', '2026-10-20', '16:00') === 6);
+const cfgB = setBranchCapacity(cfg, 'FIL-003', 8);
+check('Cupo propio de la sede prevalece sobre el general', capacityFor(cfgB, 'FIL-003', '2026-10-20', '16:00') === 8 && capacityFor(cfgB, 'FIL-002', '2026-10-20', '16:00') === 6);
+check('Una sede puede quedar sin límite', capacityFor(setBranchCapacity(cfg, 'FIL-002', null), 'FIL-002', '2026-10-20', '16:00') === null);
+check('Quitar el cupo propio vuelve al general', capacityFor(setBranchCapacity(cfgB, 'FIL-003', undefined), 'FIL-003', '2026-10-20', '16:00') === 6);
+const cfgO = upsertOverride(cfgB, { branchId: 'FIL-003', date: '2026-10-20', time: '16:00', capacity: 5 });
+check('La excepción por fecha y horario prevalece', capacityFor(cfgO, 'FIL-003', '2026-10-20', '16:00') === 5 && capacityFor(cfgO, 'FIL-003', '2026-10-20', '17:00') === 8);
+check('Una excepción puede ser «sin límite»', capacityFor(upsertOverride(cfgO, { branchId: 'FIL-003', date: '2026-10-20', time: '16:00', capacity: null }), 'FIL-003', '2026-10-20', '16:00') === null);
+check('Repetir la excepción la reemplaza (no se duplica)', upsertOverride(cfgO, { branchId: 'FIL-003', date: '2026-10-20', time: '16:00', capacity: 7 }).overrides.length === 1);
+check('Quitar la excepción vuelve al cupo de la sede', capacityFor(removeOverride(cfgO, cfgO.overrides[0].id), 'FIL-003', '2026-10-20', '16:00') === 8);
 check('Cupos válidos: 1 a 50 o sin límite', isValidCapacity(5) && isValidCapacity(null) && isValidCapacity(50) && !isValidCapacity(0) && !isValidCapacity(51) && !isValidCapacity(2.5));
 
 const mk = (id: string, over: Partial<Schedule> = {}): Schedule => ({
   id, student: `Alumno ${id}`, studentId: `ALU-${id}`, program: 'Kids', level: 'Nivel 1', date: '2026-10-20', time: '16:00',
-  duration: 60, responsible: 'María Torres', status: 'Reservado', branchId: 'FIL-PIU', ...over,
+  duration: 60, responsible: 'María Torres', status: 'Reservado', branchId: 'FIL-002', ...over,
 });
 const five = ['1', '2', '3', '4', '5'].map(i => mk(i));
 check('Ocupación: cuenta activas y faltas (el horario ya pasó); Cancelado libera; otra sede u horario no cuenta',
-  occupancy([...five, mk('6', { status: 'Cancelado' }), mk('7', { status: 'Faltó' }), mk('8', { branchId: 'FIL-CHI' }), mk('9', { time: '17:00' })], 'FIL-PIU', '2026-10-20', '16:00') === 6);
+  occupancy([...five, mk('6', { status: 'Cancelado' }), mk('7', { status: 'Faltó' }), mk('8', { branchId: 'FIL-003' }), mk('9', { time: '17:00' })], 'FIL-002', '2026-10-20', '16:00') === 6);
 check('Faltó ocupa el horario; Cancelado no; Faltó no cuenta como asistencia', OCCUPYING_STATUSES.includes('Faltó') && !OCCUPYING_STATUSES.includes('Cancelado') && !ACTIVE_STATUSES.includes('Faltó'));
-check('Ocupación: ignora la asesoría que se edita', occupancy(five, 'FIL-PIU', '2026-10-20', '16:00', '1') === 4);
+check('Ocupación: ignora la asesoría que se edita', occupancy(five, 'FIL-002', '2026-10-20', '16:00', '1') === 4);
 
 const ctx = (schedules: Schedule[], capacity: CapacityConfig = cfg, monthly: MonthlySchedule[] = []) => ({ schedules, capacity, activities: allActivities(monthly) });
 check('Horario con lugar → abierto (5 de 6)',
-  blockState(ctx(five), 'FIL-PIU', '2026-10-20', '16:00').kind === 'open' && blockText(blockState(ctx(five), 'FIL-PIU', '2026-10-20', '16:00')) === '5 de 6 cupos');
+  blockState(ctx(five), 'FIL-002', '2026-10-20', '16:00').kind === 'open' && blockText(blockState(ctx(five), 'FIL-002', '2026-10-20', '16:00')) === '5 de 6 cupos');
 const six = [...five, mk('6')];
 check('Horario completo → lleno (6 de 6)',
-  blockState(ctx(six), 'FIL-PIU', '2026-10-20', '16:00').kind === 'full' && /Completo \(6 de 6\)/.test(blockText(blockState(ctx(six), 'FIL-PIU', '2026-10-20', '16:00'))));
-check('Horario completo → se rechaza una reserva más', /completo: 6 de 6/.test(checkBlock(ctx(six), 'FIL-PIU', '2026-10-20', '16:00') ?? ''));
-check('Aumentar el cupo habilita el horario', checkBlock(ctx(six, { ...cfg, defaultCapacity: 8 }), 'FIL-PIU', '2026-10-20', '16:00') === null);
-check('Reducir el cupo por debajo de lo ocupado lo cierra', blockState(ctx(five, { ...cfg, defaultCapacity: 4 }), 'FIL-PIU', '2026-10-20', '16:00').kind === 'full');
+  blockState(ctx(six), 'FIL-002', '2026-10-20', '16:00').kind === 'full' && /Completo \(6 de 6\)/.test(blockText(blockState(ctx(six), 'FIL-002', '2026-10-20', '16:00'))));
+check('Horario completo → se rechaza una reserva más', /completo: 6 de 6/.test(checkBlock(ctx(six), 'FIL-002', '2026-10-20', '16:00') ?? ''));
+check('Aumentar el cupo habilita el horario', checkBlock(ctx(six, { ...cfg, defaultCapacity: 8 }), 'FIL-002', '2026-10-20', '16:00') === null);
+check('Reducir el cupo por debajo de lo ocupado lo cierra', blockState(ctx(five, { ...cfg, defaultCapacity: 4 }), 'FIL-002', '2026-10-20', '16:00').kind === 'full');
 check('Sin límite: nunca se llena',
-  checkBlock(ctx([...six, mk('7'), mk('8'), mk('9')], { ...cfg, defaultCapacity: null }), 'FIL-PIU', '2026-10-20', '16:00') === null &&
-  blockText(blockState(ctx(six, { ...cfg, defaultCapacity: null }), 'FIL-PIU', '2026-10-20', '16:00')) === '6 alumnos · sin límite');
-check('El cupo es por sede: otra sede tiene lugar', checkBlock(ctx(six), 'FIL-CHI', '2026-10-20', '16:00') === null);
-check('Al reprogramar, la propia asesoría no cuenta contra el cupo', checkBlock(ctx(six), 'FIL-PIU', '2026-10-20', '16:00', '6') === null);
+  checkBlock(ctx([...six, mk('7'), mk('8'), mk('9')], { ...cfg, defaultCapacity: null }), 'FIL-002', '2026-10-20', '16:00') === null &&
+  blockText(blockState(ctx(six, { ...cfg, defaultCapacity: null }), 'FIL-002', '2026-10-20', '16:00')) === '6 alumnos · sin límite');
+check('El cupo es por sede: otra sede tiene lugar', checkBlock(ctx(six), 'FIL-003', '2026-10-20', '16:00') === null);
+check('Al reprogramar, la propia asesoría no cuenta contra el cupo', checkBlock(ctx(six), 'FIL-002', '2026-10-20', '16:00', '6') === null);
 check('Fuera de los bloques → no disponible',
-  blockState(ctx([]), 'FIL-PIU', '2026-10-18', '16:00').kind === 'closed' && checkBlock(ctx([]), 'FIL-PIU', '2026-10-20', '09:00') !== null);
+  blockState(ctx([]), 'FIL-002', '2026-10-18', '16:00').kind === 'closed' && checkBlock(ctx([]), 'FIL-002', '2026-10-20', '09:00') !== null);
 
 // ---------------------------------------------------------------- Actividades de los cronogramas (bloqueo por sede)
 const monthly: MonthlySchedule[] = [
   {
-    id: 'C1', branchId: 'FIL-PIU', sede: 'Piura', mes: 'Noviembre', anio: 2026, titulo: 'Piura', observaciones: '',
+    id: 'C1', branchId: 'FIL-002', sede: 'Piura', mes: 'Noviembre', anio: 2026, titulo: 'Piura', observaciones: '',
     actividades: [
       { id: 'a1', actividad: 'Maratón', fecha: '2026-11-10', horaInicio: '16:00', horaFin: '18:00', responsable: 'Equipo', orden: 1, cupo: 2, inscritos: ['ALU-1'] },
       { id: 'a2', actividad: 'Taller', fecha: '2026-11-10', horaInicio: '', horaFin: '', responsable: '', orden: 2, cupo: null, inscritos: [] },
@@ -206,27 +206,27 @@ const monthly: MonthlySchedule[] = [
   },
 ];
 const acti = allActivities(monthly);
-check('Solo se cruzan actividades con fecha y horas completas', acti.length === 1 && acti[0].id === 'C1:a1' && acti[0].branchId === 'FIL-PIU');
-check('La maratón de 4 a 6 p. m. bloquea 4–5 y 5–6', !!blockingActivity(acti, 'FIL-PIU', '2026-11-10', '16:00') && !!blockingActivity(acti, 'FIL-PIU', '2026-11-10', '17:00'));
-check('No bloquea 3–4 ni 6–7 (justo antes y después)', !blockingActivity(acti, 'FIL-PIU', '2026-11-10', '15:00') && !blockingActivity(acti, 'FIL-PIU', '2026-11-10', '18:00'));
-check('El bloqueo es solo de su sede', !blockingActivity(acti, 'FIL-CHI', '2026-11-10', '16:00'));
-check('El bloqueo es solo de su fecha', !blockingActivity(acti, 'FIL-PIU', '2026-11-11', '16:00'));
+check('Solo se cruzan actividades con fecha y horas completas', acti.length === 1 && acti[0].id === 'C1:a1' && acti[0].branchId === 'FIL-002');
+check('La maratón de 4 a 6 p. m. bloquea 4–5 y 5–6', !!blockingActivity(acti, 'FIL-002', '2026-11-10', '16:00') && !!blockingActivity(acti, 'FIL-002', '2026-11-10', '17:00'));
+check('No bloquea 3–4 ni 6–7 (justo antes y después)', !blockingActivity(acti, 'FIL-002', '2026-11-10', '15:00') && !blockingActivity(acti, 'FIL-002', '2026-11-10', '18:00'));
+check('El bloqueo es solo de su sede', !blockingActivity(acti, 'FIL-003', '2026-11-10', '16:00'));
+check('El bloqueo es solo de su fecha', !blockingActivity(acti, 'FIL-002', '2026-11-11', '16:00'));
 check('Una actividad que arranca a mitad de un bloque lo bloquea (15:30–16:30 → 3–4 y 4–5)',
-  !!blockingActivity([{ ...acti[0], start: '15:30', end: '16:30' }], 'FIL-PIU', '2026-11-10', '15:00') &&
-  !!blockingActivity([{ ...acti[0], start: '15:30', end: '16:30' }], 'FIL-PIU', '2026-11-10', '16:00'));
+  !!blockingActivity([{ ...acti[0], start: '15:30', end: '16:30' }], 'FIL-002', '2026-11-10', '15:00') &&
+  !!blockingActivity([{ ...acti[0], start: '15:30', end: '16:30' }], 'FIL-002', '2026-11-10', '16:00'));
 check('Reservar en un horario bloqueado → rechazado con el nombre de la actividad',
-  /ocupado por la actividad «Maratón» \(4:00 p\. m\. – 6:00 p\. m\.\)/.test(checkBlock(ctx([], cfg, monthly), 'FIL-PIU', '2026-11-10', '16:00') ?? ''));
-check('El horario bloqueado aparece como tal', blockText(blockState(ctx([], cfg, monthly), 'FIL-PIU', '2026-11-10', '17:00')) === 'Bloqueado: Maratón');
-check('El horario libre de la misma fecha sigue disponible', checkBlock(ctx([], cfg, monthly), 'FIL-PIU', '2026-11-10', '15:00') === null);
+  /ocupado por la actividad «Maratón» \(4:00 p\. m\. – 6:00 p\. m\.\)/.test(checkBlock(ctx([], cfg, monthly), 'FIL-002', '2026-11-10', '16:00') ?? ''));
+check('El horario bloqueado aparece como tal', blockText(blockState(ctx([], cfg, monthly), 'FIL-002', '2026-11-10', '17:00')) === 'Bloqueado: Maratón');
+check('El horario libre de la misma fecha sigue disponible', checkBlock(ctx([], cfg, monthly), 'FIL-002', '2026-11-10', '15:00') === null);
 check('Asesorías ya reservadas que la actividad tapa',
   affectedSchedules(
     [
       mk('1', { date: '2026-11-10', time: '16:00' }),
       mk('2', { date: '2026-11-10', time: '17:00', status: 'Cancelado' }),
       mk('3', { date: '2026-11-10', time: '19:00' }),
-      mk('4', { date: '2026-11-10', time: '17:00', branchId: 'FIL-CHI' }),
+      mk('4', { date: '2026-11-10', time: '17:00', branchId: 'FIL-003' }),
     ],
-    'FIL-PIU', { fecha: '2026-11-10', horaInicio: '16:00', horaFin: '18:00' }
+    'FIL-002', { fecha: '2026-11-10', horaInicio: '16:00', horaFin: '18:00' }
   ).map(x => x.id).join() === '1');
 check('Rango de horas', rangeLabel('16:00', '18:00') === '4:00 p. m. – 6:00 p. m.');
 
@@ -263,40 +263,40 @@ check('Rango → horas (ida y vuelta)', rangeToSlots(martes, '16:00', '18:00').j
 // ---------------------------------------------------------------- Tipos de sesión: primera asesoría, asesoría y actividad no se mezclan
 const first = (id: string, reg: string, over: Partial<Schedule> = {}) => mk(id, { isFirst: true, registrationId: reg, enrollmentId: `MAT-${id}`, ...over });
 const f1 = [first('11', 'REG-A'), first('12', 'REG-A')];
-const FB = (schedules: Schedule[], reg?: string, time = '16:00', branch = 'FIL-PIU', date = '2026-10-20', list: MonthlySchedule[] = []) =>
+const FB = (schedules: Schedule[], reg?: string, time = '16:00', branch = 'FIL-002', date = '2026-10-20', list: MonthlySchedule[] = []) =>
   firstSessionBlock(ctx(schedules, cfg, list), branch, date, time, reg);
-check('Horario vacío → libre para primera asesoría', FB([]).kind === 'free' && firstBlockText(FB([])) === 'Libre' && checkFirstSessionBlock(ctx([]), 'FIL-PIU', '2026-10-20', '16:00') === null);
-check('Horario con asesorías → ocupado (la primera necesita un horario vacío)', FB(five).kind === 'taken' && FB(five).takenBy === 'asesorias' && /ya tiene asesorías/.test(checkFirstSessionBlock(ctx(five), 'FIL-PIU', '2026-10-20', '16:00') ?? ''));
+check('Horario vacío → libre para primera asesoría', FB([]).kind === 'free' && firstBlockText(FB([])) === 'Libre' && checkFirstSessionBlock(ctx([]), 'FIL-002', '2026-10-20', '16:00') === null);
+check('Horario con asesorías → ocupado (la primera necesita un horario vacío)', FB(five).kind === 'taken' && FB(five).takenBy === 'asesorias' && /ya tiene asesorías/.test(checkFirstSessionBlock(ctx(five), 'FIL-002', '2026-10-20', '16:00') ?? ''));
 check('Una sola asesoría normal ya lo ocupa', FB([mk('1')]).kind === 'taken');
-check('Primeras asesorías de otro registro → ocupado', FB(f1, 'REG-B').kind === 'taken' && FB(f1, 'REG-B').takenBy === 'otro-registro' && /otro registro/.test(checkFirstSessionBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00', 'REG-B') ?? ''));
+check('Primeras asesorías de otro registro → ocupado', FB(f1, 'REG-B').kind === 'taken' && FB(f1, 'REG-B').takenBy === 'otro-registro' && /otro registro/.test(checkFirstSessionBlock(ctx(f1), 'FIL-002', '2026-10-20', '16:00', 'REG-B') ?? ''));
 check('Con un registro nuevo (asistente), las primeras ya registradas no se comparten', FB(f1).kind === 'taken');
-check('Los alumnos del mismo registro comparten el horario', FB(f1, 'REG-A').kind === 'own' && firstBlockText(FB(f1, 'REG-A')) === 'Con alumnos de este registro' && checkFirstSessionBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00', 'REG-A') === null);
+check('Los alumnos del mismo registro comparten el horario', FB(f1, 'REG-A').kind === 'own' && firstBlockText(FB(f1, 'REG-A')) === 'Con alumnos de este registro' && checkFirstSessionBlock(ctx(f1), 'FIL-002', '2026-10-20', '16:00', 'REG-A') === null);
 check('Un horario mixto (primera + asesoría normal) no es «propio»', FB([...f1, mk('1')], 'REG-A').kind === 'taken');
 check('La primera asesoría no tiene cupo: 10 alumnos del mismo registro caben', FB(Array.from({ length: 10 }, (_, i) => first(`2${i}`, 'REG-A')), 'REG-A').kind === 'own');
 check('Cancelar libera el horario de primera asesoría', FB([first('11', 'REG-A', { status: 'Cancelado' })], 'REG-B').kind === 'free');
 check('Faltó NO lo libera (el horario ya pasó)', FB([first('11', 'REG-A', { status: 'Faltó' })], 'REG-B').kind === 'taken');
-check('Es por sede: otra sede lo tiene libre', FB(f1, 'REG-B', '16:00', 'FIL-CHI').kind === 'free');
-check('Es por fecha y horario', FB(f1, 'REG-B', '17:00').kind === 'free' && FB(f1, 'REG-B', '16:00', 'FIL-PIU', '2026-10-21').kind === 'free');
-check('Al reprogramar, su propia asesoría no cuenta', firstSessionBlock(ctx([first('11', 'REG-A')]), 'FIL-PIU', '2026-10-20', '16:00', 'REG-A', '11').kind === 'free');
-check('Fuera de la agenda → no disponible', FB([], undefined, '09:00').kind === 'closed' && FB([], undefined, '16:00', 'FIL-PIU', '2026-10-18').kind === 'closed');
+check('Es por sede: otra sede lo tiene libre', FB(f1, 'REG-B', '16:00', 'FIL-003').kind === 'free');
+check('Es por fecha y horario', FB(f1, 'REG-B', '17:00').kind === 'free' && FB(f1, 'REG-B', '16:00', 'FIL-002', '2026-10-21').kind === 'free');
+check('Al reprogramar, su propia asesoría no cuenta', firstSessionBlock(ctx([first('11', 'REG-A')]), 'FIL-002', '2026-10-20', '16:00', 'REG-A', '11').kind === 'free');
+check('Fuera de la agenda → no disponible', FB([], undefined, '09:00').kind === 'closed' && FB([], undefined, '16:00', 'FIL-002', '2026-10-18').kind === 'closed');
 check('Con una actividad encima → bloqueado',
-  FB([], undefined, '16:00', 'FIL-PIU', '2026-11-10', monthly).kind === 'blocked' &&
-  /Maratón/.test(checkFirstSessionBlock(ctx([], cfg, monthly), 'FIL-PIU', '2026-11-10', '17:00') ?? ''));
+  FB([], undefined, '16:00', 'FIL-002', '2026-11-10', monthly).kind === 'blocked' &&
+  /Maratón/.test(checkFirstSessionBlock(ctx([], cfg, monthly), 'FIL-002', '2026-11-10', '17:00') ?? ''));
 
 // Para una asesoría normal, el horario con primeras asesorías está cerrado (y no cuenta cupo)
 check('Horario de primera asesoría → cerrado para asesorías normales',
-  blockState(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00').kind === 'first' && blockText(blockState(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00')) === 'Reservado para primera asesoría');
-check('La asesoría normal se rechaza ahí con el motivo', /reservado para primeras asesorías/.test(checkBlock(ctx(f1), 'FIL-PIU', '2026-10-20', '16:00') ?? ''));
-check('Una primera asesoría cancelada devuelve el horario a las asesorías normales', checkBlock(ctx([first('11', 'REG-A', { status: 'Cancelado' })]), 'FIL-PIU', '2026-10-20', '16:00') === null);
-check('Una primera con falta mantiene el horario cerrado', blockState(ctx([first('11', 'REG-A', { status: 'Faltó' })]), 'FIL-PIU', '2026-10-20', '16:00').kind === 'first');
-check('Otra sede no se ve afectada', checkBlock(ctx(f1), 'FIL-CHI', '2026-10-20', '16:00') === null);
-check('Una actividad gana sobre cualquier otro tipo', blockState(ctx(f1, cfg, monthly), 'FIL-PIU', '2026-11-10', '16:00').kind === 'blocked');
+  blockState(ctx(f1), 'FIL-002', '2026-10-20', '16:00').kind === 'first' && blockText(blockState(ctx(f1), 'FIL-002', '2026-10-20', '16:00')) === 'Reservado para primera asesoría');
+check('La asesoría normal se rechaza ahí con el motivo', /reservado para primeras asesorías/.test(checkBlock(ctx(f1), 'FIL-002', '2026-10-20', '16:00') ?? ''));
+check('Una primera asesoría cancelada devuelve el horario a las asesorías normales', checkBlock(ctx([first('11', 'REG-A', { status: 'Cancelado' })]), 'FIL-002', '2026-10-20', '16:00') === null);
+check('Una primera con falta mantiene el horario cerrado', blockState(ctx([first('11', 'REG-A', { status: 'Faltó' })]), 'FIL-002', '2026-10-20', '16:00').kind === 'first');
+check('Otra sede no se ve afectada', checkBlock(ctx(f1), 'FIL-003', '2026-10-20', '16:00') === null);
+check('Una actividad gana sobre cualquier otro tipo', blockState(ctx(f1, cfg, monthly), 'FIL-002', '2026-11-10', '16:00').kind === 'blocked');
 
 // Reprogramar una primera asesoría: mismo horario del registro o uno vacío; nunca uno con asesorías
 const vr = (over: Record<string, unknown>, schedules: Schedule[]) =>
   validateReservation(
     ctx(schedules),
-    { student: 'Alumno 11', studentId: 'ALU-11', responsible: 'María Torres', date: '2026-10-20', time: '16:00', status: 'Reprogramado', branchId: 'FIL-PIU', checkPast: true, isFirst: true, registrationId: 'REG-A', ...over },
+    { student: 'Alumno 11', studentId: 'ALU-11', responsible: 'María Torres', date: '2026-10-20', time: '16:00', status: 'Reprogramado', branchId: 'FIL-002', checkPast: true, isFirst: true, registrationId: 'REG-A', ...over },
     '2026-10-16', '11'
   );
 check('Primera asesoría → horario vacío → permitido', vr({ time: '17:00' }, f1) === null);
@@ -307,13 +307,13 @@ check('Primera asesoría → horario de otro registro → rechazado', /otro regi
 // ---------------------------------------------------------------- Inscripción en actividades
 const act = acti[0];
 const enroll = (studentId: string, over: Record<string, unknown> = {}) =>
-  validateActivityEnrollment({ activity: act, studentId, studentName: `Alumno ${studentId}`, studentBranchId: 'FIL-PIU', schedules: [], ...over });
+  validateActivityEnrollment({ activity: act, studentId, studentName: `Alumno ${studentId}`, studentBranchId: 'FIL-002', schedules: [], ...over });
 const asesoria = (over: Partial<Schedule> = {}) => [mk('1', { studentId: 'ALU-2', student: 'Alumno ALU-2', date: '2026-11-10', time: '17:00', ...over })];
 check('Inscribir a un alumno de la sede con cupo → permitido', enroll('ALU-2') === null);
 check('Ya inscrito → rechazado', /ya está inscrito/.test(enroll('ALU-1') ?? ''));
-check('Alumno de otra sede → rechazado', /otra sede/.test(enroll('ALU-2', { studentBranchId: 'FIL-CHI' }) ?? ''));
+check('Alumno de otra sede → rechazado', /otra sede/.test(enroll('ALU-2', { studentBranchId: 'FIL-003' }) ?? ''));
 check('Actividad completa → rechazado',
-  /completa \(2 de 2/.test(validateActivityEnrollment({ activity: { ...act, enrolled: ['ALU-1', 'ALU-2'] }, studentId: 'ALU-3', studentName: 'A3', studentBranchId: 'FIL-PIU', schedules: [] }) ?? ''));
+  /completa \(2 de 2/.test(validateActivityEnrollment({ activity: { ...act, enrolled: ['ALU-1', 'ALU-2'] }, studentId: 'ALU-3', studentName: 'A3', studentBranchId: 'FIL-002', schedules: [] }) ?? ''));
 check('Cupos libres', seatsLeft(act) === 1 && seatsLeft({ capacity: null, enrolled: ['x'] }) === null && seatsLeft({ capacity: 1, enrolled: ['x', 'y'] }) === 0);
 check('Alumno con una asesoría que se cruza ese día → rechazado',
   /tiene una asesoría ese día de 5:00 p\. m\. – 6:00 p\. m\./.test(enroll('ALU-2', { schedules: asesoria() }) ?? ''));
@@ -327,7 +327,7 @@ check('Inscribir y quitar (sin duplicar)',
 const res = (over: Record<string, unknown> = {}, c = ctx(five)) =>
   validateReservation(
     c,
-    { student: 'Nuevo', studentId: 'ALU-N', responsible: 'María Torres', date: '2026-10-20', time: '16:00', status: 'Reservado', branchId: 'FIL-PIU', checkPast: true, ...over },
+    { student: 'Nuevo', studentId: 'ALU-N', responsible: 'María Torres', date: '2026-10-20', time: '16:00', status: 'Reservado', branchId: 'FIL-002', checkPast: true, ...over },
     '2026-10-16'
   );
 check('Reserva con lugar → válida', res() === null);
@@ -342,11 +342,11 @@ const enrol = (id: string, studentId: string, branchId: string, dateISO: string)
   id, student: `Alumno ${studentId}`, studentId, guardianIds: [], branchId, dateISO, programId: '1', program: 'Kids', level: 'N1', status: 'Activa',
 });
 check('Sede del alumno = la de su matrícula más reciente',
-  branchOfStudent({ id: 'ALU-1' }, [enrol('1', 'ALU-1', 'FIL-PIU', '2026-01-01'), enrol('2', 'ALU-1', 'FIL-CHI', '2026-06-01')]) === 'FIL-CHI');
+  branchOfStudent({ id: 'ALU-1' }, [enrol('1', 'ALU-1', 'FIL-002', '2026-01-01'), enrol('2', 'ALU-1', 'FIL-003', '2026-06-01')]) === 'FIL-003');
 check('Sin matrícula → sin sede', branchOfStudent({ id: 'ALU-9' }, []) === undefined);
 check('Responsable sugerido: el que ya atiende ese horario',
-  suggestedResponsible([mk('1', { responsible: 'Ana' }), mk('2', { responsible: 'Ana' }), mk('3', { responsible: 'Luis' })], 'FIL-PIU', '2026-10-20', '16:00') === 'Ana');
-check('Responsable sugerido: vacío si el horario está libre', suggestedResponsible(five, 'FIL-PIU', '2026-10-20', '17:00') === '');
+  suggestedResponsible([mk('1', { responsible: 'Ana' }), mk('2', { responsible: 'Ana' }), mk('3', { responsible: 'Luis' })], 'FIL-002', '2026-10-20', '16:00') === 'Ana');
+check('Responsable sugerido: vacío si el horario está libre', suggestedResponsible(five, 'FIL-002', '2026-10-20', '17:00') === '');
 const groups = groupByBlock([mk('1', { time: '17:00' }), mk('2'), mk('3', { time: '17:00' })]);
 check('Agrupar por horario, en orden', groups.map(g => `${g.time}:${g.items.length}`).join() === '16:00:1,17:00:2');
 
@@ -361,7 +361,7 @@ const pend = studentsWithoutSession(
       mk('2', { studentId: 'ALU-2', student: 'Alumno ALU-2', status: 'Cancelado' }),
       mk('3', { studentId: 'ALU-5', student: 'Alumno ALU-5', date: '2026-10-28' }),
     ],
-    enrollments: [enrol('1', 'ALU-1', 'FIL-PIU', ''), enrol('2', 'ALU-2', 'FIL-PIU', ''), enrol('3', 'ALU-3', 'FIL-CHI', ''), enrol('5', 'ALU-5', 'FIL-PIU', '')],
+    enrollments: [enrol('1', 'ALU-1', 'FIL-002', ''), enrol('2', 'ALU-2', 'FIL-002', ''), enrol('3', 'ALU-3', 'FIL-003', ''), enrol('5', 'ALU-5', 'FIL-002', '')],
   },
   week
 );
@@ -369,15 +369,15 @@ check('Sin asesoría esta semana: activos que no reservaron (cancelada no cuenta
   pend.map(x => x.student.id).join() === 'ALU-2,ALU-3,ALU-5');
 check('Filtrar por sede',
   studentsWithoutSession(
-    { students: [stu('ALU-2'), stu('ALU-3')], schedules: [], enrollments: [enrol('2', 'ALU-2', 'FIL-PIU', ''), enrol('3', 'ALU-3', 'FIL-CHI', '')] },
-    week, 'FIL-CHI'
+    { students: [stu('ALU-2'), stu('ALU-3')], schedules: [], enrollments: [enrol('2', 'ALU-2', 'FIL-002', ''), enrol('3', 'ALU-3', 'FIL-003', '')] },
+    week, 'FIL-003'
   ).map(x => x.student.id).join() === 'ALU-3');
 
 // ---------------------------------------------------------------- Programa mostrado del alumno
 const diego = { id: 'ALU-7' };
-check('El programa mostrado sale de la matrícula más reciente (la ficha del alumno ya no lo guarda)', studentProgramLabel(diego, [enrol('1', 'ALU-7', 'FIL-PIU', '2026-01-01')]) === 'Kids - N1');
+check('El programa mostrado sale de la matrícula más reciente (la ficha del alumno ya no lo guarda)', studentProgramLabel(diego, [enrol('1', 'ALU-7', 'FIL-002', '2026-01-01')]) === 'Kids - N1');
 check('Sin matrícula no hay programa que mostrar', studentProgramLabel(diego, []) === '');
-check('Sin nivel se muestra solo el programa', studentProgramLabel(diego, [{ ...enrol('1', 'ALU-7', 'FIL-PIU', ''), level: 'Sin nivel' }]) === 'Kids');
+check('Sin nivel se muestra solo el programa', studentProgramLabel(diego, [{ ...enrol('1', 'ALU-7', 'FIL-002', ''), level: 'Sin nivel' }]) === 'Kids');
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);
 process.exit(failed === 0 ? 0 : 1);

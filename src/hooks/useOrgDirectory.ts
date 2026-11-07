@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Branch, Company, Warehouse } from '../context/DataContext';
 import { supabase } from '../lib/supabase';
 import {
-  createBranch, createCompany, createWarehouse, editBranch, editCompany, editWarehouse, removeBranch, removeCompany, type OpResult,
+  createBranch, createCompany, createWarehouse, editBranch, editCompany, editWarehouse, loadOrgDirectory, removeBranch, removeCompany,
+  type OpResult, type OrgDirectoryData,
 } from '../services/orgDirectory';
 import { createSupabaseOrgRepository } from '../services/orgRepository';
 import { withCompanyNames } from '../utils/orgDirectory';
@@ -10,16 +11,17 @@ import { withCompanyNames } from '../utils/orgDirectory';
 export type OrgDirectoryStatus = 'loading' | 'ready' | 'error';
 
 /**
- * Empresas y Filiales guardadas en la base de datos: las carga al montarse (ya con sesión iniciada) y las mantiene al día con cada
- * operación. Las reglas y el orden «validar → guardar» están en `services/orgDirectory.ts`; aquí solo se guarda el estado de React.
- * Cada operación devuelve `{ ok, error }` como las demás acciones del contexto (nunca lanza).
+ * Empresas, Filiales y Almacenes guardados en la base de datos: arranca con lo que `AccessGate` leyó al iniciar sesión (así el resto del
+ * sistema ya tiene sus sedes desde el primer instante) y se mantiene al día con cada operación. Las reglas y el orden «validar → guardar»
+ * están en `services/orgDirectory.ts`; aquí solo se guarda el estado de React. Cada operación devuelve `{ ok, error }` como las demás
+ * acciones del contexto (nunca lanza). `reload` vuelve a leer la base (si algo quedó a medias).
  */
-export function useOrgDirectory() {
+export function useOrgDirectory(initial: OrgDirectoryData) {
   const repo = useMemo(() => createSupabaseOrgRepository(supabase), []);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [rawBranches, setRawBranches] = useState<Branch[]>([]);
-  const [rawWarehouses, setRawWarehouses] = useState<Warehouse[]>([]);
-  const [status, setStatus] = useState<OrgDirectoryStatus>('loading');
+  const [companies, setCompanies] = useState<Company[]>(initial.companies);
+  const [rawBranches, setRawBranches] = useState<Branch[]>(initial.branches);
+  const [rawWarehouses, setRawWarehouses] = useState<Warehouse[]>(initial.warehouses);
+  const [status, setStatus] = useState<OrgDirectoryStatus>('ready');
   const [error, setError] = useState('');
 
   // Las operaciones leen la lista vigente (no la de cuando se creó la función) para validar contra lo último que se vio.
@@ -37,19 +39,17 @@ export function useOrgDirectory() {
   const reload = useCallback(async () => {
     setStatus('loading');
     setError('');
-    const [c, b, w] = await Promise.all([repo.listCompanies(), repo.listBranches(), repo.listWarehouses()]);
-    if (!c.ok || !b.ok || !w.ok) {
-      setError(c.error ?? b.error ?? w.error ?? 'No se pudieron cargar las empresas, filiales y almacenes.');
+    const res = await loadOrgDirectory(repo);
+    if (!res.ok || !res.value) {
+      setError(res.error ?? 'No se pudieron cargar las empresas, filiales y almacenes.');
       setStatus('error');
       return;
     }
-    setCompanies(c.data ?? []);
-    setRawBranches(b.data ?? []);
-    setRawWarehouses(w.data ?? []);
+    setCompanies(res.value.companies);
+    setRawBranches(res.value.branches);
+    setRawWarehouses(res.value.warehouses);
     setStatus('ready');
   }, [repo]);
-
-  useEffect(() => { void reload(); }, [reload]);
 
   const addCompany = useCallback(async (input: Omit<Company, 'id'>): Promise<OpResult<Company> & { id?: string }> => {
     const res = await createCompany(repo, companiesRef.current, input);

@@ -34,8 +34,8 @@ const staff = (id: string, over: Partial<Staff> = {}): Staff => ({
 });
 const members = [staff('1'), staff('2', { names: 'Luis', lastNameP: 'Pérez' }), staff('3', { names: 'Eva', lastNameP: 'Soto', status: 'Inactivo' })];
 const branches: Branch[] = [
-  { id: 'FIL-PIU', name: 'Piura', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '', phoneFixed: '', phoneMobile: '' } as Branch,
-  { id: 'FIL-CHI', name: 'Chiclayo', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '', phoneFixed: '', phoneMobile: '' } as Branch,
+  { id: 'FIL-002', name: 'Piura', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '', phoneFixed: '', phoneMobile: '' } as Branch,
+  { id: 'FIL-003', name: 'Chiclayo', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '', phoneFixed: '', phoneMobile: '' } as Branch,
 ];
 const asg = (id: string, over: Partial<Assignment> = {}): Assignment => ({
   id, staffId: '1', branch: 'Piura', area: 'Psicopedagogía', hasAccess: true, startDate: '2026-01-01', isMain: true, status: 'Activa', ...over,
@@ -117,7 +117,7 @@ const cash: CashMovement[] = [
   mv('CJ-1', { paymentId: 'PAG-1', enrollmentIds: ['MAT-1'], concept: 'Cobro' }),
   mv('CJ-2', { kind: 'Egreso', amount: 30, concept: 'Pago a proveedor', reference: 'Limpieza (Factura F1)' }),
   mv('CJ-3', { kind: 'Egreso', paymentId: 'PAG-9', concept: 'Devolución de pago' }),
-  mv('CJ-4', { concept: 'Venta de artículo', sale: { itemId: 'ITM-1', branchId: 'FIL-PIU', qty: 2 }, amount: 120 }),
+  mv('CJ-4', { concept: 'Venta de artículo', sale: { itemId: 'ITM-1', branchId: 'FIL-002', qty: 2 }, amount: 120 }),
   mv('CJ-5', { concept: 'Venta de artículo', amount: 60 }),
   mv('CJ-6', { amount: 250 }),
   mv('CJ-7', { method: 'Transferencia', amount: 500 }),
@@ -166,7 +166,7 @@ check('Reversar un egreso siempre se puede (con motivo)', validatePettyReversal(
 // ================================================================ Estado de cuenta
 const guardian = { id: 'G1', name: 'Juan Ruiz', doc: '1', phone: '9', email: 'a@b.c' } as Guardian;
 const stu: Student[] = [{ id: 'ALU-1', doc: '1', name: 'Mateo Ruiz', birthDate: '2017-01-01', guardianIds: ['G1'] }, { id: 'ALU-2', doc: '2', name: 'Otro', birthDate: '2017-01-01', guardianIds: ['G9'] }];
-const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({ id, dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', guardianIds: ['G1'], program: 'Kids', programId: '1', level: 'Nivel 1', branchId: 'FIL-PIU', status: 'Activa', ...over });
+const enr = (id: string, over: Partial<Enrollment> = {}): Enrollment => ({ id, dateISO: '2026-09-01', student: 'Mateo Ruiz', studentId: 'ALU-1', guardianIds: ['G1'], program: 'Kids', programId: '1', level: 'Nivel 1', branchId: 'FIL-002', status: 'Activa', ...over });
 const inst = (id: string, amount: number, balance: number, due: string, status: InstallmentStatus, payments: any[] = []): Installment => ({ id, name: `Cuota ${id.slice(1)}`, amount, balance, dueDateISO: due, status, payments });
 const sPlan: Plan = {
   id: 'PLN-1', mat: 'MAT-1', type: 'Plan 4', total: 800, balance: 400, status: 'Atrasado',
@@ -235,11 +235,11 @@ check('Documento imprimible escapa el HTML', (() => { const h = tableDocumentHtm
 // ================================================================ Dashboard
 const dctx: DashboardContext = {
   branches, students: stu, guardians: [guardian],
-  enrollments: [enr('MAT-1', { branchId: 'FIL-PIU', verificationStatus: 'Pendiente' }), enr('MAT-2', { branchId: 'FIL-CHI', verificationStatus: 'Verificado Completo' }), enr('MAT-3', { branchId: 'FIL-PIU', status: 'Caída' })],
+  enrollments: [enr('MAT-1', { branchId: 'FIL-002', verificationStatus: 'Pendiente' }), enr('MAT-2', { branchId: 'FIL-003', verificationStatus: 'Verificado Completo' }), enr('MAT-3', { branchId: 'FIL-002', status: 'Caída' })],
   plans: [sPlan, { ...sPlan, id: 'PLN-2', mat: 'MAT-2', status: 'Completado', balance: 0, installments: [] }],
   payments: [...pays, { id: 'PAG-9', date: TODAY, student: 'X', concept: 'c', amount: 70, method: 'Efectivo', receipt: 'B9', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-10', date: '2026-10-23', student: 'X', concept: 'c', amount: 30, method: 'Efectivo', receipt: 'B10', status: 'Aprobado', enrollmentIds: ['MAT-1'] }, { id: 'PAG-11', date: TODAY, student: 'X', concept: 'c', amount: 999, method: 'Efectivo', receipt: 'B11', status: 'Anulado', enrollmentIds: ['MAT-1'] }],
-  cashMovements: [mv('A', { branchId: 'FIL-PIU', currency: 'USD', amount: 100, amountUSD: 100, date: '2026-10-05T15:00:00Z' }), mv('B', { branchId: 'FIL-PIU', amountUSD: 40, date: '2026-10-06T15:00:00Z' }), mv('C', { branchId: 'FIL-CHI', amountUSD: 10, date: '2026-09-06T15:00:00Z' })],
-  stockItems: [{ id: 's1', itemId: 'i', branchId: 'FIL-PIU', stock: 3, minStock: 5 }, { id: 's2', itemId: 'i', branchId: 'FIL-CHI', stock: 9, minStock: 5 }] as StockItem[],
+  cashMovements: [mv('A', { branchId: 'FIL-002', currency: 'USD', amount: 100, amountUSD: 100, date: '2026-10-05T15:00:00Z' }), mv('B', { branchId: 'FIL-002', amountUSD: 40, date: '2026-10-06T15:00:00Z' }), mv('C', { branchId: 'FIL-003', amountUSD: 10, date: '2026-09-06T15:00:00Z' })],
+  stockItems: [{ id: 's1', itemId: 'i', branchId: 'FIL-002', stock: 3, minStock: 5 }, { id: 's2', itemId: 'i', branchId: 'FIL-003', stock: 9, minStock: 5 }] as StockItem[],
   dropRequests: [{ id: 'CAI-1', status: 'Pendiente', enrollmentId: 'MAT-1', requestedAt: '2026-10-23T09:00:00Z', requestedBy: 'Ana', reason: 'x', detail: 'y', effectiveDate: TODAY, requestedByUser: '' } as unknown as DropRequest],
 };
 const k = dashboardKpis(dctx, TODAY);
@@ -248,8 +248,8 @@ check('Pagos del día (fecha ISO), sin anulados', k.paymentsTodayUSD === 100);
 check('Saldos de caja por moneda', k.cashUSD === 100 && k.cashPEN === 200);
 check('Resumen por sede: matrículas, ingresos del mes y mora', (() => {
   const b = branchFigures(dctx, TODAY);
-  const piu = b.find(x => x.branch.id === 'FIL-PIU')!;
-  const chi = b.find(x => x.branch.id === 'FIL-CHI')!;
+  const piu = b.find(x => x.branch.id === 'FIL-002')!;
+  const chi = b.find(x => x.branch.id === 'FIL-003')!;
   return piu.activeEnrollments === 1 && piu.monthIncomeUSD === 140 && piu.overdueUSD === 200 && chi.activeEnrollments === 1 && chi.monthIncomeUSD === 0 && chi.overdueUSD === 0;
 })());
 check('Vencimientos: la vencida primero y el horizonte', (() => {

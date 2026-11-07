@@ -4,138 +4,35 @@
  */
 import type { Assignment, Branch, Contract, Level, Permission, Program, Role, Staff, User, Warehouse } from '../context/DataContext';
 import { ROLE_TEMPLATES, templatePermissions } from '../utils/roleTemplates';
+import { REAL_BRANCHES, RUC, realBranchId, realCompanyId, realCompanyName } from './realOrg';
 import { todayLocalISO } from '../utils/schedule';
 
-/** Un solo almacén central, aparte de las sedes: de él salen los envíos a todas las filiales (Los Olivos es una sede como las demás). */
+/**
+ * Un solo almacén central, aparte de las sedes: de él salen los envíos a todas las filiales (Los Olivos es una sede como las demás).
+ * Es el mismo de la base (`ALM-001`, de SILEE, la empresa de Los Olivos).
+ */
 export const seedWarehouses = (): Warehouse[] => [
   {
-    id: 'ALM-001', name: 'Almacén central', company: 'Educación y Cultura S.A.C.', status: 'Activo',
+    id: 'ALM-001', name: 'Almacén central', company: realCompanyName(RUC.silee), companyId: realCompanyId(RUC.silee), status: 'Activo',
     address: 'Jr. Carlos Monge #233, Los Olivos', observations: 'Abastece a todas las filiales; no vende.',
   },
 ];
 
-export const seedBranches = (): Branch[] => [
-    { 
-      id: 'FIL-PIU', 
-      name: 'Piura', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Av. Sullana #280', 
-      reference: 'Frente al Museo Vicus',
-      department: 'Piura',
-      province: 'Piura',
-      district: 'Piura',
-      phoneFixed: '073-617445',
-      phoneMobile: '933732053'
-    },
-    { 
-      id: 'FIL-CHI', 
-      name: 'Chiclayo', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Calle Andalucía #150 Urb. San Juan', 
-      reference: 'Altura del Hotel Tumbas Reales',
-      department: 'Lambayeque',
-      province: 'Chiclayo',
-      district: 'Chiclayo',
-      phoneFixed: '074-525632',
-      phoneMobile: '905464734'
-    },
-    { 
-      id: 'FIL-CAJ', 
-      name: 'Cajamarca', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Guadalupe #466', 
-      reference: 'Huánuco y Silva Santiesteban',
-      department: 'Cajamarca',
-      province: 'Cajamarca',
-      district: 'Cajamarca',
-      phoneFixed: '076-772573',
-      phoneMobile: '933722476'
-    },
-    { 
-      id: 'FIL-LOL', 
-      name: 'Los Olivos', 
-      company: 'Educación y Cultura S.A.C.',
-      status: 'Activo', 
-      address: 'Jr. Carlos Monge #233', 
-      reference: 'Espalda cdra. 4 Av. Izaguirre',
-      department: 'Lima',
-      province: 'Lima',
-      district: 'Los Olivos',
-      phoneFixed: '01-7504687',
-      phoneMobile: '960508686'
-    },
-    { 
-      id: 'FIL-SIS', 
-      name: 'San Isidro', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Calle Francisco de Zela #2575', 
-      reference: '1/2 cdra. del Touring',
-      department: 'Lima',
-      province: 'Lima',
-      district: 'San Isidro',
-      phoneMobile: '960508686'
-    },
-    { 
-      id: 'FIL-HUA', 
-      name: 'Huancayo', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Arequipa #218', 
-      reference: 'Complejo Salesiano Sta. Rosa',
-      department: 'Junín',
-      province: 'Huancayo',
-      district: 'El Tambo',
-      phoneFixed: '064-419923',
-      phoneMobile: '992195898'
-    },
-    { 
-      id: 'FIL-PUN', 
-      name: 'Puno', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Moquegua #422 (2° piso)', 
-      reference: 'Frente al Restaurant Tamis',
-      department: 'Puno',
-      province: 'Puno',
-      district: 'Puno',
-      phoneFixed: '051-352969',
-      phoneMobile: '961274101'
-    },
-    { 
-      id: 'FIL-JUL', 
-      name: 'Juliaca', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Jr. Bolívar #329', 
-      reference: 'Costado del Mía Market',
-      department: 'Puno',
-      province: 'San Román',
-      district: 'Juliaca',
-      phoneMobile: '913632393'
-    },
-    { 
-      id: 'FIL-TAC', 
-      name: 'Tacna', 
-      company: 'Educación y Cultura S.A.C.', 
-      status: 'Activo', 
-      address: 'Av. Cusco #485', 
-      reference: 'Frente a Mueblería Rony',
-      department: 'Tacna',
-      province: 'Tacna',
-      district: 'Tacna',
-      phoneFixed: '052-638377',
-      phoneMobile: '933746179'
-    },
-  ];
+/**
+ * Las sedes de los datos de ejemplo son las REALES (`src/data/realOrg.ts`): mismos códigos `FIL-NNN`, nombres, empresas y direcciones que
+ * Organización → Filiales. El sistema ya no usa esta lista para mostrar nada (lee las sedes de la base); sirve para los `check-*` y para
+ * que los datos de ejemplo apunten a sedes que existen.
+ */
+export const seedBranches = (): Branch[] => REAL_BRANCHES.map(b => ({
+  id: realBranchId(b.name), name: b.name, company: realCompanyName(b.ruc), companyId: realCompanyId(b.ruc), status: 'Activo' as const,
+  address: b.address, reference: b.reference, department: b.department, province: b.province, district: b.district,
+  ...(b.phoneFixed ? { phoneFixed: b.phoneFixed } : {}), ...(b.phoneMobile ? { phoneMobile: b.phoneMobile } : {}),
+}));
 
 export const seedPrograms = (): Program[] => [
     { id: '1', code: 'PRG-KIDS', name: 'Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },
     { id: '2', code: 'PRG-PK', name: 'Pre-Kids', hasLevels: true, durationBase: 3, warranty: 3, allBranches: true, status: 'Activo' },
-    { id: '3', code: 'PRG-PL', name: 'Pre-lectura', hasLevels: false, durationBase: 3, warranty: 3, allBranches: false, enabledBranches: ['FIL-PIU', 'FIL-CHI'], status: 'Activo' },
+    { id: '3', code: 'PRG-PL', name: 'Pre-lectura', hasLevels: false, durationBase: 3, warranty: 3, allBranches: false, enabledBranches: [realBranchId('Piura'), realBranchId('Chiclayo')], status: 'Activo' },
     { id: '4', code: 'PRG-ESP', name: 'Especialización', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
     { id: '5', code: 'PRG-PROF', name: 'Profesional', hasLevels: false, durationBase: 6, warranty: 6, allBranches: true, status: 'Activo' },
   ];

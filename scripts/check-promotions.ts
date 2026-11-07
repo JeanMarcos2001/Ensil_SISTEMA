@@ -42,7 +42,7 @@ check('Promoción inactiva → no disponible', offers([{ ...promo, status: 'Inac
 check('Promoción fuera de vigencia → no disponible', offers([promo], [st('a', KIDS), st('b', KIDS)], { ...ctx, date: '2027-01-02' }) === 0);
 check('Promoción aún no vigente → no disponible', offers([promo], [st('a', KIDS), st('b', KIDS)], { ...ctx, date: '2025-12-31' }) === 0);
 check('Sede no incluida → no disponible',
-  offers([{ ...promo, applyToAllBranches: false, branchIds: ['FIL-PIU'] }], [st('a', KIDS), st('b', KIDS)]) === 0);
+  offers([{ ...promo, applyToAllBranches: false, branchIds: ['FIL-002'] }], [st('a', KIDS), st('b', KIDS)]) === 0);
 check('Sede incluida → disponible',
   offers([{ ...promo, applyToAllBranches: false, branchIds: ['FIL-AYA'] }], [st('a', KIDS), st('b', KIDS)]) === 1);
 

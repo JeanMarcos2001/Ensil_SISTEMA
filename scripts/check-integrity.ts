@@ -99,7 +99,7 @@ check('Sin cambio de nombre no se toca nada', !syncStudentName(mateo.id, mateo.n
 check('El comprobante ya emitido conserva el nombre de ese día', seed.payments[0].student === mateo.name && syncStudentName(mateo.id, 'Nuevo', seed.enrollments, agenda).changed);
 check('Renombrar la sede, el programa o el nivel corrige la matrícula (por id)', (() => {
   const r = syncCatalogLabels(seed.enrollments, agenda, {
-    branches: data.branches.map(b => (b.id === 'FIL-PIU' ? { ...b, name: 'Piura Centro' } : b)), programs: data.programs.map(p => (p.id === '1' ? { ...p, name: 'Kids Plus' } : p)), levels: data.levels,
+    branches: data.branches.map(b => (b.id === 'FIL-002' ? { ...b, name: 'Piura Centro' } : b)), programs: data.programs.map(p => (p.id === '1' ? { ...p, name: 'Kids Plus' } : p)), levels: data.levels,
   });
   return r.enrollments[0].sede === 'Piura Centro' && r.enrollments[0].program === 'Kids Plus' && r.enrollments[1].sede === 'Chiclayo' && r.enrollments[3].program === 'Pre-Kids';
 })());

@@ -171,3 +171,24 @@ Hoy el almacén central **es la filial Los Olivos** marcada con `isWarehouse`, y
 - **Variables de entorno en Vercel** (Project Settings → Environment Variables, en Production, Preview y Development; hay que **volver a desplegar** después, porque Vite las incorpora al construir): `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (las mismas de `.env.local`; es la clave pública, nunca la `service_role`) y `VITE_APP_URL` (`https://ensil-sistema.vercel.app`, sin barra final). Sin las dos primeras el sistema muestra «Falta configurar el servidor».
 - **Enlaces de los correos** (invitación, «olvidé mi contraseña», «reenviar acceso»): llevan a `VITE_APP_URL` (`utils/appUrl.ts`); si no está definida, a la dirección de la pestaña (por eso una cuenta creada desde `localhost` mandaba a `localhost`). Además Supabase solo respeta la dirección si está en **Authentication → URL Configuration**: *Site URL* = la de Vercel y, en *Redirect URLs*, `https://ensil-sistema.vercel.app/**` (más `http://localhost:3000/**` y `http://localhost:4173/**` para trabajar en local).
 - Una invitación ya enviada conserva la dirección con la que se creó: se corrige con «Reenviar acceso» desde el sistema ya configurado.
+
+## Empresas y sedes reales (cargadas el 2026-11-07)
+
+Están en la base **6 empresas y 16 sedes**, cada sede con su empresa. El detalle completo (RUC, dirección, referencia, teléfonos, mapa y foto de cada sede) está en [`DATOS_SEDES.md`](DATOS_SEDES.md); se **genera** con `npx tsx scripts/doc-sedes-reales.ts`, que también escribe `supabase/seed/empresas_y_sedes_reales.sql` (no es una migración: se pega una sola vez en el SQL Editor del proyecto `ensil-sistema`; es repetible y todo o nada). El script valida los datos con las mismas reglas de Organización antes de escribir nada.
+
+El almacén central pertenece a **SILEE**, igual que Los Olivos.
+
+| Empresa | RUC | Código | Sedes |
+|---|---|---|---|
+| SILEE E.I.R.L. | 20610010289 | `EMP-001` | Los Olivos, Trujillo |
+| COLEGIO ENSIL DE LAS AMERICAS E.I.R.L. | 20611694092 | `EMP-002` | — (ninguna por ahora) |
+| EDITORIAL ENSIL DE LAS AMERICAS TACNA | 20533093133 | `EMP-003` | Tacna, Cusco Marcavalle |
+| ENSIL INT EIRL | 20612421243 | `EMP-004` | Ayacucho, Ica, Huaraz, Huancayo, Puno |
+| ENSIL EVOLUTION S.R.L. | 20612459313 | `EMP-005` | Piura, Chiclayo, Cajamarca, San Isidro, Juliaca, Arequipa |
+| ENSIL REVOLUTION S.A.C. | 20614185229 | `EMP-006` | Cusco Magisterio |
+
+- **Piura** es de Ensil Evolution (el usuario aclaró que la de Colegio Ensil «no cuenta»). Como la sede ya existía con Colegio Ensil, el script le corrigió la empresa; **la pantalla no permite cambiar la empresa de una sede ya creada**, así que un cambio así se hace por SQL.
+- **Estas sedes son la única lista de sedes del sistema** (desde el 2026-11-07): se leen al iniciar sesión y todas las pantallas las usan; los datos de ejemplo apuntan a los mismos códigos (`src/data/realOrg.ts`).
+- **Ilo** (en la web) **no se cargó**: el usuario pidió esperar; falta definir su empresa.
+- Las 4 empresas nuevas se cargaron con la razón social **como la escribió el usuario** y con una nota en «Observaciones»: confirmarla con la ficha RUC de SUNAT.
+- `supabase/seed/filiales_de_prueba.sql` quedó obsoleto (Piura ya no es de Colegio Ensil); se retira en la limpieza de pruebas.

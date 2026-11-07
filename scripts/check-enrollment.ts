@@ -23,7 +23,7 @@ const check = (name: string, ok: boolean, detail = '') => {
 // ---------- Catálogos de prueba (mismas reglas que la semilla)
 const branches: Branch[] = [
   { id: 'FIL-AYA', name: 'Ayacucho', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '' },
-  { id: 'FIL-PIU', name: 'Piura', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '' },
+  { id: 'FIL-002', name: 'Piura', company: 'X', status: 'Activo', address: '', department: '', province: '', district: '' },
 ];
 const leadSources: LeadSource[] = [{ id: 'L1', name: 'Facebook', status: 'active' }];
 const staff: Staff[] = [
@@ -374,10 +374,10 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   check('Horario con asesorías canceladas → vacío, válido', noSession(sched([sch('1', { status: 'Cancelado' })]), base()));
   check('Una asesoría con falta mantiene el horario ocupado', probeIn(sched([sch('1', { status: 'Faltó' })]), base()).some(m => /ya tiene asesorías/.test(m)));
   check('Primera asesoría de otro registro → rechazado', probeIn(sched([sch('1', { isFirst: true, registrationId: 'MAT-2026-050' })]), base()).some(m => /otro registro/.test(m)));
-  check('Asesorías de otra sede no cuentan', noSession(sched([sch('1', { branchId: 'FIL-PIU' })]), base()));
+  check('Asesorías de otra sede no cuentan', noSession(sched([sch('1', { branchId: 'FIL-002' })]), base()));
   const marathon = { id: 'm:1', monthlyId: 'm', activityId: '1', branchId: 'FIL-AYA', sede: 'Ayacucho', name: 'Maratón', date: '2026-10-14', start: '15:30', end: '17:00', responsible: '', capacity: null, enrolled: [] };
   check('Actividad de la sede encima del horario → rechazado', probeIn(sched([], [marathon]), base()).some(m => /ocupado por la actividad «Maratón»/.test(m)));
-  check('Actividad de otra sede no bloquea', noSession(sched([], [{ ...marathon, branchId: 'FIL-PIU' }]), base()));
+  check('Actividad de otra sede no bloquea', noSession(sched([], [{ ...marathon, branchId: 'FIL-002' }]), base()));
   check('Actividad que termina antes del bloque no bloquea', noSession(sched([], [{ ...marathon, start: '14:00', end: '16:00' }]), base()));
   // Un mismo registro: 3 alumnos en el mismo horario, sin cupo (el cupo de las asesorías es 2 y no aplica)
   const trio = draftWith([{ program: 'PK', level: 'P1', type: 'CONT' }, { program: 'KIDS', level: 'K2', type: 'CONT' }, { program: 'KIDS', level: 'K1', type: 'CONT' }]);

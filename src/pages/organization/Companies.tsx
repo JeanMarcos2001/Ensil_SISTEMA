@@ -21,7 +21,7 @@ export function Companies({ onNavigate }: CompaniesProps) {
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const { orgBranches: branches, orgWarehouses: warehouses, orgCompanies: companies, orgDirectory, addCompany, updateCompany, deleteCompany, can } = useData();
+  const { branches, warehouses, companies, orgDirectory, addCompany, updateCompany, deleteCompany, can } = useData();
   /** Filiales y almacenes juntos: cualquiera vinculado a la empresa impide inactivarla o eliminarla. */
   const linked = [...branches, ...warehouses];
   const [saving, setSaving] = useState(false);

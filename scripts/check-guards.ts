@@ -106,11 +106,11 @@ const people = {
   users: [{ id: 'U1', name: 'Rosa', role: 'Administrador de sede', branch: 'Piura', status: 'Activo' as const }],
   roles: [{ id: 'R1', name: 'Administrador de sede', status: 'Activo' as const }],
   permissions: [{ roleId: 'R1', permissions: ['log-recepciones:confirm', 'log-recepciones:view'] }],
-  branches: [{ id: 'FIL-PIU', name: 'Piura' }, { id: 'FIL-CHI', name: 'Chiclayo' }],
+  branches: [{ id: 'FIL-002', name: 'Piura' }, { id: 'FIL-003', name: 'Chiclayo' }],
 };
 const holders = buildHolders(people);
-const toPiura = availability('log-envios:dispatch', holders, { branchId: 'FIL-PIU', branchName: 'Piura' });
-const toChiclayo = availability('log-envios:dispatch', holders, { branchId: 'FIL-CHI', branchName: 'Chiclayo' });
+const toPiura = availability('log-envios:dispatch', holders, { branchId: 'FIL-002', branchName: 'Piura' });
+const toChiclayo = availability('log-envios:dispatch', holders, { branchId: 'FIL-003', branchName: 'Chiclayo' });
 check('Despachar a una sede con quien reciba se ofrece', toPiura.available && !toPiura.reason);
 check('Despachar a una sede sin quien reciba no se ofrece y dice por qué', !toChiclayo.available && /Chiclayo/.test(toChiclayo.reason ?? ''), toChiclayo.reason ?? '');
 check('A un rol que no es Superusuario se le niega tal cual', availabilityForViewer(toChiclayo, false).available === false);

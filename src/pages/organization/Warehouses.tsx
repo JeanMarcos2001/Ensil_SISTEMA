@@ -19,7 +19,7 @@ const EMPTY: Form = { name: '', companyId: '', address: '', observations: '', st
  * no se muestran unidades.
  */
 export function Warehouses() {
-  const { orgWarehouses: warehouses, orgCompanies: companies, orgDirectory, addWarehouse, updateWarehouse, can } = useData();
+  const { warehouses, companies, orgDirectory, addWarehouse, updateWarehouse, can } = useData();
   const [searchTerm, setSearchTerm] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editing, setEditing] = useState<Warehouse | null>(null);

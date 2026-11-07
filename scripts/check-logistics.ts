@@ -26,7 +26,7 @@ const noWarehouse = stockLocations(branches, []);
 
 check('Los datos de ejemplo tienen un solo almacén central, aparte de las sedes (Los Olivos es una sede)', centralWarehouse(seedWarehouses())?.id === 'ALM-001' && warehouseDefinitionError(seedWarehouses()) === null && !seedBranches().some(b => b.id === 'ALM-001'));
 check('Una ubicación de stock es el almacén o una sede, con su tipo', locs.length === 5 && locs[0].kind === 'almacén' && locs.slice(1).every(l => l.kind === 'sede'));
-check('El id del almacén se reconoce por su prefijo y nunca choca con una sede', isWarehouseId('ALM-001') && isWarehouseId('ALM-012') && !isWarehouseId('FIL-LOL') && !isWarehouseId('LOL') && !isWarehouseId('ALM-1'));
+check('El id del almacén se reconoce por su prefijo y nunca choca con una sede', isWarehouseId('ALM-001') && isWarehouseId('ALM-012') && !isWarehouseId('FIL-001') && !isWarehouseId('LOL') && !isWarehouseId('ALM-1'));
 check('El almacén central se define por dato, no por nombre', centralWarehouse(warehouses)?.id === 'ALM-001' && centralWarehouse([]) === undefined);
 check('Un almacén inactivo no cuenta como almacén central', centralWarehouse([W('ALM-001', 'Almacén central', 'Inactivo')]) === undefined);
 check('No puede haber dos almacenes centrales activos', /Solo puede haber un almacén central activo/.test(warehouseDefinitionError([...warehouses, W('ALM-002', 'Otro')]) ?? ''));
@@ -35,7 +35,7 @@ const stk = (branchId: string, stock: number) => ({ branchId, stock });
 check('Un almacén con mercadería no se inactiva (quedaría stock que nadie mueve)', /todavía tiene 12 unidades/.test(warehouseInactivationError(warehouses[0], 'Inactivo', [stk('ALM-001', 10), stk('ALM-001', 2), stk('PIU', 99)]) ?? ''));
 check('Vacío sí se inactiva; y el stock de una sede no cuenta', warehouseInactivationError(warehouses[0], 'Inactivo', [stk('PIU', 99)]) === null && warehouseInactivationError(warehouses[0], 'Inactivo', [stk('ALM-001', 0)]) === null);
 check('Reactivarlo o dejarlo igual no pide nada', warehouseInactivationError(warehouses[0], 'Activo', [stk('ALM-001', 5)]) === null && warehouseInactivationError(W('ALM-001', 'x', 'Inactivo'), 'Inactivo', [stk('ALM-001', 5)]) === null);
-check('El almacén no vende: la venta es en una sede', /no vende/.test(locationSaleError('ALM-001') ?? '') && locationSaleError('FIL-PIU') === null && locationSaleError('LOL') === null);
+check('El almacén no vende: la venta es en una sede', /no vende/.test(locationSaleError('ALM-001') ?? '') && locationSaleError('FIL-002') === null && locationSaleError('LOL') === null);
 
 check('Un envío sale del almacén central hacia una filial', shipmentRouteError('ALM-001', 'PIU', locs) === null);
 check('Los Olivos recibe envíos como cualquier otra sede (ya no es el almacén)', shipmentRouteError('ALM-001', 'LOL', locs) === null);
