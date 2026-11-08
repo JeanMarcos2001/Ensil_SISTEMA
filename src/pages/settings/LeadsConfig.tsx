@@ -2,18 +2,19 @@ import React, { useState } from 'react';
 import { Button } from '../../components/ui/Button';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
+import { useActionError } from '../../hooks/useActionError';
 
 export function LeadsConfig() {
   const { leadSources, addLeadSource, updateLeadSource, deleteLeadSource, can } = useData();
+  const actionError = useActionError();
   const [newName, setNewName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  const handleAdd = () => {
-    if (newName.trim()) {
-      addLeadSource(newName.trim());
-      setNewName('');
-    }
+  const handleAdd = async () => {
+    if (!newName.trim()) return;
+    const res = await actionError.run(addLeadSource(newName.trim()));
+    if (res.ok) setNewName('');
   };
 
   const handleStartEdit = (id: string, name: string) => {
@@ -21,14 +22,14 @@ export function LeadsConfig() {
     setEditName(name);
   };
 
-  const handleSaveEdit = () => {
-    if (editingId && editName.trim()) {
-      const source = leadSources.find(s => s.id === editingId);
-      if (source) {
-        updateLeadSource(editingId, editName.trim(), source.status);
-      }
-      setEditingId(null);
+  const handleSaveEdit = async () => {
+    if (!editingId || !editName.trim()) return;
+    const source = leadSources.find(x => x.id === editingId);
+    if (source) {
+      const res = await actionError.run(updateLeadSource(editingId, editName.trim(), source.status));
+      if (!res.ok) return;
     }
+    setEditingId(null);
   };
 
   return (
@@ -53,6 +54,8 @@ export function LeadsConfig() {
           </Button>
         </div>
       )}
+
+      {actionError.error && <p className="rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       <div className="border border-border-soft rounded-xl overflow-hidden bg-surface">
         <table className="w-full text-sm text-left">
@@ -105,7 +108,7 @@ export function LeadsConfig() {
                           </button>
                         )}
                         {can('cfg-leads:delete') && (
-                          <button onClick={() => deleteLeadSource(source.id)} className="p-1.5 text-text-muted hover:text-danger-text hover:bg-danger-tint rounded-lg transition-colors">
+                          <button onClick={() => void actionError.run(deleteLeadSource(source.id))} className="p-1.5 text-text-muted hover:text-danger-text hover:bg-danger-tint rounded-lg transition-colors">
                             <Trash2 size={14} />
                           </button>
                         )}

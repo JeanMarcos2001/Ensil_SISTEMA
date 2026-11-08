@@ -60,11 +60,16 @@ export interface ItemValidationInput {
   editingId?: string;
 }
 
+/** El SKU de un artículo: letras, números, punto, guion y guion bajo; hasta 40 caracteres (la base de datos lo exige igual). */
+export const SKU_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+
 /** Valida un artículo del catálogo. Devuelve el mensaje de error o `null`. */
 export function validateItem({ item, allItems, editingId }: ItemValidationInput): string | null {
   if (!item.id?.trim()) return 'El código SKU es obligatorio.';
+  if (!SKU_PATTERN.test(item.id.trim())) return 'El SKU solo admite letras, números, punto, guion y guion bajo (máximo 40 caracteres).';
   if (!item.name?.trim()) return 'El nombre del artículo es obligatorio.';
-  if (allItems.some(i => i.id === item.id && i.id !== editingId)) return 'El código SKU ya existe en el sistema.';
+  if (allItems.some(i => i.id.toLowerCase() === item.id!.trim().toLowerCase() && i.id !== editingId)) return 'El código SKU ya existe en el sistema.';
+  if (item.cost !== undefined && !(item.cost >= 0)) return 'El costo no puede ser negativo.';
 
   if (item.type === 'Libro' && !item.bindingType) return 'Seleccione el tipo de libro (Anillado o Encolado).';
 
@@ -87,6 +92,36 @@ export function validateItem({ item, allItems, editingId }: ItemValidationInput)
     }
   }
   return null;
+}
+
+export interface PriceInput { itemId: string; branchId: string; amount: number; validFrom: string }
+
+/**
+ * ¿Se puede registrar este precio? Mayor a 0, con fecha de inicio, de un artículo y una sede que existen, y sin chocar con el historial
+ * del mismo alcance (artículo y sede): no repetir la fecha de inicio ni registrarlo antes de una vigencia posterior.
+ */
+export function priceError(input: PriceInput, prices: ItemPrice[], known: { itemIds?: string[]; branchIds?: string[] } = {}): string | null {
+  if (!(input.amount > 0)) return 'El precio debe ser mayor a 0.';
+  if (!input.validFrom) return 'Indique desde cuándo rige el precio.';
+  if (known.itemIds && !known.itemIds.includes(input.itemId)) return 'No se encontró el artículo.';
+  if (input.branchId !== 'all' && known.branchIds && !known.branchIds.includes(input.branchId)) return 'La sede elegida no existe.';
+  const sameScope = prices.filter(p => p.itemId === input.itemId && p.branchId === input.branchId);
+  if (sameScope.some(p => p.validFrom === input.validFrom)) return 'Ya existe un precio con esa fecha de inicio. Use una fecha posterior.';
+  if (sameScope.some(p => p.validFrom > input.validFrom)) return 'Existe un precio con vigencia posterior. Registre el nuevo precio después de esa fecha.';
+  return null;
+}
+
+/** El día anterior a una fecha ISO (el cierre de la vigencia abierta cuando entra un precio nuevo). */
+export function dayBefore(iso: string): string {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+}
+
+/** El historial después de registrar un precio: cierra la vigencia abierta del mismo alcance (no la sobrescribe) y agrega el nuevo. */
+export function withNewPrice(prices: ItemPrice[], created: ItemPrice): ItemPrice[] {
+  return [
+    ...prices.map(p => (p.itemId === created.itemId && p.branchId === created.branchId && !p.validTo ? { ...p, validTo: dayBefore(created.validFrom) } : p)),
+    created,
+  ];
 }
 
 export interface StockMove { branchId: string; itemId: string; qty: number }

@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, Tag, Calendar, Users, DollarSign, X, AlertCircle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
 import { useData, Promotion } from '../../context/DataContext';
 import { eligibleProgramIds } from '../../utils/promotions';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
@@ -35,6 +36,8 @@ const initialFormData: Omit<Promotion, 'id'> = {
 
 export function Promotions() {
   const { promotions, addPromotion, updatePromotion, programs, paymentTypes, branches, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedPromotion, setSelectedPromotion] = useState<string | null>(null);
@@ -112,54 +115,20 @@ export function Promotions() {
     setIsFormOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isReadOnly || saving) return;
     setFormError(null);
-    
-    // Validations
-    if (!formData.code || formData.code.includes(' ')) {
-      setFormError("El código es obligatorio y no debe contener espacios.");
-      return;
-    }
-    if (formData.requiredStudents < 2) {
-      setFormError("La cantidad de alumnos requerida debe ser mayor a 1.");
-      return;
-    }
-    if (promotions.some(p => p.id !== selectedPromotion && p.code.toLowerCase() === formData.code.toLowerCase())) {
-      setFormError("Ya existe una promoción con ese código.");
-      return;
-    }
-    if ((formData.eligibleProgramIds ?? []).length === 0) {
-      setFormError("Seleccione al menos un programa elegible.");
-      return;
-    }
-    if (formData.requiredBasePrice !== undefined && !(formData.requiredBasePrice > 0)) {
-      setFormError("El precio contado base requerido debe ser mayor a 0 (o déjelo vacío).");
-      return;
-    }
-    if (formData.paymentTypeIds.length === 0) {
-      setFormError("Debe seleccionar al menos un tipo de pago permitido.");
-      return;
-    }
-    if (formData.totalPrice <= 0) {
-      setFormError("El precio promocional total debe ser mayor a 0.");
-      return;
-    }
-    if (!formData.applyToAllBranches && formData.branchIds.length === 0) {
-      setFormError("Debe seleccionar al menos una sede o aplicar a todas.");
-      return;
-    }
-    if (formData.endDate && formData.startDate > formData.endDate) {
-      setFormError("La fecha de fin no puede ser menor a la fecha de inicio.");
-      return;
-    }
 
     // La elegibilidad dinámica reemplaza a la composición rígida.
     const dataToSave: Omit<Promotion, 'id'> = { ...formData, composition: [], currency: 'USD' };
-    if (selectedPromotion) {
-      updatePromotion(selectedPromotion, dataToSave);
-    } else {
-      addPromotion(dataToSave);
+    // Las reglas (código, alumnos, programas, tipos de pago, precio, sedes y fechas) las comprueba la acción y, otra vez, la base de datos.
+    setSaving(true);
+    const res = selectedPromotion ? await updatePromotion(selectedPromotion, dataToSave) : await addPromotion(dataToSave);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error ?? 'No se pudo guardar la promoción.');
+      return;
     }
     setIsFormOpen(false);
   };
@@ -212,6 +181,8 @@ export function Promotions() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -300,7 +271,7 @@ export function Promotions() {
                             title: row.status === 'Activo' ? 'Desactivar Promoción' : 'Activar Promoción',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} la promoción "${row.name}"?`,
                             onConfirm: () => {
-                              updatePromotion(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
+                              void actionError.run(updatePromotion(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }));
                             },
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
@@ -382,7 +353,7 @@ export function Promotions() {
               {isReadOnly ? 'Cerrar' : 'Cancelar'}
             </Button>
             {!isReadOnly && (
-              <Button variant="primary" onClick={handleSubmit}>Guardar Promoción</Button>
+              <Button variant="primary" onClick={handleSubmit} disabled={saving}>Guardar Promoción</Button>
             )}
           </div>
         }

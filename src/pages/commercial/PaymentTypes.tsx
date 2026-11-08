@@ -6,6 +6,8 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
+import { copyCode, copyName } from '../../utils/catalog';
 import { useData, PaymentType, ScheduleMode } from '../../context/DataContext';
 import { resolveScheduleMode } from '../../utils/tariffs';
 import { Search, Plus, CreditCard, Calendar, AlertCircle } from 'lucide-react';
@@ -18,6 +20,8 @@ const SCHEDULE_MODE_LABELS: Record<ScheduleMode, string> = {
 
 export function PaymentTypes() {
   const { paymentTypes, addPaymentType, updatePaymentType, deletePaymentType, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | null>(null);
@@ -91,39 +95,29 @@ export function PaymentTypes() {
 
   const handleDuplicate = (paymentType: PaymentType) => {
     const { id, ...rest } = paymentType;
-    addPaymentType({
+    void actionError.run(addPaymentType({
       ...rest,
-      code: `${rest.code}-COPY`,
-      name: `${rest.name} (Copia)`
-    });
+      code: copyCode(rest.code, paymentTypes.map(t => t.code)),
+      name: copyName(rest.name, paymentTypes.map(t => t.name)),
+    }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
+    if (isReadOnly || saving) return;
     setFormError(null);
-
-    if (formData.scheduleMode === 'inmediato' && formData.installments !== 1) {
-      setFormError('El pago inmediato tiene una sola obligación.');
-      return;
-    }
-    if (formData.scheduleMode !== 'inmediato' && formData.installments < 2) {
-      setFormError('Esta modalidad requiere al menos 2 obligaciones.');
-      return;
-    }
-    if (formData.scheduleMode === 'intervalo_fijo' && formData.termDays < 1) {
-      setFormError('El intervalo entre cuotas debe ser de al menos 1 día.');
-      return;
-    }
 
     const dataToSave = {
       ...formData,
       termDays: formData.scheduleMode === 'inmediato' ? 0 : formData.termDays,
     };
-    if (selectedPaymentType) {
-      updatePaymentType(selectedPaymentType.id, dataToSave);
-    } else {
-      addPaymentType(dataToSave);
+    // Las reglas (modalidad, obligaciones, código único) las comprueba la acción y, otra vez, la base de datos.
+    setSaving(true);
+    const res = selectedPaymentType ? await updatePaymentType(selectedPaymentType.id, dataToSave) : await addPaymentType(dataToSave);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error ?? 'No se pudo guardar el tipo de pago.');
+      return;
     }
     setIsFormOpen(false);
   };
@@ -163,6 +157,8 @@ export function PaymentTypes() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -252,7 +248,7 @@ export function PaymentTypes() {
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Tipo de Pago' : 'Activar Tipo de Pago',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el tipo de pago "${row.name}"?`,
-                            onConfirm: () => updatePaymentType(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }),
+                            onConfirm: () => actionError.run(updatePaymentType(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' })),
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
                           }),
@@ -263,7 +259,7 @@ export function PaymentTypes() {
                           onClick: () => openConfirm({
                             title: 'Eliminar Tipo de Pago',
                             description: `¿Está seguro de que desea eliminar el tipo de pago "${row.name}"? Esta acción no se puede deshacer.`,
-                            onConfirm: () => deletePaymentType(row.id),
+                            onConfirm: () => actionError.run(deletePaymentType(row.id)),
                             variant: 'danger',
                             confirmLabel: 'SÍ, ELIMINAR'
                           }), 
@@ -331,7 +327,7 @@ export function PaymentTypes() {
               {isReadOnly ? "Cerrar" : "Cancelar"}
             </Button>
             {!isReadOnly && (
-              <Button variant="primary" onClick={handleSubmit}>Guardar Tipo de Pago</Button>
+              <Button variant="primary" onClick={handleSubmit} disabled={saving}>Guardar Tipo de Pago</Button>
             )}
           </div>
         }

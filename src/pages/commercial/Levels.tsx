@@ -6,11 +6,15 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
+import { copyCode, copyName } from '../../utils/catalog';
 import { useData, Level } from '../../context/DataContext';
 import { Search, Plus, Layers, BookOpen, AlertCircle } from 'lucide-react';
 
 export function Levels() {
   const { levels, programs, addLevel, updateLevel, deleteLevel, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState<Level | null>(null);
@@ -81,44 +85,25 @@ export function Levels() {
 
   const handleDuplicate = (level: Level) => {
     const { id, ...rest } = level;
-    addLevel({
+    const siblings = levels.filter(l => l.programId === rest.programId);
+    void actionError.run(addLevel({
       ...rest,
-      name: `${rest.name} (Copia)`,
-      code: `${rest.code}-COPY`
-    });
+      name: copyName(rest.name, siblings.map(l => l.name)),
+      code: copyCode(rest.code, siblings.map(l => l.code)),
+    }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
+    if (isReadOnly || saving) return;
     setFormError(null);
-
-    if (!formData.programId) {
-      setFormError("Debe seleccionar un programa padre.");
+    // Las reglas (programa con niveles, nombre y código, etc.) las comprueba la acción y, otra vez, la base de datos.
+    setSaving(true);
+    const res = selectedLevel ? await updateLevel(selectedLevel.id, formData) : await addLevel(formData);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error ?? 'No se pudo guardar el nivel.');
       return;
-    }
-    const parentProgram = programs.find(p => p.id === formData.programId);
-    if (!parentProgram) {
-      setFormError("El programa seleccionado no existe.");
-      return;
-    }
-    if (!parentProgram.hasLevels) {
-      setFormError(`El programa "${parentProgram.name}" no está habilitado para gestionar niveles. Solo se permiten programas configurados con 'Tiene niveles' en la sección Programas.`);
-      return;
-    }
-    if (!formData.name.trim()) {
-      setFormError("El nombre del nivel es obligatorio.");
-      return;
-    }
-    if (!formData.code.trim()) {
-      setFormError("El código del nivel es obligatorio.");
-      return;
-    }
-
-    if (selectedLevel) {
-      updateLevel(selectedLevel.id, formData);
-    } else {
-      addLevel(formData);
     }
     setIsFormOpen(false);
   };
@@ -172,6 +157,8 @@ export function Levels() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -269,7 +256,7 @@ export function Levels() {
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Nivel' : 'Activar Nivel',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el nivel "${row.name}"?`,
-                            onConfirm: () => updateLevel(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }),
+                            onConfirm: () => actionError.run(updateLevel(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' })),
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
                           }),
@@ -280,7 +267,7 @@ export function Levels() {
                           onClick: () => openConfirm({
                             title: 'Eliminar Nivel',
                             description: `¿Está seguro de que desea eliminar el nivel "${row.name}"? Esta acción no se puede deshacer.`,
-                            onConfirm: () => deleteLevel(row.id),
+                            onConfirm: () => actionError.run(deleteLevel(row.id)),
                             variant: 'danger',
                             confirmLabel: 'SÍ, ELIMINAR'
                           }), 
@@ -354,7 +341,7 @@ export function Levels() {
               {isReadOnly ? "Cerrar" : "Cancelar"}
             </Button>
             {!isReadOnly && (
-              <Button variant="primary" onClick={handleSubmit}>Guardar Nivel</Button>
+              <Button variant="primary" onClick={handleSubmit} disabled={saving}>Guardar Nivel</Button>
             )}
           </div>
         }

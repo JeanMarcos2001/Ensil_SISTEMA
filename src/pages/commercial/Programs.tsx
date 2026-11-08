@@ -7,11 +7,15 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
+import { copyCode, copyName } from '../../utils/catalog';
 import { useData, Program } from '../../context/DataContext';
 import { Search, Plus, BookOpen, Layers, X, AlertCircle } from 'lucide-react';
 
 export function Programs() {
   const { programs, addProgram, updateProgram, deleteProgram, branches, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedProgram, setSelectedProgram] = useState<Program | null>(null);
@@ -111,43 +115,23 @@ export function Programs() {
     setFormData(prev => ({ ...prev, alias: newTags.join(', ') }));
   };
 
-  const validateForm = () => {
-    if (!formData.code.trim()) return "El código oficial es obligatorio.";
-    if (!formData.name.trim()) return "El nombre oficial es obligatorio.";
-    if (formData.durationBase === '' || formData.durationBase < 1) return "La duración base debe ser al menos 1 mes.";
-    if (formData.warranty === '' || formData.warranty < 0) return "La garantía no puede ser negativa.";
-    if (!formData.allBranches && formData.enabledBranches.length === 0) return "Debe seleccionar al menos una sede.";
-
-    // Unique checks
-    const isCodeDuplicate = programs.some(p => p.code.toLowerCase() === formData.code.toLowerCase() && p.id !== selectedProgram?.id);
-    if (isCodeDuplicate) return "El código oficial ya está en uso.";
-
-    const isNameDuplicate = programs.some(p => p.name.toLowerCase() === formData.name.toLowerCase() && p.status === 'Activo' && p.id !== selectedProgram?.id);
-    if (isNameDuplicate) return "El nombre oficial ya existe en el catálogo activo.";
-
-    return null;
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
-
-    const error = validateForm();
-    if (error) {
-      setFormError(error);
-      return;
-    }
+    if (isReadOnly || saving) return;
+    setFormError(null);
 
     const finalData = {
       ...formData,
-      durationBase: Number(formData.durationBase),
-      warranty: Number(formData.warranty)
+      durationBase: formData.durationBase === '' ? NaN : Number(formData.durationBase),
+      warranty: formData.warranty === '' ? NaN : Number(formData.warranty),
     };
-
-    if (selectedProgram) {
-      updateProgram(selectedProgram.id, finalData);
-    } else {
-      addProgram(finalData);
+    // Las reglas (código y nombre únicos, sedes, etc.) las comprueba la acción y, otra vez, la base de datos.
+    setSaving(true);
+    const res = selectedProgram ? await updateProgram(selectedProgram.id, finalData) : await addProgram(finalData);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error ?? 'No se pudo guardar el programa.');
+      return;
     }
     setIsFormOpen(false);
   };
@@ -160,11 +144,11 @@ export function Programs() {
 
   const handleDuplicate = (program: Program) => {
     const { id, ...rest } = program;
-    addProgram({
+    void actionError.run(addProgram({
       ...rest,
-      name: `${rest.name} (Copia)`,
-      code: `${rest.code}-COPY`
-    });
+      name: copyName(rest.name, programs.map(x => x.name)),
+      code: copyCode(rest.code, programs.map(x => x.code)),
+    }));
   };
 
   const filteredPrograms = programs.filter(p => {
@@ -215,6 +199,8 @@ export function Programs() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -303,7 +289,7 @@ export function Programs() {
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Programa' : 'Activar Programa',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el programa "${row.name}"?`,
-                            onConfirm: () => updateProgram(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }),
+                            onConfirm: () => actionError.run(updateProgram(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' })),
                             variant: row.status === 'Activo' ? 'warning' : 'primary'
                           }),
                           danger: row.status === 'Activo' 
@@ -313,7 +299,7 @@ export function Programs() {
                           onClick: () => openConfirm({
                             title: 'Eliminar Programa',
                             description: `¿Está seguro de que desea eliminar el programa "${row.name}"? Esta acción no se puede deshacer.`,
-                            onConfirm: () => deleteProgram(row.id),
+                            onConfirm: () => actionError.run(deleteProgram(row.id)),
                             variant: 'danger'
                           }), 
                           danger: true 
@@ -386,7 +372,7 @@ export function Programs() {
               {isReadOnly ? "Cerrar" : "Cancelar"}
             </Button>
             {!isReadOnly && (
-              <Button variant="primary" onClick={handleSubmit}>Guardar Programa</Button>
+              <Button variant="primary" onClick={handleSubmit} disabled={saving}>Guardar Programa</Button>
             )}
           </div>
         }

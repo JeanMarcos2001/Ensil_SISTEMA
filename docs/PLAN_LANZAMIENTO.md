@@ -14,11 +14,11 @@ Documento de trabajo del **2026-11-06**. Reúne **todo lo que falta** para usar 
 
 **Funciona en producción** (`ensil-sistema.vercel.app`, desde `main`):
 - Inicio de sesión real (correo y contraseña), invitación por correo para fijar la contraseña, «olvidé mi contraseña» y «reenviar acceso».
-- Guardado en Supabase de: Empresas, Filiales (sedes), Almacén central, Roles y sus funciones, Cuentas de usuario, Personal y Asignaciones, con seguridad por función y por sede (RLS).
+- Guardado en Supabase de: Empresas, Filiales (sedes), Almacén central, Roles y sus funciones, Cuentas de usuario, Personal y Asignaciones, Contratos y Planilla, el catálogo comercial (programas, niveles, tipos de pago, tarifarios, promociones y orígenes de leads) y los artículos con sus precios de venta y recetas de materiales, con seguridad por función y por sede (RLS).
 - Reglas del acceso: una cuenta nace de una persona de Personal; el rol real se elige solo en Usuarios y se filtra por el lugar de trabajo; el Superusuario es solo para cuentas técnicas; alcance por sede en Personal y Asignaciones.
-- Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía).
+- Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía); el catálogo comercial de prueba (migración 0010): 4 programas, 4 niveles, 5 tipos de pago, 8 tarifarios, 2 promociones y 5 orígenes de leads; y los artículos de prueba (migración 0011): 5 artículos, 3 precios y 3 recetas.
 
-**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, alumnos, titulares, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, catálogo comercial (programas, niveles, tarifarios, promociones, tipos de pago), artículos, recetas, stock y kardex, envíos, transferencias, recepciones, ajustes, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
+**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, alumnos, titulares, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, stock y kardex, envíos, transferencias, recepciones, ajustes, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
 
 > **Consecuencia:** el sistema **no puede usarse todavía con datos reales de alumnos ni dinero**. Eso es el centro de este plan (Fase 3). Todo lo demás lo rodea.
 
@@ -156,12 +156,13 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.2 Catálogo comercial
 
-- ☐ 🤖 Programas, niveles, tipos de pago, tarifarios, promociones (con su composición), orígenes de leads. *(L)*
-- ☐ 🧑 **Cargar los precios y condiciones reales** (tarifarios por sede/programa, promociones vigentes). *(M)*
+- ☑ 🤖 Programas, niveles, tipos de pago, tarifarios, promociones (con su composición), orígenes de leads (2026-11-07, migración 0010): se leen al iniciar sesión, se cambian con la función de cada pantalla, la base valida otra vez y no deja eliminar lo que ya se usa. Sin «Especialización» (el avanzado es solo «Profesional»). *(L)*
+- ☐ 🧑 **Cargar los precios y condiciones reales** (tarifarios por sede/programa, promociones vigentes). Hoy están los de prueba (decidido el 2026-11-07); se cambian desde Oferta comercial, no hace falta tocar el código. *(M)*
 
 ### 6.3 Logística y stock
 
-- ☐ 🤖 Artículos, precios, recetas, y el stock como **movimientos que nunca se editan** (entrada de compra, despacho, recepción, venta, devolución, ajuste con motivo). Envíos, transferencias, recepciones, ajustes y mermas. *(XL)*
+- ☑ 🤖 Artículos, sus precios de venta (con historial que no se sobrescribe) y recetas de materiales (2026-11-07, migración 0011): se leen al iniciar sesión, se cambian con la función de cada pantalla, la base valida otra vez (incluida «una sola receta activa por programa, nivel, sede y período») y los artículos se inactivan, no se eliminan. *(L)*
+- ☐ 🤖 **El stock como movimientos que nunca se editan** (entrada de compra, despacho, recepción, venta, devolución, ajuste con motivo). Envíos, transferencias, recepciones, ajustes y mermas. *(XL)*
 - ☐ 🧑 **Inventario inicial:** conteo físico del almacén y de cada sede; se carga como un movimiento de ajuste por ubicación. *(M)*
 
 ### 6.4 Personas: titulares y alumnos

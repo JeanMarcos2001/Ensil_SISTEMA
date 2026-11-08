@@ -21,6 +21,7 @@ export function ItemPricesModal({ item, onClose }: ItemPricesModalProps) {
   const [amount, setAmount] = useState('');
   const [validFrom, setValidFrom] = useState(todayISO());
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   if (!item) return null;
 
@@ -30,10 +31,13 @@ export function ItemPricesModal({ item, onClose }: ItemPricesModalProps) {
   const current = getCurrentPrice(itemPrices, item.id, 'all', today);
   const scopes = ['all', ...branches.map(b => b.id)];
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
+    if (saving) return;
     setError(null);
     const value = parseFloat(amount);
-    const result = addItemPrice({ itemId: item.id, branchId, amount: value, validFrom });
+    setSaving(true);
+    const result = await addItemPrice({ itemId: item.id, branchId, amount: value, validFrom });
+    setSaving(false);
     if (!result.ok) {
       setError(result.error ?? 'No se pudo registrar el precio.');
       return;
@@ -110,7 +114,7 @@ export function ItemPricesModal({ item, onClose }: ItemPricesModalProps) {
           </div>
           <div className="flex justify-between items-center">
             <p className="text-xs text-text-muted">Al registrar un precio se cierra la vigencia anterior del mismo alcance; el historial se conserva.</p>
-            <Button variant="primary" onClick={handleAdd}>Registrar precio</Button>
+            <Button variant="primary" onClick={handleAdd} disabled={saving}>Registrar precio</Button>
           </div>
         </section>
 

@@ -106,8 +106,13 @@ export function Recipes() {
     setIsFormOpen(true);
   };
 
-  const handleSaveRecipe = () => {
-    const result = saveRecipe({ ...(formData as Recipe), id: selectedRecipe?.id ?? '' });
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveRecipe = async () => {
+    if (saving) return;
+    setSaving(true);
+    const result = await saveRecipe({ ...(formData as Recipe), id: selectedRecipe?.id ?? '' });
+    setSaving(false);
     if (!result.ok) {
       setFormErrors((result.error ?? 'No se pudo guardar la receta.').split(/\n/));
       return;
@@ -282,8 +287,8 @@ export function Recipes() {
                             onClick: () => openConfirm({
                               title: 'Duplicar Receta',
                               description: `¿Está seguro de que desea duplicar la receta "${row.name}"?`,
-                              onConfirm: () => {
-                                const result = duplicateRecipe(row.id);
+                              onConfirm: async () => {
+                                const result = await duplicateRecipe(row.id);
                                 setActionError(result.ok ? null : result.error ?? 'No se pudo duplicar la receta.');
                               },
                               variant: 'primary',
@@ -295,8 +300,8 @@ export function Recipes() {
                             onClick: () => openConfirm({
                               title: row.status === 'Activo' ? 'Desactivar Receta' : 'Activar Receta',
                               description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} la receta "${row.name}"?`,
-                              onConfirm: () => {
-                                const result = setRecipeStatus(row.id, row.status === 'Activo' ? 'Inactivo' : 'Activo');
+                              onConfirm: async () => {
+                                const result = await setRecipeStatus(row.id, row.status === 'Activo' ? 'Inactivo' : 'Activo');
                                 setActionError(result.ok ? null : result.error ?? 'No se pudo cambiar el estado de la receta.');
                               },
                               variant: row.status === 'Activo' ? 'warning' : 'primary',
@@ -364,7 +369,7 @@ export function Recipes() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-            {can(selectedRecipe ? 'com-recetas:edit' : 'com-recetas:create') && <Button variant="primary" onClick={handleSaveRecipe}>Guardar Receta</Button>}
+            {can(selectedRecipe ? 'com-recetas:edit' : 'com-recetas:create') && <Button variant="primary" onClick={handleSaveRecipe} disabled={saving}>Guardar Receta</Button>}
           </div>
         }
       >

@@ -49,7 +49,6 @@ export const PROGRAM_METRICS: Record<string, MetricDef[]> = {
   Kids: [nivel, sesion(), velocidad([20, 600]), comprension],
   'Pre-Kids': [nivel, { key: 'semana', label: 'Semana', kind: 'ordinal', required: true, min: 1, max: 52, integer: true, prefix: 'Semana ', placeholder: 'N.º de semana' }, yesNo('identifica', '¿Identifica?'), yesNo('leeSolo', '¿Lee solo?')],
   'Pre-lectura': [sesion()],
-  'Especialización': ADVANCED,
   Teens: ADVANCED,
   Profesional: ADVANCED,
 };

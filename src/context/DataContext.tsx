@@ -44,13 +44,17 @@ import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, LaborRegime, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
-import { seedLevels, seedPrograms, seedUsers } from '../data/seedCatalog';
+import { seedUsers } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 import { availability, buildHolders, type Availability } from '../utils/capabilities';
 import { availabilityForViewer, denialMessage, guardActions, unmetClause, userChangeNeeds } from '../utils/guards';
+import { useCatalog } from '../hooks/useCatalog';
+import { useItemCatalog } from '../hooks/useItemCatalog';
+import type { ItemCatalogData } from '../services/itemCatalog';
 import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
+import type { CatalogData, CatalogLinks } from '../utils/catalog';
 import type { OpResult, OrgDirectoryData } from '../services/orgDirectory';
 import { supabase } from '../lib/supabase';
 import { loadAccessRoles, loadUsers, persistNewRole, persistPermissions, persistRoleDelete, persistRoleUpdate, type AccessData } from '../services/accessRoles';
@@ -64,9 +68,8 @@ import {
 import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, seatLimitError, validateRoleInput, type AcceptedRisk } from '../utils/roleBuilder';
 import { markRead, noticesFor, visibility, type NoticeScope } from '../utils/notifications';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
-import { duplicateRecipe as copyRecipe, recipeStatusError, validateRecipe } from '../utils/recipes';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
-import { availableStock, getCurrentPrice, itemSaleError, stockEntryError, stockMovesError, validateItem } from '../utils/inventory';
+import { availableStock, getCurrentPrice, itemSaleError, stockEntryError, stockMovesError } from '../utils/inventory';
 
 // Types
 export interface Guardian {
@@ -1310,9 +1313,9 @@ interface DataContextType {
   payments: Payment[];
   items: Item[];
   /** Crea artículos (uno o una carga masiva); un artículo que se vende nace con su precio general (`prices`). Todo o nada. */
-  addItems: (items: Item[], prices?: { itemId: string; amount: number }[]) => StockResult;
+  addItems: (items: Item[], prices?: { itemId: string; amount: number }[]) => Promise<StockResult>;
   /** Edita un artículo (también activarlo o desactivarlo). */
-  updateItem: (id: string, item: Item) => StockResult;
+  updateItem: (id: string, item: Item) => Promise<StockResult>;
   stockItems: StockItem[];
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
@@ -1325,7 +1328,7 @@ interface DataContextType {
   reversePettyCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
   promotionGroups: PromotionGroup[];
   itemPrices: ItemPrice[];
-  addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => { ok: boolean; error?: string };
+  addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => Promise<{ ok: boolean; error?: string }>;
   kardex: KardexEntry[];
   transfers: Transfer[];
   couriers: Courier[];
@@ -1435,10 +1438,10 @@ interface DataContextType {
   promotions: Promotion[];
   recipes: Recipe[];
   /** Crea (id vacío) o edita una receta; valida los datos y que no se solape con otra activa. Los errores vienen separados por saltos de línea. */
-  saveRecipe: (recipe: Recipe) => StockResult & { id?: string };
+  saveRecipe: (recipe: Recipe) => Promise<StockResult & { id?: string }>;
   /** La copia nace inactiva (si no, chocaría con la original). */
-  duplicateRecipe: (id: string) => StockResult & { id?: string };
-  setRecipeStatus: (id: string, status: Recipe['status']) => StockResult;
+  duplicateRecipe: (id: string) => Promise<StockResult & { id?: string }>;
+  setRecipeStatus: (id: string, status: Recipe['status']) => Promise<StockResult>;
   unpackPackage: (stockId: string) => StockResult;
   packPackage: (stockId: string) => StockResult;
   /** Vende un artículo en caja: descuenta el stock de la sede y registra el ingreso en una sola operación. */
@@ -1518,9 +1521,10 @@ interface DataContextType {
   registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => StockResult;
   /** Traslada el saldo pendiente de una cuota a una cuota nueva con otro vencimiento (con motivo). */
   refinanceInstallment: (planId: string, installmentId: string, input: RefinanceInput) => StockResult;
-  addLeadSource: (name: string) => void;
-  updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => void;
-  deleteLeadSource: (id: string) => void;
+  /** Orígenes de leads: de la base de datos (como todo el catálogo comercial). Las acciones del catálogo validan, guardan en la base y devuelven `{ ok, error }`. */
+  addLeadSource: (name: string) => Promise<OpResult<LeadSource>>;
+  updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => Promise<OpResult<LeadSource>>;
+  deleteLeadSource: (id: string) => Promise<OpResult>;
   updateEnrollmentVerification: (enrollmentId: string, data: {
     status: Enrollment['verificationStatus'];
     items: string[];
@@ -1528,21 +1532,22 @@ interface DataContextType {
     date: string;
     verifier: string;
   }, deductions?: { itemId: string; quantity: number }[]) => StockResult;
-  addProgram: (program: Omit<Program, 'id'>) => void;
-  updateProgram: (id: string, program: Partial<Program>) => void;
-  deleteProgram: (id: string) => void;
-  addLevel: (level: Omit<Level, 'id'>) => void;
-  updateLevel: (id: string, level: Partial<Level>) => void;
-  deleteLevel: (id: string) => void;
-  addPaymentType: (paymentType: Omit<PaymentType, 'id'>) => void;
-  updatePaymentType: (id: string, paymentType: Partial<PaymentType>) => void;
-  deletePaymentType: (id: string) => void;
-  addTariff: (tariff: Omit<Tariff, 'id'>) => void;
-  updateTariff: (id: string, tariff: Partial<Tariff>) => void;
-  deleteTariff: (id: string) => void;
-  addPromotion: (promotion: Omit<Promotion, 'id'>) => void;
-  updatePromotion: (id: string, promotion: Partial<Promotion>) => void;
-  deletePromotion: (id: string) => void;
+  addProgram: (program: Omit<Program, 'id'>) => Promise<OpResult<Program>>;
+  updateProgram: (id: string, program: Partial<Program>) => Promise<OpResult<Program>>;
+  /** Un programa que ya se usa (niveles, tarifarios, promociones, matrículas o recetas) no se elimina: se inactiva. */
+  deleteProgram: (id: string) => Promise<OpResult>;
+  addLevel: (level: Omit<Level, 'id'>) => Promise<OpResult<Level>>;
+  updateLevel: (id: string, level: Partial<Level>) => Promise<OpResult<Level>>;
+  deleteLevel: (id: string) => Promise<OpResult>;
+  addPaymentType: (paymentType: Omit<PaymentType, 'id'>) => Promise<OpResult<PaymentType>>;
+  updatePaymentType: (id: string, paymentType: Partial<PaymentType>) => Promise<OpResult<PaymentType>>;
+  deletePaymentType: (id: string) => Promise<OpResult>;
+  addTariff: (tariff: Omit<Tariff, 'id'>) => Promise<OpResult<Tariff>>;
+  updateTariff: (id: string, tariff: Partial<Tariff>) => Promise<OpResult<Tariff>>;
+  deleteTariff: (id: string) => Promise<OpResult>;
+  addPromotion: (promotion: Omit<Promotion, 'id'>) => Promise<OpResult<Promotion>>;
+  updatePromotion: (id: string, promotion: Partial<Promotion>) => Promise<OpResult<Promotion>>;
+  deletePromotion: (id: string) => Promise<OpResult>;
   addBranch: (branch: Omit<Branch, 'id'>) => Promise<OpResult<Branch> & { id?: string }>;
   updateBranch: (id: string, branch: Partial<Branch>) => Promise<OpResult<Branch>>;
   deleteBranch: (id: string) => Promise<OpResult>;
@@ -1586,7 +1591,7 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
  * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
  * almacén, leídos de la base en ese mismo momento; `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
@@ -1594,87 +1599,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
   const [enrollments, setEnrollments] = useState<Enrollment[]>(() => structuredClone(PEOPLE_SEED.enrollments));
   const [plans, setPlans] = useState<Plan[]>(() => structuredClone(PEOPLE_SEED.plans));
   const [payments, setPayments] = useState<Payment[]>(() => structuredClone(PEOPLE_SEED.payments));
-
-  const [items, setItems] = useState<Item[]>([
-    { 
-      id: 'ITM-LIB-K1', 
-      name: 'Libro Kids Nivel 1', 
-      type: 'Libro', 
-      cost: 45.00, 
-      status: 'Activo',
-      description: 'Libro de nivel 1 para programa Kids',
-      unit: 'Unidad',
-      isSold: true,
-      salePrice: 60.00,
-      isDeliveredOnEnrollment: true,
-      isPackage: false,
-      allowUnpacking: false,
-      bookType: 'Individual',
-      bindingType: 'Encolado'
-    },
-    { 
-      id: 'ITM-MAT-01', 
-      name: 'Material Lógico Matemático', 
-      type: 'Material educativo', 
-      cost: 20.00, 
-      status: 'Activo',
-      description: 'Material para desarrollo lógico',
-      unit: 'Unidad',
-      isSold: false,
-      isDeliveredOnEnrollment: true,
-      isPackage: false,
-      allowUnpacking: false,
-      sessions: 12,
-      gymnasticsPerSession: 2,
-      trainingsPerSession: 3,
-      trainingMode: 'General'
-    },
-    { 
-      id: 'ITM-KIT-BIENV', 
-      name: 'Kit Bienvenida (Mochila + Útiles)', 
-      type: 'Paquete / kit logístico', 
-      cost: 80.00, 
-      status: 'Activo',
-      description: 'Kit entregado al matricular',
-      unit: 'Kit',
-      isSold: false,
-      isDeliveredOnEnrollment: true,
-      isPackage: true,
-      allowUnpacking: true,
-      composition: [
-        { itemId: 'ITM-HER-01', name: 'Mochila Institucional', quantity: 1 },
-        { itemId: 'ITM-HER-02', name: 'Cartuchera', quantity: 1 }
-      ]
-    },
-    { 
-      id: 'ITM-HER-01', 
-      name: 'Mochila Institucional', 
-      type: 'Herramienta / adicional', 
-      cost: 25.00, 
-      status: 'Activo',
-      description: 'Mochila con logo ENSIL',
-      unit: 'Unidad',
-      isSold: true,
-      salePrice: 45.00,
-      isDeliveredOnEnrollment: true,
-      isPackage: false,
-      allowUnpacking: false
-    },
-    { 
-      id: 'ITM-HER-02', 
-      name: 'Cartuchera', 
-      type: 'Herramienta / adicional', 
-      cost: 5.00, 
-      status: 'Activo',
-      description: 'Cartuchera básica',
-      unit: 'Unidad',
-      isSold: true,
-      salePrice: 10.00,
-      isDeliveredOnEnrollment: true,
-      isPackage: false,
-      allowUnpacking: false
-    },
-  ]);
 
   const [cashMovements, setCashMovements] = useState<CashMovement[]>(() => structuredClone(PEOPLE_SEED.cashMovements));
   const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
@@ -1707,13 +1631,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     setCashMovements(prev => [created, ...prev]);
     return created;
   };
-
-  // Precios de venta con vigencia (USD). Semilla: precios generales de los artículos vendibles.
-  const [itemPrices, setItemPrices] = useState<ItemPrice[]>([
-    { id: 'PRC-001', itemId: 'ITM-LIB-K1', branchId: 'all', amount: 60, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
-    { id: 'PRC-002', itemId: 'ITM-HER-01', branchId: 'all', amount: 45, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
-    { id: 'PRC-003', itemId: 'ITM-HER-02', branchId: 'all', amount: 10, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
-  ]);
 
   const [stockItems, setStockItems] = useState<StockItem[]>([
     { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-002', stock: 100, minStock: 50 },
@@ -2231,213 +2148,17 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     [sessionAccount, sessionScope, branches]
   );
 
-  const [leadSources, setLeadSources] = useState<LeadSource[]>([
-    { id: '1', name: 'Facebook Ads', status: 'active' },
-    { id: '2', name: 'Orgánico', status: 'active' },
-    { id: '3', name: 'Referido', status: 'active' },
-    { id: '4', name: 'Instagram', status: 'active' },
-    { id: '5', name: 'WhatsApp', status: 'active' },
-  ]);
+  // El catálogo comercial (programas, niveles, tipos de pago, tarifarios, promociones y orígenes de leads) es el de la base de datos: se lee al
+  // iniciar sesión (`AccessGate`) y Oferta comercial lo cambia con las acciones de más abajo (asíncronas: validan, guardan y devuelven `{ ok, error }`).
+  // Los datos de partida están en `data/seedCatalog.ts` (se cargan con `supabase/seed/catalogo_comercial.sql`).
+  const catalog = useCatalog(catalogData, branches);
+  const { leadSources, programs, levels, paymentTypes, tariffs, promotions } = catalog;
 
-  const [programs, setPrograms] = useState<Program[]>(() => seedPrograms());
-
-  const [levels, setLevels] = useState<Level[]>(() => seedLevels());
-
-  const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([
-    { id: '1', code: 'TP-CONT', name: 'Contado', installments: 1, termDays: 0, scheduleMode: 'inmediato', applicablePrograms: ['1', '2', '3', '4'], status: 'Activo' },
-    { id: '2', code: 'TP-C2P', name: 'Contado en 2 partes', installments: 2, termDays: 30, scheduleMode: 'fechas_manuales', applicablePrograms: ['1', '2'], status: 'Activo' },
-    { id: '3', code: 'TP-P3', name: 'Plan 3', installments: 3, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['1', '2'], status: 'Activo' },
-    { id: '4', code: 'TP-P6', name: 'Plan 6', installments: 6, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['1', '2'], status: 'Activo' },
-    { id: '5', code: 'TP-P9', name: 'Plan 9', installments: 9, termDays: 30, scheduleMode: 'intervalo_fijo', applicablePrograms: ['5'], status: 'Activo' },
-  ]);
-
-  const [tariffs, setTariffs] = useState<Tariff[]>([
-    {
-      id: '1', name: 'Kids - Contado 2026', programId: '1', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 500,
-      installments: [
-        { number: 1, concept: 'Pago único', amount: 500, dueDays: 0, kind: 'unica' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      // Contado en 2 partes: en matrícula solo se acuerdan las fechas; el monto de la parte 1 se registra al cobrar en Planes y la parte 2 es el saldo.
-      id: '2', name: 'Kids - Contado en 2 partes 2026', programId: '1', paymentTypeId: '2', branchId: 'all', currency: 'USD', basePrice: 500,
-      installments: [
-        { number: 1, concept: 'Parte 1', amount: 0, dueDays: 0, kind: 'parte', variable: true },
-        { number: 2, concept: 'Parte 2 (saldo)', amount: 0, dueDays: 30, kind: 'parte', variable: true }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      id: '3', name: 'Pre-Kids - Contado 2026', programId: '2', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 500,
-      installments: [
-        { number: 1, concept: 'Pago único', amount: 500, dueDays: 0, kind: 'unica' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      id: '4', name: 'Pre-lectura - Plan 3 2026', programId: '3', paymentTypeId: '3', branchId: 'all', currency: 'USD', basePrice: 1000,
-      installments: [
-        { number: 0, concept: 'Matrícula', amount: 100, dueDays: 0, kind: 'matricula' },
-        { number: 1, concept: 'Cuota 1', amount: 300, dueDays: 0, kind: 'cuota' },
-        { number: 2, concept: 'Cuota 2', amount: 300, dueDays: 30, kind: 'cuota' },
-        { number: 3, concept: 'Cuota 3', amount: 300, dueDays: 60, kind: 'cuota' }
-      ],
-      startDate: '2026-01-01', status: 'Activo'
-    },
-    {
-      id: '5', name: 'Profesional - Contado 2026', programId: '5', paymentTypeId: '1', branchId: 'all', currency: 'USD', basePrice: 1000,
-      installments: [
-        { number: 1, concept: 'Pago único', amount: 1000, dueDays: 0, kind: 'unica' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      id: '6', name: 'Profesional - Plan 3 2026', programId: '5', paymentTypeId: '3', branchId: 'all', currency: 'USD', basePrice: 1200,
-      installments: [
-        { number: 0, concept: 'Matrícula', amount: 300, dueDays: 0, kind: 'matricula' },
-        { number: 1, concept: 'Cuota 1', amount: 300, dueDays: 0, kind: 'cuota' },
-        { number: 2, concept: 'Cuota 2', amount: 300, dueDays: 30, kind: 'cuota' },
-        { number: 3, concept: 'Cuota 3', amount: 300, dueDays: 60, kind: 'cuota' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      id: '7', name: 'Profesional - Plan 6 2026', programId: '5', paymentTypeId: '4', branchId: 'all', currency: 'USD', basePrice: 1400,
-      installments: [
-        { number: 0, concept: 'Matrícula', amount: 200, dueDays: 0, kind: 'matricula' },
-        { number: 1, concept: 'Cuota 1', amount: 200, dueDays: 0, kind: 'cuota' },
-        { number: 2, concept: 'Cuota 2', amount: 200, dueDays: 30, kind: 'cuota' },
-        { number: 3, concept: 'Cuota 3', amount: 200, dueDays: 60, kind: 'cuota' },
-        { number: 4, concept: 'Cuota 4', amount: 200, dueDays: 90, kind: 'cuota' },
-        { number: 5, concept: 'Cuota 5', amount: 200, dueDays: 120, kind: 'cuota' },
-        { number: 6, concept: 'Cuota 6', amount: 200, dueDays: 150, kind: 'cuota' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-    {
-      id: '8', name: 'Profesional - Plan 9 2026', programId: '5', paymentTypeId: '5', branchId: 'all', currency: 'USD', basePrice: 1500,
-      installments: [
-        { number: 0, concept: 'Matrícula', amount: 150, dueDays: 0, kind: 'matricula' },
-        { number: 1, concept: 'Cuota 1', amount: 150, dueDays: 0, kind: 'cuota' },
-        { number: 2, concept: 'Cuota 2', amount: 150, dueDays: 30, kind: 'cuota' },
-        { number: 3, concept: 'Cuota 3', amount: 150, dueDays: 60, kind: 'cuota' },
-        { number: 4, concept: 'Cuota 4', amount: 150, dueDays: 90, kind: 'cuota' },
-        { number: 5, concept: 'Cuota 5', amount: 150, dueDays: 120, kind: 'cuota' },
-        { number: 6, concept: 'Cuota 6', amount: 150, dueDays: 150, kind: 'cuota' },
-        { number: 7, concept: 'Cuota 7', amount: 150, dueDays: 180, kind: 'cuota' },
-        { number: 8, concept: 'Cuota 8', amount: 150, dueDays: 210, kind: 'cuota' },
-        { number: 9, concept: 'Cuota 9', amount: 150, dueDays: 240, kind: 'cuota' }
-      ],
-      startDate: '2026-01-01', endDate: '2026-12-31', status: 'Activo'
-    },
-  ]);
-
-  const [promotions, setPromotions] = useState<Promotion[]>([
-    {
-      id: '1',
-      code: 'PROMO-2X700',
-      name: '2 matrículas Pre-Kids / Kids por USD 700',
-      type: 'Grupal',
-      requiredStudents: 2,
-      eligibleProgramIds: ['2', '1'], // Pre-Kids y Kids (cualquier combinación y nivel)
-      requiredBasePrice: 500, // Contado base de cada alumno
-      allowMultipleGroups: true,
-      paymentTypeIds: ['1'], // Contado
-      totalPrice: 700,
-      currency: 'USD',
-      internalDistributionRule: 'Igualitario',
-      branchIds: [],
-      applyToAllBranches: true,
-      startDate: '2026-01-01',
-      endDate: '2026-12-31',
-      status: 'Activo'
-    },
-    {
-      id: '2',
-      code: 'PROMO-PROF-2X1700',
-      name: '2 matrículas Profesional por USD 1700',
-      type: 'Grupal',
-      requiredStudents: 2,
-      eligibleProgramIds: ['5'],
-      requiredBasePrice: 1000,
-      allowMultipleGroups: true,
-      paymentTypeIds: ['1'], // Contado
-      totalPrice: 1700,
-      currency: 'USD',
-      internalDistributionRule: 'Igualitario',
-      branchIds: [],
-      applyToAllBranches: true,
-      startDate: '2026-01-01',
-      endDate: '2026-12-31',
-      status: 'Activo'
-    }
-  ]);
-
-  const [recipes, setRecipes] = useState<Recipe[]>([
-    {
-      id: 'REC-001',
-      name: 'Pack Kids Nivel 1 2024',
-      programId: '1',
-      levelId: '1',
-      branchIds: [],
-      applyToAllBranches: true,
-      status: 'Activo',
-      items: [
-        { itemId: 'ITM-LIB-K1', quantity: 1 },
-        { itemId: 'ITM-KIT-BIENV', quantity: 1 }
-      ],
-      startDate: '2026-01-01',
-      endDate: '2026-12-31'
-    },
-    {
-      id: 'REC-002',
-      name: 'Pack Kids Nivel 2 2024',
-      programId: '1',
-      levelId: '2',
-      branchIds: [],
-      applyToAllBranches: true,
-      status: 'Activo',
-      items: [
-        { itemId: 'ITM-LIB-K1', quantity: 1 },
-        { itemId: 'ITM-MAT-01', quantity: 1 }
-      ],
-      startDate: '2026-01-01',
-      endDate: '2026-12-31'
-    },
-    {
-      id: 'REC-003',
-      name: 'Pack Pre-Kids Nivel 1 2026',
-      programId: '2',
-      levelId: '4',
-      branchIds: [],
-      applyToAllBranches: true,
-      status: 'Activo',
-      items: [
-        { itemId: 'ITM-KIT-BIENV', quantity: 1 },
-        { itemId: 'ITM-MAT-01', quantity: 1 }
-      ],
-      startDate: '2026-01-01',
-      endDate: '2026-12-31'
-    }
-  ]);
-
-  const addLeadSource = (name: string) => {
-    const newSource: LeadSource = {
-      id: nextNumericId(leadSources.map(x => x.id)),
-      name,
-      status: 'active'
-    };
-    setLeadSources(prev => [...prev, newSource]);
-  };
-
-  const updateLeadSource = (id: string, name: string, status: 'active' | 'inactive') => {
-    setLeadSources(prev => prev.map(s => s.id === id ? { ...s, name, status } : s));
-  };
-
-  const deleteLeadSource = (id: string) => {
-    setLeadSources(prev => prev.filter(s => s.id !== id));
-  };
+  // Artículos, precios de venta (con vigencia e historial) y recetas de materiales: de la base de datos (`AccessGate` los lee al iniciar sesión).
+  // Las acciones de más abajo son asíncronas: validan con las reglas puras, guardan en la base y devuelven `{ ok, error }`.
+  // Los datos de partida están en `data/seedCatalog.ts` (se cargan con `supabase/seed/articulos_y_recetas.sql`).
+  const itemCat = useItemCatalog(itemCatalogData, { programs, levels, branches });
+  const { items, itemPrices, recipes } = itemCat;
 
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
@@ -2519,56 +2240,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     return { ok: true };
   };
 
-  const addItemPrice = (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => {
-    if (!(price.amount > 0)) return { ok: false, error: 'El precio debe ser mayor a 0.' };
-    if (!price.validFrom) return { ok: false, error: 'Indique desde cuándo rige el precio.' };
-    const sameScope = itemPrices.filter(p => p.itemId === price.itemId && p.branchId === price.branchId);
-    if (sameScope.some(p => p.validFrom === price.validFrom)) {
-      return { ok: false, error: 'Ya existe un precio con esa fecha de inicio. Use una fecha posterior.' };
-    }
-    if (sameScope.some(p => p.validFrom > price.validFrom)) {
-      return { ok: false, error: 'Existe un precio con vigencia posterior. Registre el nuevo precio después de esa fecha.' };
-    }
-    const dayBefore = new Date(Date.parse(price.validFrom + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
-    const newPrice: ItemPrice = {
-      id: allocId('PRC', itemPrices.map(p => p.id)),
-      ...price,
-      amount: Math.round(price.amount * 100) / 100,
-      createdAt: new Date().toISOString(),
-      createdBy: currentUser.name,
-    };
-    setItemPrices(prev => [
-      // Cierra la vigencia abierta del mismo alcance en lugar de sobrescribirla
-      ...prev.map(p =>
-        p.itemId === price.itemId && p.branchId === price.branchId && !p.validTo ? { ...p, validTo: dayBefore } : p
-      ),
-      newPrice,
-    ]);
-    return { ok: true };
-  };
-
-  const addItems = (newItems: Item[], prices: { itemId: string; amount: number }[] = []): StockResult => {
-    if (newItems.length === 0) return { ok: false, error: 'No hay artículos para guardar.' };
-    const accepted: Item[] = [];
-    for (const item of newItems) {
-      const problem = validateItem({ item, allItems: [...items, ...accepted] });
-      if (problem) return { ok: false, error: newItems.length > 1 ? `${item.id || 'Artículo'}: ${problem}` : problem };
-      accepted.push(item);
-    }
-    const badPrice = prices.find(p => !(p.amount > 0) || !accepted.some(i => i.id === p.itemId));
-    if (badPrice) return { ok: false, error: 'Indique el precio general de venta (USD) para un artículo que se vende.' };
-    setItems(prev => [...prev, ...accepted]);
-    prices.forEach(p => addItemPrice({ itemId: p.itemId, branchId: 'all', amount: p.amount, validFrom: todayLocalISO() }));
-    return { ok: true };
-  };
-
-  const updateItem = (id: string, item: Item): StockResult => {
-    if (!items.some(i => i.id === id)) return { ok: false, error: 'No se encontró el artículo.' };
-    const problem = validateItem({ item, allItems: items, editingId: id });
-    if (problem) return { ok: false, error: problem };
-    setItems(prev => prev.map(i => (i.id === id ? item : i)));
-    return { ok: true };
-  };
+  const addItemPrice: DataContextType['addItemPrice'] = price => itemCat.addItemPrice(price);
+  const addItems: DataContextType['addItems'] = (newItems, prices = []) => itemCat.addItems(newItems, prices);
+  const updateItem: DataContextType['updateItem'] = (id, item) => itemCat.updateItem(id, item);
 
   const addCourier = (courier: Omit<Courier, 'id'>): StockResult => {
     if (!courier.code?.trim() || !courier.name?.trim()) return { ok: false, error: 'El código y nombre son obligatorios.' };
@@ -2643,39 +2317,9 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     return updateStock(input.branchId, input.itemId, input.qty, 'Ingreso', input.reason?.trim() || 'Ingreso manual de stock', input.doc.trim());
   };
 
-  const saveRecipe = (recipe: Recipe): StockResult & { id?: string } => {
-    const previous = recipe.id ? recipes.find(r => r.id === recipe.id) : undefined;
-    if (!can(previous ? PERM.recipeEdit : PERM.recipeCreate)) return { ok: false, error: `Su rol no puede ${previous ? 'editar' : 'crear'} recetas.` };
-    if (recipe.id && !previous) return { ok: false, error: 'No se encontró la receta.' };
-    const errors = validateRecipe(recipe, recipes.filter(r => r.id !== recipe.id), items, previous);
-    if (errors.length > 0) return { ok: false, error: errors.join('\n') };
-    if (previous) {
-      setRecipes(prev => prev.map(r => (r.id === recipe.id ? recipe : r)));
-      return { ok: true, id: recipe.id };
-    }
-    const id = nextSequentialId('REC', recipes.map(r => r.id));
-    setRecipes(prev => [{ ...recipe, id }, ...prev]);
-    return { ok: true, id };
-  };
-
-  const duplicateRecipe = (id: string): StockResult & { id?: string } => {
-    if (!can(PERM.recipeCreate)) return { ok: false, error: 'Su rol no puede crear recetas.' };
-    const source = recipes.find(r => r.id === id);
-    if (!source) return { ok: false, error: 'No se encontró la receta.' };
-    const copyId = nextSequentialId('REC', recipes.map(r => r.id));
-    setRecipes(prev => [copyRecipe(source, copyId), ...prev]);
-    return { ok: true, id: copyId };
-  };
-
-  const setRecipeStatus = (id: string, status: Recipe['status']): StockResult => {
-    if (!can(PERM.recipeStatus)) return { ok: false, error: 'Su rol no puede activar ni desactivar recetas.' };
-    const recipe = recipes.find(r => r.id === id);
-    if (!recipe) return { ok: false, error: 'No se encontró la receta.' };
-    const error = recipeStatusError(recipe, status, recipes);
-    if (error) return { ok: false, error };
-    setRecipes(prev => prev.map(r => (r.id === id ? { ...r, status } : r)));
-    return { ok: true };
-  };
+  const saveRecipe: DataContextType['saveRecipe'] = recipe => itemCat.saveRecipe(recipe);
+  const duplicateRecipe: DataContextType['duplicateRecipe'] = id => itemCat.duplicateRecipe(id);
+  const setRecipeStatus: DataContextType['setRecipeStatus'] = (id, status) => itemCat.setRecipeStatus(id, status);
 
   const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string): StockResult => {
     const stock = stockRef.current.find(s => s.id === stockId);
@@ -3622,14 +3266,6 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     setTrackings(prev => prev.map(t => (t.id === id ? { ...t, ...data } : t)));
   };
 
-  const addProgram = (programData: Omit<Program, 'id'>) => {
-    const newProgram = {
-      ...programData,
-      id: nextNumericId(programs.map(x => x.id)),
-    };
-    setPrograms(prev => [...prev, newProgram]);
-  };
-
   /** Las matrículas y la agenda copian el nombre del programa, del nivel y de la sede: al renombrar un catálogo se corrigen (syncCatalogLabels). */
   const relabelFrom = (catalogs: { branches: Branch[]; programs: Program[]; levels: Level[] }) => {
     const synced = syncCatalogLabels(enrollments, schedules, catalogs);
@@ -3637,69 +3273,40 @@ export function DataProvider({ children, access, accountId, org: orgData }: { ch
     setSchedules(synced.schedules);
   };
 
-  const updateProgram = (id: string, programData: Partial<Program>) => {
-    const next = programs.map(p => p.id === id ? { ...p, ...programData } : p);
-    setPrograms(next);
-    if (programData.name !== undefined) relabelFrom({ branches, programs: next, levels });
-  };
+  /** Lo que sigue en memoria y apunta al catálogo (matrículas, recetas, grupos promocionales): impide eliminar lo que ya se usa. */
+  const catalogLinks = (): CatalogLinks => ({ enrollments, recipes, promotionGroups });
 
-  const deleteProgram = (id: string) => {
-    setPrograms(prev => prev.filter(p => p.id !== id));
+  const addProgram: DataContextType['addProgram'] = program => catalog.add('program', program);
+  const updateProgram: DataContextType['updateProgram'] = async (id, programData) => {
+    const res = await catalog.edit('program', id, programData);
+    if (res.ok && res.value && programData.name !== undefined) relabelFrom({ branches, programs: programs.map(p => (p.id === id ? res.value! : p)), levels });
+    return res;
   };
+  const deleteProgram: DataContextType['deleteProgram'] = id => catalog.remove('program', id, catalogLinks());
 
-  const addLevel = (levelData: Omit<Level, 'id'>) => {
-    const newLevel = {
-      ...levelData,
-      id: nextNumericId(levels.map(x => x.id)),
-    };
-    setLevels(prev => [...prev, newLevel]);
+  const addLevel: DataContextType['addLevel'] = level => catalog.add('level', level);
+  const updateLevel: DataContextType['updateLevel'] = async (id, levelData) => {
+    const res = await catalog.edit('level', id, levelData);
+    if (res.ok && res.value && levelData.name !== undefined) relabelFrom({ branches, programs, levels: levels.map(l => (l.id === id ? res.value! : l)) });
+    return res;
   };
+  const deleteLevel: DataContextType['deleteLevel'] = id => catalog.remove('level', id, catalogLinks());
 
-  const updateLevel = (id: string, levelData: Partial<Level>) => {
-    const next = levels.map(l => l.id === id ? { ...l, ...levelData } : l);
-    setLevels(next);
-    if (levelData.name !== undefined) relabelFrom({ branches, programs, levels: next });
-  };
+  const addPaymentType: DataContextType['addPaymentType'] = paymentType => catalog.add('paymentType', paymentType);
+  const updatePaymentType: DataContextType['updatePaymentType'] = (id, data) => catalog.edit('paymentType', id, data);
+  const deletePaymentType: DataContextType['deletePaymentType'] = id => catalog.remove('paymentType', id, catalogLinks());
 
-  const deleteLevel = (id: string) => {
-    setLevels(prev => prev.filter(l => l.id !== id));
-  };
+  const addTariff: DataContextType['addTariff'] = tariff => catalog.add('tariff', tariff);
+  const updateTariff: DataContextType['updateTariff'] = (id, data) => catalog.edit('tariff', id, data);
+  const deleteTariff: DataContextType['deleteTariff'] = id => catalog.remove('tariff', id, catalogLinks());
 
-  const addPaymentType = (data: Omit<PaymentType, 'id'>) => {
-    setPaymentTypes(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
-  };
+  const addPromotion: DataContextType['addPromotion'] = promotion => catalog.add('promotion', promotion);
+  const updatePromotion: DataContextType['updatePromotion'] = (id, data) => catalog.edit('promotion', id, data);
+  const deletePromotion: DataContextType['deletePromotion'] = id => catalog.remove('promotion', id, catalogLinks());
 
-  const updatePaymentType = (id: string, data: Partial<PaymentType>) => {
-    setPaymentTypes(prev => prev.map(pt => pt.id === id ? { ...pt, ...data } : pt));
-  };
-
-  const deletePaymentType = (id: string) => {
-    setPaymentTypes(prev => prev.filter(pt => pt.id !== id));
-  };
-
-  const addTariff = (data: Omit<Tariff, 'id'>) => {
-    setTariffs(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
-  };
-
-  const updateTariff = (id: string, data: Partial<Tariff>) => {
-    setTariffs(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
-  };
-
-  const deleteTariff = (id: string) => {
-    setTariffs(prev => prev.filter(t => t.id !== id));
-  };
-
-  const addPromotion = (data: Omit<Promotion, 'id'>) => {
-    setPromotions(prev => [...prev, { ...data, id: nextNumericId(prev.map(x => x.id)) }]);
-  };
-
-  const updatePromotion = (id: string, data: Partial<Promotion>) => {
-    setPromotions(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
-  };
-
-  const deletePromotion = (id: string) => {
-    setPromotions(prev => prev.filter(p => p.id !== id));
-  };
+  const addLeadSource: DataContextType['addLeadSource'] = name => catalog.add('leadSource', { name, status: 'active' });
+  const updateLeadSource: DataContextType['updateLeadSource'] = (id, name, status) => catalog.edit('leadSource', id, { name, status });
+  const deleteLeadSource: DataContextType['deleteLeadSource'] = id => catalog.remove('leadSource', id, catalogLinks());
 
   const shipmentsRef = useRef<Shipment[]>(shipments);
   shipmentsRef.current = shipments;

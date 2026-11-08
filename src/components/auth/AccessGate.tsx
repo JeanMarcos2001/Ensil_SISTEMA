@@ -5,37 +5,47 @@ import { supabase } from '../../lib/supabase';
 import { loadAccess, type AccessData } from '../../services/accessRoles';
 import { createSupabaseAccountsRepository } from '../../services/accountsRepository';
 import { createSupabaseRolesRepository } from '../../services/accessRolesRepository';
+import { loadCatalog } from '../../services/catalog';
+import { loadItemCatalog, type ItemCatalogData } from '../../services/itemCatalog';
+import { createSupabaseItemCatalogRepository } from '../../services/itemCatalogRepository';
+import { createSupabaseCatalogRepository } from '../../services/catalogRepository';
 import { loadOrgDirectory, type OrgDirectoryData } from '../../services/orgDirectory';
 import { createSupabaseOrgRepository } from '../../services/orgRepository';
+import type { CatalogData } from '../../utils/catalog';
 import { Button } from '../ui/Button';
 
 const screen = 'min-h-screen flex items-center justify-center bg-app-bg px-4 text-center';
 
 /**
- * Carga desde la base, ANTES de montar el sistema, los roles, sus funciones, las cuentas y las empresas, sedes y almacén: el menú, los
- * permisos y la sede que se ve dependen de ellos, así que no se puede mostrar nada hasta tenerlos. Entrega también el id de la cuenta con
- * la que se ingresó. Con un error de conexión se ofrece reintentar.
+ * Carga desde la base, ANTES de montar el sistema, los roles, sus funciones, las cuentas, las empresas, sedes y almacén, y el catálogo
+ * comercial (programas, niveles, tipos de pago, tarifarios, promociones y orígenes de leads) y los artículos con sus precios y recetas: el
+ * menú, los permisos, la sede que se ve, la matrícula y la verificación de materiales dependen de ellos, así que no se puede mostrar nada hasta tenerlos. Entrega también el id de la cuenta con la que se ingresó.
+ * Con un error de conexión se ofrece reintentar.
  */
-export function AccessGate({ children }: { children: (access: AccessData, accountId: string, org: OrgDirectoryData) => ReactNode }) {
+export function AccessGate({ children }: { children: (access: AccessData, accountId: string, org: OrgDirectoryData, catalog: CatalogData, itemCatalog: ItemCatalogData) => ReactNode }) {
   const { account } = useAuth();
   const rolesRepo = useMemo(() => createSupabaseRolesRepository(supabase), []);
   const accountsRepo = useMemo(() => createSupabaseAccountsRepository(supabase), []);
   const orgRepo = useMemo(() => createSupabaseOrgRepository(supabase), []);
-  const [loaded, setLoaded] = useState<{ access: AccessData; org: OrgDirectoryData } | null>(null);
+  const catalogRepo = useMemo(() => createSupabaseCatalogRepository(supabase), []);
+  const itemRepo = useMemo(() => createSupabaseItemCatalogRepository(supabase), []);
+  const [loaded, setLoaded] = useState<{ access: AccessData; org: OrgDirectoryData; catalog: CatalogData; items: ItemCatalogData } | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setError('');
-    const [res, org] = await Promise.all([loadAccess(rolesRepo, accountsRepo), loadOrgDirectory(orgRepo)]);
+    const [res, org, catalog, items] = await Promise.all([loadAccess(rolesRepo, accountsRepo), loadOrgDirectory(orgRepo), loadCatalog(catalogRepo), loadItemCatalog(itemRepo)]);
     if (!res.ok || !res.value) { setError(res.error ?? 'No se pudieron cargar los roles y las cuentas.'); return; }
     if (!org.ok || !org.value) { setError(org.error ?? 'No se pudieron cargar las empresas, sedes y almacenes.'); return; }
+    if (!catalog.ok || !catalog.value) { setError(catalog.error ?? 'No se pudo cargar el catálogo comercial.'); return; }
+    if (!items.ok || !items.value) { setError(items.error ?? 'No se pudieron cargar los artículos y las recetas.'); return; }
     if (account && !res.value.users.some(u => u.id === account.id)) { setError('No se encontró su cuenta entre las que el sistema puede mostrar: su rol puede haber cambiado. Vuelva a ingresar.'); return; }
-    setLoaded({ access: res.value, org: org.value });
-  }, [rolesRepo, accountsRepo, orgRepo, account]);
+    setLoaded({ access: res.value, org: org.value, catalog: catalog.value, items: items.value });
+  }, [rolesRepo, accountsRepo, orgRepo, catalogRepo, itemRepo, account]);
 
   useEffect(() => { void load(); }, [load]);
 
-  if (loaded && account) return <>{children(loaded.access, account.id, loaded.org)}</>;
+  if (loaded && account) return <>{children(loaded.access, account.id, loaded.org, loaded.catalog, loaded.items)}</>;
   if (error) {
     return (
       <div className={screen}>
@@ -47,5 +57,5 @@ export function AccessGate({ children }: { children: (access: AccessData, accoun
       </div>
     );
   }
-  return <div className={screen} role="status"><p className="text-sm text-text-secondary flex items-center gap-2"><Loader2 size={16} className="animate-spin" />Cargando roles, cuentas, empresas y sedes…</p></div>;
+  return <div className={screen} role="status"><p className="text-sm text-text-secondary flex items-center gap-2"><Loader2 size={16} className="animate-spin" />Cargando roles, cuentas, sedes, catálogo y artículos…</p></div>;
 }

@@ -4,7 +4,7 @@
  * Regla de fondo: para un mismo programa, nivel, sede y período solo puede haber UNA receta activa; si no, la verificación no sabría qué
  * entregar. Por eso una receta duplicada nace **inactiva** y activar una receta vuelve a comprobar el solape.
  */
-import type { Item, Recipe } from '../context/DataContext';
+import type { Branch, Item, Level, Program, Recipe } from '../context/DataContext';
 import { getRecipeSelectableItems } from './inventory';
 
 const FOREVER = '9999-12-31';
@@ -25,11 +25,30 @@ export function overlappingRecipe(recipe: Recipe, recipes: Recipe[]): Recipe | u
   return recipes.find(r => r.id !== recipe.id && r.status === 'Activo' && recipesOverlap(r, recipe));
 }
 
-/** Todos los errores de una receta, juntos (vacío = se puede guardar). `recipes` son las demás recetas del sistema. */
-export function validateRecipe(recipe: Recipe, recipes: Recipe[], items: Item[], previous?: Recipe): string[] {
+/** Con qué se comprueban el programa, el nivel y las sedes de una receta (el catálogo comercial y las sedes). */
+export interface RecipeRefs {
+  programs: Pick<Program, 'id' | 'hasLevels'>[];
+  levels: Pick<Level, 'id' | 'programId'>[];
+  branches: Pick<Branch, 'id'>[];
+}
+
+/**
+ * Todos los errores de una receta, juntos (vacío = se puede guardar). `recipes` son las demás recetas del sistema. Con `refs` también se
+ * comprueba que el programa, el nivel (del mismo programa) y las sedes existan.
+ */
+export function validateRecipe(recipe: Recipe, recipes: Recipe[], items: Item[], previous?: Recipe, refs?: RecipeRefs): string[] {
   const errors: string[] = [];
   if (!recipe.name?.trim()) errors.push('El nombre es obligatorio.');
   if (!recipe.programId) errors.push('El programa es obligatorio.');
+  else if (refs) {
+    const program = refs.programs.find(p => p.id === recipe.programId);
+    if (!program) errors.push('El programa seleccionado no existe.');
+    else if (recipe.levelId) {
+      const level = refs.levels.find(l => l.id === recipe.levelId);
+      if (!program.hasLevels || !level || level.programId !== recipe.programId) errors.push('El nivel seleccionado no pertenece al programa.');
+    }
+  }
+  if (refs && !recipe.applyToAllBranches && (recipe.branchIds ?? []).some(id => !refs.branches.some(b => b.id === id))) errors.push('Una de las sedes elegidas no existe.');
   const lines = recipe.items ?? [];
   if (lines.length === 0) errors.push('Debe agregar al menos un artículo.');
   if (lines.some(l => !l.itemId)) errors.push('Seleccione el artículo en todas las filas.');

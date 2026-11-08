@@ -6,6 +6,8 @@ import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
+import { copyCode, copyName } from '../../utils/catalog';
 import { useData, Tariff, TariffInstallment } from '../../context/DataContext';
 import { generateBreakdown, countObligations, resolveScheduleMode, sumBreakdown, roundMoney } from '../../utils/tariffs';
 import { Search, Plus, DollarSign, Calendar, AlertCircle } from 'lucide-react';
@@ -14,6 +16,8 @@ import { todayLocalISO } from '../../utils/schedule';
 
 export function Tariffs() {
   const { tariffs, programs, levels, paymentTypes, branches, addTariff, updateTariff, deleteTariff, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [selectedTariff, setSelectedTariff] = useState<Tariff | null>(null);
@@ -106,69 +110,36 @@ export function Tariffs() {
 
   const handleDuplicate = (tariff: Tariff) => {
     const { id, ...rest } = tariff;
-    addTariff({
+    void actionError.run(addTariff({
       ...rest,
-      name: `${rest.name} (Copia)`
-    });
+      name: copyName(rest.name, tariffs.map(t => t.name)),
+    }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
+    if (isReadOnly || saving) return;
     setFormError(null);
 
-    if (!formData.name.trim()) {
-      setFormError("El nombre de la tarifa es obligatorio.");
-      return;
-    }
-    if (!formData.programId) {
-      setFormError("Debe seleccionar un programa.");
-      return;
-    }
     const selectedProgram = programs.find(p => p.id === formData.programId);
-    if (formData.levelId) {
-      const level = levels.find(l => l.id === formData.levelId);
-      if (!selectedProgram?.hasLevels || !level || level.programId !== formData.programId) {
-        setFormError("El nivel seleccionado no pertenece al programa.");
-        return;
-      }
-    }
-    if (!formData.paymentTypeId) {
-      setFormError("Debe seleccionar un tipo de pago.");
-      return;
-    }
-    const paymentType = paymentTypes.find(pt => pt.id === formData.paymentTypeId);
-    if (formData.installments.length === 0) {
-      setFormError("Genere el desglose antes de guardar.");
-      return;
-    }
-    if (paymentType && countObligations(formData.installments) !== paymentType.installments) {
-      setFormError(`El tipo de pago "${paymentType.name}" requiere ${paymentType.installments} obligación(es) además de la matrícula. Regenere el desglose.`);
-      return;
-    }
     const hasVariable = formData.installments.some(l => l.variable);
-    if (!hasVariable && formData.installments.some(l => !(l.amount > 0))) {
-      setFormError("Todas las líneas del desglose deben tener un monto mayor a 0.");
-      return;
-    }
+    // Con montos fijos el total siempre es la suma del desglose
     const total = hasVariable ? roundMoney(formData.basePrice) : sumBreakdown(formData.installments);
-    if (!(total > 0)) {
-      setFormError(hasVariable ? "Indique el total objetivo (mayor a 0)." : "El total del desglose debe ser mayor a 0.");
-      return;
-    }
-
     const dataToSave = {
       ...formData,
       currency: 'USD' as const, // La configuración comercial es siempre en dólares
-      basePrice: total, // Con montos fijos el total siempre es la suma del desglose
+      basePrice: total,
       levelId: selectedProgram?.hasLevels && formData.levelId ? formData.levelId : undefined,
       endDate: formData.endDate || undefined,
     };
 
-    if (selectedTariff) {
-      updateTariff(selectedTariff.id, dataToSave);
-    } else {
-      addTariff(dataToSave);
+    // Las reglas (programa, nivel, desglose, total, vigencia) las comprueba la acción y, otra vez, la base de datos.
+    setSaving(true);
+    const res = selectedTariff ? await updateTariff(selectedTariff.id, dataToSave) : await addTariff(dataToSave);
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error ?? 'No se pudo guardar el tarifario.');
+      return;
     }
     setIsFormOpen(false);
   };
@@ -246,6 +217,8 @@ export function Tariffs() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card (Filters + Table + Pagination) */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -354,7 +327,7 @@ export function Tariffs() {
                           onClick: () => openConfirm({
                             title: row.status === 'Activo' ? 'Desactivar Tarifario' : 'Activar Tarifario',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el tarifario "${row.name}"?`,
-                            onConfirm: () => updateTariff(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }),
+                            onConfirm: () => actionError.run(updateTariff(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' })),
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
                           }),
@@ -365,7 +338,7 @@ export function Tariffs() {
                           onClick: () => openConfirm({
                             title: 'Eliminar Tarifario',
                             description: `¿Está seguro de que desea eliminar el tarifario "${row.name}"? Esta acción no se puede deshacer.`,
-                            onConfirm: () => deleteTariff(row.id),
+                            onConfirm: () => actionError.run(deleteTariff(row.id)),
                             variant: 'danger',
                             confirmLabel: 'SÍ, ELIMINAR'
                           }), 
@@ -439,7 +412,7 @@ export function Tariffs() {
               {isReadOnly ? "Cerrar" : "Cancelar"}
             </Button>
             {!isReadOnly && (
-              <Button variant="primary" onClick={handleSubmit}>Guardar Tarifario</Button>
+              <Button variant="primary" onClick={handleSubmit} disabled={saving}>Guardar Tarifario</Button>
             )}
           </div>
         }

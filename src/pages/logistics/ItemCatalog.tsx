@@ -7,6 +7,7 @@ import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Search, Plus, Package, Book, Wrench, Layers, Eye, Trash2, Upload, Download, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { useTablePagination } from '../../hooks/useTablePagination';
+import { useActionError } from '../../hooks/useActionError';
 import { useData, Item, ItemType } from '../../context/DataContext';
 import { ItemPricesModal } from './ItemPricesModal';
 import { getCurrentPrice, validateItem } from '../../utils/inventory';
@@ -15,6 +16,8 @@ import { downloadCsv } from '../../utils/exportCsv';
 
 export function ItemCatalog() {
   const { items, addItems, updateItem, itemPrices, can } = useData();
+  const actionError = useActionError();
+  const [saving, setSaving] = useState(false);
   const [priceItem, setPriceItem] = useState<Item | null>(null);
   const [initialPrice, setInitialPrice] = useState('');
   const [compItemId, setCompItemId] = useState('');
@@ -133,12 +136,15 @@ export function ItemCatalog() {
     setWizardStep(2);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     if (isBulkUpload) {
       if (!bulk) { setFormError('Elija el archivo CSV con los libros.'); return; }
       if (bulk.result.errors.length > 0) { setFormError('El archivo tiene errores: corríjalos y vuelva a cargarlo. No se guardó ningún libro.'); return; }
       if (bulk.result.items.length === 0) { setFormError('El archivo no tiene libros para guardar.'); return; }
-      const saved = addItems(bulk.result.items, bulk.result.prices.map(pr => ({ itemId: pr.itemId, amount: pr.amount })));
+      setSaving(true);
+      const saved = await addItems(bulk.result.items, bulk.result.prices.map(pr => ({ itemId: pr.itemId, amount: pr.amount })));
+      setSaving(false);
       if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el lote.'); return; }
       setIsFormOpen(false);
       setFormError(null);
@@ -160,9 +166,11 @@ export function ItemCatalog() {
 
     // El precio vive en `itemPrices` (con vigencia e historial), no dentro del artículo.
     const { salePrice: _legacyPrice, ...itemData } = formData as Item;
-    const saved = selectedItem
+    setSaving(true);
+    const saved = await (selectedItem
       ? updateItem(selectedItem.id, { ...itemData } as Item)
-      : addItems([{ ...itemData } as Item], formData.isSold ? [{ itemId: formData.id!, amount: priceValue }] : []);
+      : addItems([{ ...itemData } as Item], formData.isSold ? [{ itemId: formData.id!, amount: priceValue }] : []));
+    setSaving(false);
     if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el artículo.'); return; }
     setIsFormOpen(false);
     setFormError(null);
@@ -210,6 +218,8 @@ export function ItemCatalog() {
           )}
         </div>
       </div>
+
+      {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
 
       {/* Main Content Card */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -332,7 +342,7 @@ export function ItemCatalog() {
                             title: row.status === 'Activo' ? 'Desactivar Artículo' : 'Activar Artículo',
                             description: `¿Está seguro de que desea ${row.status === 'Activo' ? 'desactivar' : 'activar'} el artículo "${row.name}"?`,
                             onConfirm: () => {
-                              updateItem(row.id, { ...row, status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
+                              void actionError.run(updateItem(row.id, { ...row, status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }));
                             },
                             variant: row.status === 'Activo' ? 'warning' : 'primary',
                             confirmLabel: row.status === 'Activo' ? 'SÍ, DESACTIVAR' : 'SÍ, ACTIVAR'
@@ -420,7 +430,7 @@ export function ItemCatalog() {
                   setIsFormOpen(false);
                   setFormError(null);
                 }}>Cancelar</Button>
-                <Button variant="primary" onClick={handleSave}>{isBulkUpload ? 'Guardar Lote' : 'Guardar Artículo'}</Button>
+                <Button variant="primary" onClick={handleSave} disabled={saving}>{isBulkUpload ? 'Guardar Lote' : 'Guardar Artículo'}</Button>
               </div>
             </div>
           ) : null

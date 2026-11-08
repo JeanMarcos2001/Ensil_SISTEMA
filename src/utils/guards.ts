@@ -109,12 +109,9 @@ export const THROWS_ON_DENIAL: ReadonlySet<string> = new Set([
   // devuelven la entidad creada
   'addCashMovement', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStudent', 'addTracking',
   // no devuelven nada
-  'addLeadSource', 'addLevel', 'addPaymentType', 'addProgram', 'addPromotion', 'addTariff',
   'markNotificationAsRead', 'setCapacityConfig',
-  'deleteLeadSource', 'deleteLevel', 'deleteMonthlySchedule', 'deletePaymentType', 'deleteProgram', 'deletePromotion',
-  'deleteShipment', 'deleteTariff',
-  'updateGuardian', 'updateLeadSource', 'updateLevel', 'updateMinStock', 'updateMonthlySchedule',
-  'updatePaymentType', 'updateProgram', 'updatePromotion', 'updateStudent', 'updateTariff', 'updateTracking',
+  'deleteMonthlySchedule', 'deleteShipment',
+  'updateGuardian', 'updateMinStock', 'updateMonthlySchedule', 'updateStudent', 'updateTracking',
 ]);
 
 /**
