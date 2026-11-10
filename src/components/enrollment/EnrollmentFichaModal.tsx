@@ -104,8 +104,8 @@ export function EnrollmentFichaModal({ enrollmentId, onClose, initialTab = 'resu
   const canPay = data.can('op-pagos:register') && active && !!plan && plan.balance > 0 && plan.installments.some(i => i.balance > 0 && i.status !== 'Refinanciada');
   const students = ficha.group?.members.map(m => m.student) ?? [];
 
-  const enableExtension = () => {
-    const r = data.enableExtension(e.id);
+  const enableExtension = async () => {
+    const r = await data.enableExtension(e.id);
     setNotice(r.ok ? 'Extensión habilitada.' : r.error ?? 'No se pudo habilitar la extensión.');
   };
 

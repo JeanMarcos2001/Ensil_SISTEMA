@@ -30,6 +30,7 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
   const [creditNote, setCreditNote] = useState('');
   const [noteMode, setNoteMode] = useState<NoteMode>('emitir');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const today = todayLocalISO();
 
   useEffect(() => { setReason(''); setDetail(''); setRefunded(false); setCreditNote(''); setError(null); setNoteMode(payment ? allowedNoteModes(payment)[0] : 'emitir'); }, [paymentId]);
@@ -59,8 +60,11 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
   const modes = allowedNoteModes(payment);
   const nextLabel = doc ? noteLabel(NOTE_SERIES[doc.type], nextNoteNumber(data.creditNotes, NOTE_SERIES[doc.type])) : '';
 
-  const handleSave = () => {
-    const r = data.reversePayment(payment.id, { reason, detail, refunded: effectiveRefund, creditNote, creditNoteMode: noteMode });
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    const r = await data.reversePayment(payment.id, { reason, detail, refunded: effectiveRefund, creditNote, creditNoteMode: noteMode });
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo reversar el pago.'); return; }
     onClose();
   };
@@ -74,7 +78,7 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" className="bg-danger-text hover:bg-danger-text/90 text-white border-none" onClick={handleSave}>Confirmar reversa</Button>
+          <Button variant="primary" className="bg-danger-text hover:bg-danger-text/90 text-white border-none" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Confirmar reversa'}</Button>
         </div>
       }
     >

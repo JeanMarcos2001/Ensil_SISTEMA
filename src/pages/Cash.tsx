@@ -117,6 +117,7 @@ export function Cash() {
   const [saleTC, setSaleTC] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [savingSale, setSavingSale] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
 
   // Egreso manual
   const [exp, setExp] = useState<ExpenseInput>(() => emptyExpense(todayLocalISO()));
@@ -131,12 +132,16 @@ export function Cash() {
     setExp(x => ({ ...x, currency }));
     setExpSubmitted(false); setExpError(null); setIsEgresoOpen(true);
   };
-  const submitExpense = () => {
+  const submitExpense = async () => {
+    if (savingExpense) return;
     setExpSubmitted(true);
     if (Object.keys(expErrors).length > 0) return;
     const closed = closedMessage(cashClosures, 'caja', exp.currency, exp.date);
     if (closed) { setExpError(closed); return; }
-    addCashMovement(buildExpense(exp));
+    setSavingExpense(true);
+    const r = await addCashMovement(buildExpense(exp));
+    setSavingExpense(false);
+    if (!r.ok) { setExpError(r.error ?? 'No se pudo registrar el egreso.'); return; }
     setCurrency(exp.currency);
     setIsEgresoOpen(false);
   };
@@ -410,7 +415,7 @@ export function Cash() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsEgresoOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={submitExpense}>Registrar egreso</Button>
+            <Button variant="primary" onClick={submitExpense} disabled={savingExpense}>{savingExpense ? 'Guardando…' : 'Registrar egreso'}</Button>
           </div>
         }
       >

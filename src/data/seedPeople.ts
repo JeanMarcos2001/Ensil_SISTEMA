@@ -73,7 +73,7 @@ export function buildPeopleSeed(today: string): PeopleSeed {
   const enrollment = (n: number, student: Student, programId: string, program: string, levelId: string, level: string, branchId: string, sede: string,
     dateISO: string, price: number, paymentTypeId: string, paymentTypeName: string, status: Enrollment['status'] = 'Activa'): Enrollment => ({
     id: mat(n), dateISO, studentId: student.id, student: student.name, guardianIds: [...(student.guardianIds)], programId, program, levelId, level, branchId, sede,
-    asesor: 'María Torres', origen: ['Facebook Ads', 'Referido', 'Orgánico', 'Instagram', 'WhatsApp'][n - 1], origenId: String(n),
+    asesor: 'María Torres', origen: ['Facebook Ads', 'Orgánico', 'Referido', 'Instagram', 'WhatsApp'][n - 1], origenId: String(n),
     status, assignedPrice: price, paymentTypeId, paymentTypeName, createdAt: at(dateISO, '10:00'), createdBy: 'Ana G.',
   });
   const dates = [d(-50), d(-65), d(-95), d(-2), addDaysISO(expiringStart, -3)];

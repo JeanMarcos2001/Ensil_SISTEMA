@@ -56,6 +56,8 @@ import type { ItemCatalogData } from '../services/itemCatalog';
 import { useLogistics } from '../hooks/useLogistics';
 import type { LogisticsData } from '../services/logistics';
 import { usePeople } from '../hooks/usePeople';
+import { useMoney } from '../hooks/useMoney';
+import type { MoneyAction, MoneyRows, MoneyState, StockOp } from '../utils/moneyDb';
 import type { PeopleData } from '../services/people';
 import { planEnrollmentPeople, withCreatedPeople } from '../utils/enrollmentPeople';
 import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
@@ -460,6 +462,8 @@ export interface Payment {
   enrollmentIds?: string[]; // Matrículas cubiertas por este pago
   user?: string; // Quién registró el pago
   comment?: string;
+  /** Sede donde se cobró (la de la matrícula ese día): no cambia aunque la matrícula se traslade. En la base es `pagos.sede_id`. */
+  branchId?: string;
 }
 
 /**
@@ -1324,11 +1328,11 @@ interface DataContextType {
   updateItem: (id: string, item: Item) => Promise<StockResult>;
   stockItems: StockItem[];
   cashMovements: CashMovement[];
-  addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
+  addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => Promise<StockResult>;
   /** Reversa un movimiento de caja manual, venta o lote de depósito (los de un pago se reversan desde el pago). */
   reverseCashMovement: (id: string, input: { reason: string; detail: string }) => Promise<StockResult>;
   /** Lleva ingresos en efectivo al banco: un egreso «Depósito bancario» y los ingresos quedan depositados. */
-  createDepositBatch: (input: DepositInput) => StockResult & { code?: string };
+  createDepositBatch: (input: DepositInput) => Promise<StockResult & { code?: string }>;
   pettyCashMovements: PettyCashMovement[];
   addPettyCashMovement: (input: PettyInput) => StockResult;
   reversePettyCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
@@ -1473,17 +1477,17 @@ interface DataContextType {
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
   registerEnrollments: (draft: EnrollmentDraft) => Promise<{ ok: boolean; error?: string; enrollmentIds?: string[] }>;
   /** Habilita el período de extensión (garantía) de una matrícula por vencer o con la duración base terminada. */
-  enableExtension: (enrollmentId: string) => StockResult;
+  enableExtension: (enrollmentId: string) => Promise<StockResult>;
   dropRequests: DropRequest[];
   /** Solicita la caída de una matrícula: queda pendiente hasta que alguien con autoridad la resuelva. */
   requestEnrollmentDrop: (enrollmentId: string, input: DropInput) => StockResult;
   /** Aprueba (aplica los efectos en plan, asesorías, actividades y alumno) o rechaza una solicitud de caída. */
-  resolveEnrollmentDrop: (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }) => StockResult;
+  resolveEnrollmentDrop: (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }) => Promise<StockResult>;
   enrollmentChanges: EnrollmentChange[];
   /** Corrige datos administrativos de una matrícula activa (con motivo y constancia). */
-  updateEnrollmentData: (enrollmentId: string, after: EnrollmentEditValues, reason: string) => StockResult;
+  updateEnrollmentData: (enrollmentId: string, after: EnrollmentEditValues, reason: string) => Promise<StockResult>;
   /** Reversa un pago: queda anulado, repone la cuota, ajusta caja y libera su comprobante. */
-  reversePayment: (paymentId: string, input: ReversalInput) => StockResult;
+  reversePayment: (paymentId: string, input: ReversalInput) => Promise<StockResult>;
   cashClosures: CashClosure[];
   /** Hace el arqueo y cierra una caja hasta una fecha (Caja PEN, Caja USD o Caja chica). */
   closeCash: (input: ClosureInput) => StockResult;
@@ -1498,16 +1502,16 @@ interface DataContextType {
   /** Registra que un recordatorio de cobranza se envió (o se omitió, con motivo). */
   logReminder: (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string) => StockResult;
   /** Cobra la mora acumulada de una cuota vencida generando una cuota «Mora». */
-  chargeMora: (planId: string, installmentId: string) => StockResult;
+  chargeMora: (planId: string, installmentId: string) => Promise<StockResult>;
   contractTemplate: ContractTemplate;
   /** Guarda la plantilla del contrato (sube la versión; pierde la marca de revisada si el texto cambió). */
   updateContractTemplate: (template: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>) => StockResult;
   /** Datos con los que se arman el contrato y la ficha de una matrícula. */
   documentContextOf: (enrollmentId: string) => DocContext | undefined;
   /** Genera (o regenera, si los datos cambiaron) el contrato o la ficha de la matrícula. */
-  generateEnrollmentDocument: (enrollmentId: string, kind: DocKind) => StockResult;
+  generateEnrollmentDocument: (enrollmentId: string, kind: DocKind) => Promise<StockResult>;
   /** Registra que el documento fue firmado (fecha y archivo escaneado). */
-  registerDocumentSignature: (enrollmentId: string, kind: DocKind, input: { date: string; file: string }) => StockResult;
+  registerDocumentSignature: (enrollmentId: string, kind: DocKind, input: { date: string; file: string }) => Promise<StockResult>;
   changeRequests: ChangeRequest[];
   /** Pide reactivar una matrícula caída (la resuelve quien tiene autoridad). */
   requestReactivation: (enrollmentId: string, input: ReactivationInput) => StockResult;
@@ -1516,7 +1520,7 @@ interface DataContextType {
   /** Pide trasladar una matrícula activa a otra sede. */
   requestTransfer: (enrollmentId: string, input: TransferInput) => StockResult;
   /** Aprueba (aplica los efectos) o rechaza una solicitud de reactivación, cambio de programa o traslado. */
-  resolveChangeRequest: (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string) => StockResult;
+  resolveChangeRequest: (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string) => Promise<StockResult>;
   updatePettyFund: (fund: { assigned: string; maxExpense: string }) => StockResult;
   creditNotes: CreditNote[];
   /** ¿El usuario actual tiene el permiso `funcionalidad:acción`? (el Superusuario puede todo) */
@@ -1526,9 +1530,9 @@ interface DataContextType {
   addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
   updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
   /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
-  registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => StockResult;
+  registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => Promise<StockResult>;
   /** Traslada el saldo pendiente de una cuota a una cuota nueva con otro vencimiento (con motivo). */
-  refinanceInstallment: (planId: string, installmentId: string, input: RefinanceInput) => StockResult;
+  refinanceInstallment: (planId: string, installmentId: string, input: RefinanceInput) => Promise<StockResult>;
   /** Orígenes de leads: de la base de datos (como todo el catálogo comercial). Las acciones del catálogo validan, guardan en la base y devuelven `{ ok, error }`. */
   addLeadSource: (name: string) => Promise<OpResult<LeadSource>>;
   updateLeadSource: (id: string, name: string, status: 'active' | 'inactive') => Promise<OpResult<LeadSource>>;
@@ -1598,9 +1602,10 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 /**
  * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
  * almacén, leídos de la base en ese mismo momento; `logistics` = el stock, el kardex, los ajustes, los envíos y las transferencias, y `people` =
- * los titulares y los alumnos (también de la base); `accountId` = la cuenta con la que se ingresó.
+ * los titulares y los alumnos, y `money` = las matrículas con su plan, cuotas, pagos, caja, notas de crédito y grupos promocionales (todo de la base);
+ * `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
@@ -1608,13 +1613,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // `supabase/seed/personas_de_ejemplo.sql`, con los mismos códigos, porque las matrículas de ejemplo en memoria los nombran).
   const people = usePeople(peopleData);
   const { guardians, students } = people;
-  const [enrollments, setEnrollments] = useState<Enrollment[]>(() => structuredClone(PEOPLE_SEED.enrollments));
-  const [plans, setPlans] = useState<Plan[]>(() => structuredClone(PEOPLE_SEED.plans));
-  const [payments, setPayments] = useState<Payment[]>(() => structuredClone(PEOPLE_SEED.payments));
-
-  const [cashMovements, setCashMovements] = useState<CashMovement[]>(() => structuredClone(PEOPLE_SEED.cashMovements));
-  const [promotionGroups, setPromotionGroups] = useState<PromotionGroup[]>([]);
-  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  // Matrículas, planes, cuotas, pagos, caja, notas de crédito y grupos promocionales: de la base de datos (`useMoney`, más abajo).
   const [cashClosures, setCashClosures] = useState<CashClosure[]>([]);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
   const [collectionPolicy, setCollectionPolicy] = useState<CollectionPolicy>(DEFAULT_POLICY);
@@ -1632,16 +1631,21 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     ];
   });
 
-  const addCashMovement = (m: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }): CashMovement => {
-    const created: CashMovement = {
-      ...m,
-      id: allocId('CJ', cashMovements.map(x => x.id)),
-      date: m.date ?? new Date().toISOString(),
-      user: currentUser.name,
-      status: 'Aplicado',
-    };
-    setCashMovements(prev => [created, ...prev]);
-    return created;
+  /** Guarda lo que una acción cambió en el dinero (todo o nada, con la función del registro de esa acción) y devuelve `{ ok, error }`. */
+  const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<StockResult> => {
+    const res = await money.commit(action, next, stock);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  };
+
+  /** Pone código y autor a los movimientos de caja nuevos de una operación (varios a la vez no repiten código). */
+  const newCashMovements = (list: Omit<CashMovement, 'id' | 'user'>[]): CashMovement[] =>
+    list.map(m => ({ ...m, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name }));
+
+  const addCashMovement: DataContextType['addCashMovement'] = async m => {
+    const created: CashMovement = { ...m, id: allocId('CJ', cashMovements.map(x => x.id)), date: m.date ?? new Date().toISOString(), user: currentUser.name, status: 'Aplicado' };
+    const d = money.draft();
+    d.cashMovements = [created, ...d.cashMovements];
+    return saveMoney(m.kind === 'Egreso' ? 'egreso_caja' : 'ingreso_caja', d);
   };
 
   // El stock, el kardex, los ajustes, los envíos, las transferencias, las incidencias de recepción, los couriers y los métodos de envío viven en la
@@ -1981,17 +1985,27 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const log = useLogistics(logisticsData, { items, locations });
   const { stockItems, kardex, transfers, shipments, couriers, shippingMethods, adjustments, incidents } = log;
 
+  // Matrículas, planes, cuotas, pagos, caja, notas de crédito y grupos promocionales: de la base de datos (`AccessGate` los lee al iniciar sesión).
+  // Las acciones de más abajo piden un borrador (`money.draft()`), lo cambian con las reglas puras de siempre y lo entregan a la base con
+  // `saveMoney` (todo o nada, con la función del registro de esa acción); si algo no cuadra, la base lo rechaza y no cambia nada. Los nombres del
+  // alumno, programa, nivel, sede, asesor, origen, tipo de pago y tarifario salen de sus ids. Los datos de ejemplo están en `data/seedPeople.ts` (se
+  // cargan con `supabase/seed/matriculas_de_ejemplo.sql`, con los mismos códigos, porque la agenda y las solicitudes de ejemplo en memoria los nombran).
+  const money = useMoney(moneyData, { students, programs, levels, branches, staff, leadSources, paymentTypes, tariffs }, () => log.refreshStock());
+  const { enrollments, plans, payments, cashMovements, creditNotes, promotionGroups } = money;
+
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
-    // Todo o nada: la base descuenta TODAS las líneas en una sola operación (si falta stock de una, no se descuenta ninguna) y deja el kardex
-    const moved = await log.deliverFromStock({ branchId: enrollment.branchId || '', enrollmentId: enrollment.id, student: enrollment.student, lines: deductions });
-    if (!moved.ok) return { ok: false, error: moved.error };
-    setEnrollments(prev => prev.map(e => (e.id === enrollmentId
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollmentId
       ? { ...e, verificationStatus: data.status, verifiedItems: data.items, verificationObservation: data.observation, verificationDate: data.date, verifier: data.verifier }
-      : e)));
-    return { ok: true };
+      : e));
+    // Todo o nada: la base descuenta TODAS las líneas del stock (si falta de una, no se descuenta ninguna), deja el kardex y marca la verificación en UNA operación
+    const stock: StockOp[] = deductions.length > 0
+      ? [{ op: 'entregar', sede: enrollment.branchId || '', matricula: enrollment.id, alumno: enrollment.student, lineas: deductions.map(l => ({ articulo_id: l.itemId, cantidad: l.quantity })) }]
+      : [];
+    return saveMoney('verificacion', d, stock);
   };
 
   /**
@@ -2014,7 +2028,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const addShippingMethod: DataContextType['addShippingMethod'] = async method => log.addShippingMethod(method);
   const updateShippingMethod: DataContextType['updateShippingMethod'] = async (id, method) => log.updateShippingMethod(id, method);
 
-  /** Venta de un artículo en caja: todo o nada (stock + ingreso), con el precio vigente de la sede y el cierre de caja respetado. */
+  /** Venta de un artículo en caja: todo o nada (el stock, el kardex y el ingreso en caja se guardan en UNA operación), con el precio vigente de la sede y el cierre de caja respetado. */
   const registerItemSale = async (input: ItemSaleInput): Promise<StockResult> => {
     if (!can(PERM.itemSale)) return { ok: false, error: 'Su rol no puede vender artículos en caja.' };
     if (!input.branchId || !input.itemId) return { ok: false, error: 'Por favor complete todos los campos obligatorios.' };
@@ -2029,13 +2043,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const closed = closedMessage(cashClosures, 'caja', input.currency, todayLocalISO());
     if (closed) return { ok: false, error: closed };
     const totalUsd = Math.round(unitPrice * input.qty * 100) / 100;
-    // El stock y el kardex los mueve la base; el ingreso en caja se registra solo si el stock salió bien
-    const out = await log.sellFromStock({
-      branchId: input.branchId, itemId: input.itemId, qty: input.qty, doc: input.receiptNumber,
-      observation: `Venta directa en caja a ${input.customerName || 'Cliente General'}. Comprobante: ${input.receiptType} ${input.receiptNumber}`,
-    });
-    if (!out.ok) return { ok: false, error: out.error };
-    addCashMovement({
+    const sale: CashMovement = {
+      id: allocId('CJ', cashMovements.map(x => x.id)), date: new Date().toISOString(), user: currentUser.name, status: 'Aplicado',
       kind: 'Ingreso',
       concept: 'Venta de artículo',
       reference: `${input.receiptType} ${input.receiptNumber || 'S/N'} / ${input.customerName || 'Cliente General'}`,
@@ -2046,8 +2055,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       method: input.method,
       branchId: input.branchId,
       sale: { itemId: input.itemId, branchId: input.branchId, qty: input.qty },
-    });
-    return { ok: true };
+    };
+    const d = money.draft();
+    d.cashMovements = [sale, ...d.cashMovements];
+    // La base descuenta el stock, deja el kardex y registra el ingreso en la misma operación: si el stock falla, no queda ingreso
+    return saveMoney('venta', d, [{
+      op: 'vender', sede: input.branchId, articulo: input.itemId, cantidad: input.qty, documento: input.receiptNumber,
+      observacion: `Venta directa en caja a ${input.customerName || 'Cliente General'}. Comprobante: ${input.receiptType} ${input.receiptNumber}`,
+    }]);
   };
 
   const registerStockEntry: DataContextType['registerStockEntry'] = async input => {
@@ -2136,8 +2151,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   /**
    * Cobra una cuota. `amount` es el monto aplicado en USD (la deuda siempre es en USD). Si se cobró en soles,
    * `currency: 'PEN'` + `exchangeRate` + `originalAmount` registran el dinero real en la caja de soles.
+   * El plan, el pago y sus movimientos de caja se guardan juntos (todo o nada).
    */
-  const registerPayment = (planId: string, installmentId: string, input: RegisterPaymentInput): StockResult => {
+  const registerPayment: DataContextType['registerPayment'] = async (planId, installmentId, input) => {
     const planNow = plans.find(pl => pl.id === planId);
     const instNow = planNow?.installments.find((i: any) => i.id === installmentId);
     if (!planNow || !instNow) return { ok: false, error: 'No se encontró la cuota.' };
@@ -2153,8 +2169,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (received > owed + 0.01) return { ok: false, error: `El monto equivale a USD ${received.toFixed(2)} y supera el saldo de USD ${owed.toFixed(2)}.` };
     const paymentData = { date: input.date, amount: Math.round(Math.min(received, owed) * 100) / 100, receipt: documentLabel(input.document) };
 
-    const paymentId = nextSequentialId('PAG', payments.map(p => p.id));
-    setPlans(prevPlans => prevPlans.map(plan => {
+    const paymentId = allocId('PAG', payments.map(p => p.id));
+    const d = money.draft();
+    d.plans = d.plans.map(plan => {
       if (plan.id !== planId) return plan;
 
       const targetIdx = plan.installments.findIndex(inst => inst.id === installmentId);
@@ -2199,11 +2216,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       });
       // El saldo y el estado del plan los calcula recomputePlan (única función que los escribe)
       return recomputePlan({ ...plan, installments: updatedInstallments }, todayISO);
-    }));
+    });
 
     // Pago global (una parte por medio usado, un comprobante) y un movimiento de caja por parte
-    const planRef = plans.find(pl => pl.id === planId);
-    const enrollmentRef = enrollments.find(e => e.id === planRef?.mat);
+    const enrollmentRef = enrollments.find(e => e.id === planNow.mat);
     const studentName = enrollmentRef?.student || 'Alumno';
     const built = buildPaymentRecord({
       id: paymentId,
@@ -2220,19 +2236,22 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       note: input.note?.trim(),
       user: currentUser.name,
     });
-    setPayments(prev => [built.payment, ...prev]);
-    built.cashMovements.forEach(m => addCashMovement(m));
-    return { ok: true };
+    d.payments = [built.payment, ...d.payments];
+    d.cashMovements = [...newCashMovements(built.cashMovements), ...d.cashMovements];
+    return saveMoney('cobrar', d);
   };
 
-  const refinanceInstallment = (planId: string, installmentId: string, input: RefinanceInput): StockResult => {
+  const refinanceInstallment: DataContextType['refinanceInstallment'] = async (planId, installmentId, input) => {
     const plan = plans.find(p => p.id === planId);
     if (!plan) return { ok: false, error: 'No se encontró el plan.' };
     const today = todayLocalISO();
     const problems = validateRefinance(plan, installmentId, input, today);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const installmentName = plan.installments.find(x => x.id === installmentId)?.name ?? '';
-    setPlans(prev => prev.map(p => (p.id === planId ? applyRefinance(p, installmentId, input, today, new Date().toISOString()) : p)));
+    const d = money.draft();
+    d.plans = d.plans.map(p => (p.id === planId ? applyRefinance(p, installmentId, input, today, new Date().toISOString()) : p));
+    const saved = await saveMoney('refinanciar', d);
+    if (!saved.ok) return saved;
     notify('installment_refinanced', {
       title: 'Cuota refinanciada',
       message: `${currentUser.name} refinanció «${installmentName}» del plan ${planId} (${plan.mat}): ${input.reason.trim()}`,
@@ -2251,8 +2270,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const updateStudent: DataContextType['updateStudent'] = async (id, studentData) => {
     const res = await people.updateStudent(id, studentData);
     if (res.ok && res.value) {
+      // El nombre del alumno en las matrículas se deriva de su id; solo la agenda (en memoria) conserva una copia
       const synced = syncStudentName(id, res.value.name, enrollments, schedules);
-      if (synced.changed) { setEnrollments(synced.enrollments); setSchedules(synced.schedules); }
+      if (synced.changed) setSchedules(synced.schedules);
     }
     return res;
   };
@@ -2312,18 +2332,17 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (!result.ok || !result.batch) return { ok: false, error: `Las personas se guardaron, pero no se pudo matricular: ${result.error}` };
     const b = result.batch;
 
-    // Una sola aplicación de cambios: si el armado falló arriba, no se creó nada.
-    setEnrollments(prev => [...prev, ...b.enrollments]);
-    setPlans(prev => [...prev, ...b.plans]);
-    setPayments(prev => [...b.payments, ...prev]);
-    setPromotionGroups(prev => [...prev, ...b.promotionGroups]);
+    // La matrícula, su plan, el pago, la caja y el grupo promocional se guardan en UNA operación de la base (todo o nada)
+    const d = money.draft();
+    d.enrollments = [...d.enrollments, ...b.enrollments];
+    d.plans = [...d.plans, ...b.plans];
+    d.payments = [...b.payments, ...d.payments];
+    d.promotionGroups = [...d.promotionGroups, ...b.promotionGroups];
+    d.cashMovements = [...newCashMovements(b.cashMovements), ...d.cashMovements];
+    const saved = await saveMoney('matricular', d);
+    if (!saved.ok) return { ok: false, error: `Las personas se guardaron, pero no se pudo matricular: ${saved.error}` };
+    // La agenda (la primera asesoría) sigue en memoria
     setSchedules(prev => [...prev, ...b.schedules]);
-    setCashMovements(prev => [
-      ...b.cashMovements.map((m, i) => ({
-        ...m, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name,
-      })),
-      ...prev,
-    ]);
 
     return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
   };
@@ -2351,7 +2370,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const resolveEnrollmentDrop = (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }): StockResult => {
+  const resolveEnrollmentDrop: DataContextType['resolveEnrollmentDrop'] = async (requestId, decision, opts) => {
     const request = dropRequests.find(r => r.id === requestId);
     if (!request) return { ok: false, error: 'No se encontró la solicitud.' };
     const auth = canResolve(authority(), 'Caída', request.requestedBy);
@@ -2376,8 +2395,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const forgive = opts.forgiveOverdue && preview.overdue.length > 0;
     const effects = summarizeDrop(preview, forgive);
 
-    setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e)));
-    if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p)));
+    // La matrícula y su plan (cuotas anuladas o condonadas) se guardan juntos en la base
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e));
+    if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p));
+    const saved = await saveMoney('caida', d);
+    if (!saved.ok) return saved;
+
+    // La agenda y las solicitudes siguen en memoria
     if (preview.scheduleIds.length > 0) {
       setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
       logSystemCancel(preview.scheduleIds, 'Caída de la matrícula');
@@ -2396,10 +2421,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const updateEnrollmentData = (enrollmentId: string, after: EnrollmentEditValues, reason: string): StockResult => {
+  const updateEnrollmentData: DataContextType['updateEnrollmentData'] = async (enrollmentId, after, reason) => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
-    const student = students.find(s => s.id === enrollment.studentId) ?? students.find(s => s.name === enrollment.student);
     const names = {
       origin: (id: string) => leadSources.find(l => l.id === id)?.name ?? '',
       advisor: (id: string) => { const m = staff.find(x => x.id === id); return m ? `${m.names} ${m.lastNameP}`.trim() : ''; },
@@ -2408,7 +2432,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const problems = validateEnrollmentEdit(enrollment, after, changes, reason);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const at = new Date().toISOString();
-    setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e)));
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e));
+    const saved = await saveMoney('corregir', d);
+    if (!saved.ok) return saved;
+    // El registro de las correcciones sigue en memoria
     setEnrollmentChanges(prev => [
       ...changes.map(c => ({ id: allocId('COR', enrollmentChanges.map(x => x.id)), enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
       ...prev,
@@ -2420,7 +2448,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const authority = (): AuthorityContext => ({ user: currentUser, roles, permissions });
   const can = (permission: string) => canDo(authority(), permission);
 
-  const reversePayment = (paymentId: string, input: ReversalInput): StockResult => {
+  const reversePayment: DataContextType['reversePayment'] = async (paymentId, input) => {
     const payment = payments.find(p => p.id === paymentId);
     if (!payment) return { ok: false, error: 'No se encontró el pago.' };
     if (!can(PERM.reversePayment)) return { ok: false, error: 'Su rol no puede reversar pagos.' };
@@ -2434,45 +2462,54 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if ((noteMode === 'emitir' || noteMode === 'externa') && !can(PERM.creditNote)) return { ok: false, error: 'Su rol no puede emitir ni registrar notas de crédito.' };
     const today = todayLocalISO();
     const targets = reversalTargets(payment, ctx);
+    const d = money.draft();
     let note: CreditNote | undefined;
     if (noteMode === 'emitir' || noteMode === 'externa') {
       const built = buildCreditNote({ payment, mode: noteMode, external: input.creditNote, reason: input.reason, detail: input.detail, by: currentUser.name, at: new Date().toISOString() }, creditNotes);
-      note = { ...built, id: nextSequentialId('NC', creditNotes.map(n => n.id)) };
-      setCreditNotes(prev => [note!, ...prev]);
+      note = { ...built, id: allocId('NC', creditNotes.map(n => n.id)) };
+      d.creditNotes = [note, ...d.creditNotes];
     }
 
     // 1) Cuotas y planes: se repone lo que cubrió el pago
-    setPlans(prev => prev.map(plan => {
+    d.plans = d.plans.map(plan => {
       const t = targets.find(x => x.planId === plan.id);
       return t ? applyReversalToPlan(plan, payment, t.shareUSD, today).plan : plan;
-    }));
+    });
     // 2) El pago queda anulado (con constancia); su comprobante y su operación quedan libres
-    setPayments(prev => prev.map(p => (p.id === paymentId
-      ? { ...p, status: 'Anulado', reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim(), refunded: input.refunded, creditNote: note?.label, creditNoteId: note?.id, creditNoteMode: noteMode } }
-      : p)));
+    d.payments = d.payments.map(p => (p.id === paymentId
+      ? { ...p, status: 'Anulado' as const, reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim(), refunded: input.refunded, creditNote: note?.label, creditNoteId: note?.id, creditNoteMode: noteMode } }
+      : p));
     // 3) Caja: devolución (egreso) o ingresos reversados
     if (input.refunded) {
       const parts = payment.parts && payment.parts.length > 0 ? payment.parts : [{ id: 'x', currency: payment.currency ?? 'USD', amount: payment.amount, method: payment.method } as PaymentPart];
       const usd = partsUSD(parts) ?? [payment.amount];
-      const branchId = enrollments.find(e => e.id === payment.enrollmentIds?.[0])?.branchId;
-      parts.forEach((part, i) => addCashMovement({
-        kind: 'Egreso',
-        concept: 'Devolución de pago',
-        reference: `${payment.id} / ${payment.student}`,
-        currency: part.currency,
-        amount: part.amount,
-        exchangeRate: part.currency === 'PEN' ? part.exchangeRate : undefined,
-        amountUSD: usd[i] ?? payment.amount,
-        method: part.method,
-        bank: part.bank,
-        operationNumber: part.operationNumber,
-        branchId,
-        paymentId,
-        enrollmentIds: payment.enrollmentIds,
-      }));
+      const branchId = payment.branchId ?? enrollments.find(e => e.id === payment.enrollmentIds?.[0])?.branchId;
+      d.cashMovements = [
+        ...newCashMovements(parts.map((part, i) => ({
+          date: new Date().toISOString(),
+          status: 'Aplicado' as const,
+          kind: 'Egreso' as const,
+          concept: 'Devolución de pago',
+          reference: `${payment.id} / ${payment.student}`,
+          currency: part.currency,
+          amount: part.amount,
+          exchangeRate: part.currency === 'PEN' ? part.exchangeRate : undefined,
+          amountUSD: usd[i] ?? payment.amount,
+          method: part.method,
+          bank: part.bank,
+          operationNumber: part.operationNumber,
+          branchId,
+          paymentId,
+          enrollmentIds: payment.enrollmentIds,
+        }))),
+        ...d.cashMovements,
+      ];
     } else {
-      setCashMovements(prev => prev.map(m => (m.paymentId === paymentId && m.kind === 'Ingreso' ? { ...m, status: 'Reversado' } : m)));
+      d.cashMovements = d.cashMovements.map(m => (m.paymentId === paymentId && m.kind === 'Ingreso' ? { ...m, status: 'Reversado' as const } : m));
     }
+    // Todo junto (pago, plan, nota de crédito y caja): o se guarda todo o no se guarda nada
+    const saved = await saveMoney('reversar_pago', d);
+    if (!saved.ok) return saved;
     notify('payment_reversed', { title: 'Pago reversado', message: `${currentUser.name} reversó el pago ${paymentId} de ${payment.student} (${input.reason}).`, type: 'warning', scope: { requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
@@ -2574,27 +2611,34 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const problems = validateCashReversal(movement, input.reason, input.detail, cashMovements);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const check = cashReversalCheck(movement, cashMovements);
-    if (check.restock) {
-      // La base devuelve las unidades al stock (y deja el kardex); si eso falla, el movimiento de caja no se reversa
-      const r = await log.restockReversedSale({ branchId: check.restock.branchId, itemId: check.restock.itemId, qty: check.restock.qty, movementId: movement.id });
-      if (!r.ok) return { ok: false, error: r.error };
-    }
-    setCashMovements(prev => applyCashReversal(prev, id, { ...input, at: new Date().toISOString(), by: currentUser.name }));
+    const d = money.draft();
+    d.cashMovements = applyCashReversal(d.cashMovements, id, { ...input, at: new Date().toISOString(), by: currentUser.name });
+    // Si fue una venta, la base devuelve las unidades al stock (y deja el kardex) en la MISMA operación que reversa el movimiento: si algo falla, no se hace nada
+    const stock: StockOp[] = check.restock ? [{ op: 'reponer', sede: check.restock.branchId, articulo: check.restock.itemId, cantidad: check.restock.qty, movimiento: movement.id }] : [];
+    const saved = await saveMoney('reversar_movimiento', d, stock);
+    if (!saved.ok) return saved;
     notify('cash_movement_reversed', { title: 'Movimiento de caja reversado', message: `${currentUser.name} reversó el movimiento ${movement.id} (${movement.concept}): ${input.reason}.`, type: 'warning', scope: { subjectBranchId: movement.branchId } });
     return { ok: true };
   };
 
-  const createDepositBatch = (input: DepositInput): StockResult & { code?: string } => {
+  const createDepositBatch: DataContextType['createDepositBatch'] = async input => {
     if (!can(PERM.deposit)) return { ok: false, error: 'Su rol no puede crear lotes de depósito.' };
     const closed = closedMessage(cashClosures, 'caja', input.currency, input.date);
     if (closed) return { ok: false, error: closed };
     const problems = validateDeposit(input, cashMovements, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDeposit(input, cashMovements, currentUser.name, new Date(`${input.date}T12:00:00`).toISOString());
-    const created: CashMovement = { ...built.egress, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name, status: 'Aplicado' };
+    // El egreso del lote es de la sede de los ingresos que se depositan (si vienen de varias sedes, es de caja general)
+    const sedes = Array.from(new Set(built.selected.map(m => m.branchId ?? '')));
+    const created: CashMovement = {
+      ...built.egress, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name, status: 'Aplicado',
+      ...(sedes.length === 1 && sedes[0] ? { branchId: sedes[0] } : {}),
+    };
     const ids = new Set(built.selected.map(m => m.id));
-    setCashMovements(prev => [created, ...prev.map(m => (ids.has(m.id) ? { ...m, depositedIn: built.code } : m))]);
-    return { ok: true, code: built.code };
+    const d = money.draft();
+    d.cashMovements = [created, ...d.cashMovements.map(m => (ids.has(m.id) ? { ...m, depositedIn: built.code } : m))];
+    const saved = await saveMoney('deposito', d);
+    return saved.ok ? { ok: true, code: built.code } : saved;
   };
 
   // ---- Caja chica
@@ -2705,7 +2749,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return openChange('Traslado de sede', enrollment, input.reason, input.detail, { branchId: input.branchId, firstDate: input.firstDate, firstTime: input.firstTime });
   };
 
-  const resolveChangeRequest = (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string): StockResult => {
+  const resolveChangeRequest: DataContextType['resolveChangeRequest'] = async (requestId, decision, note) => {
     const request = changeRequests.find(r => r.id === requestId);
     if (!request) return { ok: false, error: 'No se encontró la solicitud.' };
     if (request.status !== 'Pendiente') return { ok: false, error: 'Esta solicitud ya fue resuelta.' };
@@ -2727,13 +2771,18 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const plan = plans.find(p => p.mat === enrollment.id);
     const effects: string[] = [];
 
+    // En cada caso, lo que cambia en la matrícula y su plan se guarda primero en la base (todo o nada); lo que sigue en memoria (agenda, registro de
+    // correcciones y la propia solicitud) se aplica solo si eso salió bien.
     if (request.kind === 'Reactivación') {
       const problems = reactivationProblems(enrollment, c);
       if (problems.length > 0) return { ok: false, error: problems[0] };
       const startDate = request.payload.startDate || today;
       const preview = previewReactivation(enrollment, c, startDate);
-      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa' as const, dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e)));
-      if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyReactivationToPlan(p, preview, today) : p)));
+      const d = money.draft();
+      d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa' as const, dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e));
+      if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyReactivationToPlan(p, preview, today) : p));
+      const saved = await saveMoney('reactivacion', d);
+      if (!saved.ok) return saved;
       log('reactivation', 'Reactivación de la matrícula', 'Caída', 'Activa');
       effects.push(`Matrícula reactivada desde el ${startDate}.`, `${preview.restored.length} cuota(s) restituida(s) por USD ${preview.restoredUSD.toFixed(2)}, con el calendario corrido ${preview.shiftDays} día(s).`);
       if (preview.keptDebt.length > 0) effects.push(`Sigue pendiente la deuda vencida de USD ${preview.keptDebtUSD.toFixed(2)}.`);
@@ -2745,12 +2794,15 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       if (!preview) return { ok: false, error: 'No se pudo calcular el precio del programa nuevo.' };
       if (preview.remaining < 0) return { ok: false, error: `Ya se cobró más (USD ${preview.paidUSD.toFixed(2)}) que el precio del programa nuevo (USD ${preview.newTotal.toFixed(2)}): primero devuelva la diferencia.` };
       const toLabel = preview.level ? `${preview.program.name} - ${preview.level.name}` : preview.program.name;
-      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? {
+      const d = money.draft();
+      d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? {
         ...e, program: preview.program.name, programId: preview.program.id, level: preview.level?.name ?? 'Sin nivel', levelId: preview.level?.id,
         tariffId: preview.tariff.id, tariffName: preview.tariff.name, assignedPrice: preview.newTotal,
         verificationStatus: preview.verificationReset ? 'Pendiente' : e.verificationStatus,
-      } : e)));
-      if (plan) setPlans(prev => prev.map(p => (p.id === plan.id ? applyProgramChangeToPlan(p, preview, today) : p)));
+      } : e));
+      if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyProgramChangeToPlan(p, preview, today) : p));
+      const saved = await saveMoney('cambio_programa', d);
+      if (!saved.ok) return saved;
       const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && o.studentId === enrollment.studentId);
       setSchedules(prev => prev.map(sc => {
         const mine = sc.studentId === enrollment.studentId;
@@ -2768,7 +2820,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       const preview = previewTransfer(enrollment, input, c);
       if (!preview) return { ok: false, error: 'No se encontró la sede destino.' };
       const fromName = preview.fromName;
-      setEnrollments(prev => prev.map(e => (e.id === enrollment.id ? { ...e, branchId: input.branchId, sede: preview.toName } : e)));
+      const d = money.draft();
+      d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, branchId: input.branchId, sede: preview.toName } : e));
+      const saved = await saveMoney('traslado', d);
+      if (!saved.ok) return saved;
       if (preview.scheduleIds.length > 0) {
         setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
         logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
@@ -2829,7 +2884,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const generateEnrollmentDocument = (enrollmentId: string, kind: DocKind): StockResult => {
+  const generateEnrollmentDocument: DataContextType['generateEnrollmentDocument'] = async (enrollmentId, kind) => {
     if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede generar contratos ni fichas.' };
     const ctx = documentContextOf(enrollmentId);
     if (!ctx) return { ok: false, error: 'No se encontró la matrícula.' };
@@ -2837,11 +2892,12 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDocument(kind, ctx);
     const issued = issueDocument(kind, ctx.enrollment.documents?.[kind], built, currentUser.name, new Date().toISOString(), issuedNumbers(enrollments, kind));
-    setEnrollments(prev => prev.map(e => (e.id === enrollmentId ? { ...e, documents: { ...(e.documents ?? {}), [kind]: issued } } : e)));
-    return { ok: true };
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollmentId ? { ...e, documents: { ...(e.documents ?? {}), [kind]: issued } } : e));
+    return saveMoney('documentos', d);
   };
 
-  const registerDocumentSignature = (enrollmentId: string, kind: DocKind, input: { date: string; file: string }): StockResult => {
+  const registerDocumentSignature: DataContextType['registerDocumentSignature'] = async (enrollmentId, kind, input) => {
     if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede registrar firmas.' };
     const ctx = documentContextOf(enrollmentId);
     if (!ctx) return { ok: false, error: 'No se encontró la matrícula.' };
@@ -2849,10 +2905,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const state = docState(issued, buildDocument(kind, ctx).fingerprint);
     const problems = validateSignature(issued, state, input, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
-    setEnrollments(prev => prev.map(e => (e.id === enrollmentId && e.documents?.[kind]
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollmentId && e.documents?.[kind]
       ? { ...e, documents: { ...e.documents, [kind]: { ...e.documents[kind]!, signedAt: input.date, signedBy: currentUser.name, signedFile: input.file.trim() } } }
-      : e)));
-    return { ok: true };
+      : e));
+    return saveMoney('documentos', d);
   };
 
   // ---- Cobranza: política, recordatorios y mora
@@ -2875,18 +2932,19 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const chargeMora = (planId: string, installmentId: string): StockResult => {
+  const chargeMora: DataContextType['chargeMora'] = async (planId, installmentId) => {
     if (!can(PERM.chargeMora)) return { ok: false, error: 'Su rol no puede cobrar mora.' };
     const plan = plans.find(p => p.id === planId);
     if (!plan) return { ok: false, error: 'No se encontró el plan.' };
     const today = todayLocalISO();
     const problems = validateMoraCharge(plan, installmentId, collectionPolicy, today);
     if (problems.length > 0) return { ok: false, error: problems[0] };
-    setPlans(prev => prev.map(pl => (pl.id === planId ? chargeMoraOn(pl, installmentId, collectionPolicy, today) : pl)));
-    return { ok: true };
+    const d = money.draft();
+    d.plans = d.plans.map(pl => (pl.id === planId ? chargeMoraOn(pl, installmentId, collectionPolicy, today) : pl));
+    return saveMoney('mora', d);
   };
 
-  const enableExtension = (enrollmentId: string): StockResult => {
+  const enableExtension: DataContextType['enableExtension'] = async enrollmentId => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const v = enrollmentValidity(enrollment, programOf(enrollment, programs), schedules, todayLocalISO());
@@ -2900,10 +2958,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
             : 'La extensión se habilita cuando la matrícula está por vencer o ya terminó la duración base.',
       };
     }
-    setEnrollments(prev => prev.map(e => (e.id === enrollmentId
+    const d = money.draft();
+    d.enrollments = d.enrollments.map(e => (e.id === enrollmentId
       ? { ...e, extensionEnabledAt: new Date().toISOString(), extensionEnabledBy: currentUser.name }
-      : e)));
-    return { ok: true };
+      : e));
+    return saveMoney('extension', d);
   };
 
   const addTracking = (trackingData: Omit<Tracking, 'id'>): Tracking => {
@@ -2924,8 +2983,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   /** Las matrículas y la agenda copian el nombre del programa, del nivel y de la sede: al renombrar un catálogo se corrigen (syncCatalogLabels). */
   const relabelFrom = (catalogs: { branches: Branch[]; programs: Program[]; levels: Level[] }) => {
+    // Las matrículas derivan estos nombres de sus ids; solo la agenda (en memoria) conserva una copia
     const synced = syncCatalogLabels(enrollments, schedules, catalogs);
-    setEnrollments(synced.enrollments);
     setSchedules(synced.schedules);
   };
 

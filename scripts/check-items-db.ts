@@ -280,7 +280,7 @@ async function run() {
   check('Las acciones de artículos, precios y recetas son asíncronas', /addItems: \(items: Item\[\], prices\?: \{ itemId: string; amount: number \}\[\]\) => Promise<StockResult>/.test(ctxSrc) && /addItemPrice: \(price: [^)]*\) => Promise</.test(ctxSrc) && /saveRecipe: \(recipe: Recipe\) => Promise</.test(ctxSrc) && /setRecipeStatus: \(id: string, status: Recipe\['status'\]\) => Promise<StockResult>/.test(ctxSrc));
   check('Ninguna de estas acciones queda en la lista de las que lanzan error al negar el permiso', !['addItems', 'updateItem', 'addItemPrice', 'saveRecipe', 'duplicateRecipe', 'setRecipeStatus'].some(a => THROWS_ON_DENIAL.has(a)));
   const gate = read('src/components/auth/AccessGate.tsx');
-  check('Los artículos y las recetas se leen al iniciar sesión (antes de montar el sistema)', /loadItemCatalog\(itemRepo\)/.test(gate) && /loaded\.catalog, loaded\.items, loaded\.logistics, loaded\.people\)/.test(gate) && /itemCatalog=\{itemCatalog\}/.test(read('src/App.tsx')));
+  check('Los artículos y las recetas se leen al iniciar sesión (antes de montar el sistema)', /loadItemCatalog\(itemRepo\)/.test(gate) && /loaded\.catalog, loaded\.items, loaded\.logistics, loaded\.people, loaded\.money\)/.test(gate) && /itemCatalog=\{itemCatalog\}/.test(read('src/App.tsx')));
   const hook = read('src/hooks/useItemCatalog.ts');
   check('El gancho arranca con lo ya leído y valida contra lo último que se vio', /useItemCatalog\(initial: ItemCatalogData/.test(hook) && /useState<Item\[\]>\(initial\.items\)/.test(hook) && /itemsRef\.current = items/.test(hook) && !/useEffect/.test(hook));
   const catalogPage = read('src/pages/logistics/ItemCatalog.tsx');

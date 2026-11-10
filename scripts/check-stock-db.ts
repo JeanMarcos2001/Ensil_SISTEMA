@@ -452,7 +452,7 @@ check('Las acciones que mueven stock o guardan Logística son asíncronas y devu
 }), asyncActions.filter(a => !new RegExp(`\\n  ${a}: [\\s\\S]*?Promise<StockResult`).test(iface)).join());
 const gate = read('src/components/auth/AccessGate.tsx');
 check('Logística se lee de la base al iniciar sesión (antes de montar el sistema), junto con roles, cuentas, sedes, catálogo y artículos',
-  /loadLogistics\(logisticsRepo\)/.test(gate) && /loaded\.items, loaded\.logistics, loaded\.people\)/.test(gate) && /logistics=\{logistics\}/.test(read('src/App.tsx')));
+  /loadLogistics\(logisticsRepo\)/.test(gate) && /loaded\.items, loaded\.logistics, loaded\.people, loaded\.money\)/.test(gate) && /logistics=\{logistics\}/.test(read('src/App.tsx')));
 const hook = read('src/hooks/useLogistics.ts');
 check('Después de cada operación se vuelve a leer lo que cambió (se muestra lo que de verdad quedó guardado) y el kardex solo pide lo nuevo',
   /settle/.test(hook) && /refreshLedger/.test(hook) && /kardexId: kardexRef\.current\[0\]\?\.id/.test(hook) && /kardexView\(kardexLines, names\)/.test(hook));

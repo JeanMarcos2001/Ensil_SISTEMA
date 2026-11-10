@@ -42,6 +42,7 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
   const [document, setDocument] = useState<PaymentDocument>(emptyDocument());
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const firstPayable = (id: string) =>
     plans.find(p => p.id === id)?.installments.find((i: any) => i.balance > 0 && i.status !== 'Refinanciada')?.id ?? '';
@@ -82,10 +83,13 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
     setInstallmentId(firstPayable(id));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     setError(null);
     if (!selectedPlan || !installment) { setError('Seleccione la matrícula y la cuota a la que se aplicará el pago.'); return; }
-    const result = registerPayment(selectedPlan.id, installment.id, { date: payDate, parts, document, note });
+    setSaving(true);
+    const result = await registerPayment(selectedPlan.id, installment.id, { date: payDate, parts, document, note });
+    setSaving(false);
     if (!result.ok) { setError(result.error || 'No se pudo registrar el pago.'); return; }
     onSaved?.();
     onClose();
@@ -100,7 +104,7 @@ export function RegisterPaymentModal({ isOpen, onClose, initialPlanId, initialIn
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>Guardar y aplicar</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar y aplicar'}</Button>
         </div>
       }
     >

@@ -55,6 +55,7 @@ export function Plans() {
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isRefinanceOpen, setIsRefinanceOpen] = useState(false);
   const [refinanceError, setRefinanceError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Siempre la versión actual del plan y de la cuota elegidos (cambian al cobrar, refinanciar o cobrar mora)
   const selectedPlan = selectedPlanSnap ? plans.find(pl => pl.id === selectedPlanSnap.id) ?? selectedPlanSnap : null;
@@ -134,9 +135,12 @@ export function Plans() {
     setIsRefinanceOpen(true);
   };
 
-  const handleRefinance = () => {
+  const handleRefinance = async () => {
+    if (saving) return;
     if (selectedPlan && selectedInstallment) {
-      const r = refinanceInstallment(selectedPlan.id, selectedInstallment.id, { name: refinanceForm.name, dueDate: refinanceForm.dueDate, reason: refinanceForm.reason });
+      setSaving(true);
+      const r = await refinanceInstallment(selectedPlan.id, selectedInstallment.id, { name: refinanceForm.name, dueDate: refinanceForm.dueDate, reason: refinanceForm.reason });
+      setSaving(false);
       if (!r.ok) { setRefinanceError(r.error ?? 'No se pudo refinanciar la cuota.'); return; }
       setIsRefinanceOpen(false);
       setIsPlanDetailOpen(false);
@@ -441,7 +445,7 @@ export function Plans() {
                   </p>
                   {moraMessage && <p className="text-xs text-text-muted">{moraMessage}</p>}
                   {collectionPolicy.moraMonthlyRate > 0 && m.pending >= 0.01 && (
-                    <Button variant="secondary" size="sm" disabled={!can(PERM.chargeMora)} onClick={() => { const r = chargeMora(selectedPlan.id, selectedInstallment.id); setMoraMessage(r.ok ? 'Se generó la cuota de mora: ya se puede cobrar.' : r.error ?? 'No se pudo cobrar la mora.'); }}>
+                    <Button variant="secondary" size="sm" disabled={!can(PERM.chargeMora) || saving} onClick={async () => { setSaving(true); const r = await chargeMora(selectedPlan.id, selectedInstallment.id); setSaving(false); setMoraMessage(r.ok ? 'Se generó la cuota de mora: ya se puede cobrar.' : r.error ?? 'No se pudo cobrar la mora.'); }}>
                       Cobrar mora (genera una cuota)
                     </Button>
                   )}

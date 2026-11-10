@@ -9,10 +9,10 @@ import {
 } from '../data/seedCatalog';
 import { leadSourceToRow, levelToRow, paymentTypeToRow, programToRow, promotionToRow, tariffToRow } from './catalogDb';
 
-export type Value = string | number | boolean | null | string[] | object[];
+export type Value = string | number | boolean | null | string[] | object;
 
 /** Columnas que guardan una lista de objetos (jsonb): una lista vacía NO es un arreglo de textos. */
-const JSONB_COLUMNS = new Set(['lineas', 'composicion', 'articulos', 'entrenamientos_variables']);
+const JSONB_COLUMNS = new Set(['lineas', 'composicion', 'articulos', 'entrenamientos_variables', 'cobros', 'partes', 'reparto', 'documentos', 'documento', 'reversa', 'deposito', 'venta']);
 
 const q = (v: string): string => `'${v.replace(/'/g, "''")}'`;
 
@@ -21,8 +21,8 @@ function literal(v: Value, column = ''): string {
   if (typeof v === 'number') return String(v);
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (typeof v === 'string') return q(v);
-  // Lista de textos → text[]; lista de objetos (el desglose de un tarifario) → jsonb
-  if (JSONB_COLUMNS.has(column)) return `${q(JSON.stringify(v))}::jsonb`;
+  // Lista de textos → text[]; lista de objetos (el desglose de un tarifario) u objeto (una constancia) → jsonb
+  if (JSONB_COLUMNS.has(column) || !Array.isArray(v)) return `${q(JSON.stringify(v))}::jsonb`;
   if (v.length === 0 || typeof v[0] === 'string') return `array[${(v as string[]).map(q).join(', ')}]::text[]`;
   return `${q(JSON.stringify(v))}::jsonb`;
 }

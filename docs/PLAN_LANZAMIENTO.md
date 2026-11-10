@@ -171,8 +171,9 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.5 Matrícula, plan, pagos y caja *(el corazón: aquí está el dinero)*
 
-- ☐ 🤖 Matrículas (con su ciclo: caída, reactivación, cambio de programa, traslado, renovación), planes y cuotas, pagos y reversas, caja y caja chica con sus cierres y reaperturas, notas de crédito, política de cobranza, mora y recordatorios. *(XL)*
-- ☐ 🤖 **Pruebas de «dinero cuadra»:** que la suma de pagos, cuotas, caja y cierres coincida siempre. *(M)*
+- ☑ 🤖 Matrículas, planes y cuotas, pagos y reversas, caja (ingreso, egreso, depósito, venta y reversa), notas de crédito, grupos promocionales, refinanciación, mora, caída, reactivación, cambio de programa, traslado, contrato y ficha, extensión y entrega de materiales (2026-11-10, migración 0015; aplicada a la base real el 2026-11-10; **falta subir el código**): el cliente calcula con las reglas puras y la base guarda y vigila con una llamada atómica por acción (función del registro, tablas permitidas, sede, invariantes del dinero y stock en la misma operación); los pagos, la caja y las notas solo se agregan; se ve por sede (también alumnos y titulares). *(XL)*
+- ☐ 🤖 Lo que de este bloque sigue en memoria: caja chica, cierres y reaperturas de caja, política de cobranza y recordatorios, solicitudes con su historial, registro de correcciones y la plantilla del contrato. *(L)*
+- ☐ 🤖 **Pruebas de «dinero cuadra»:** que la suma de pagos, cuotas, caja y cierres coincida siempre. *(Lo de pagos, cuotas y caja ya lo vigila la base en cada operación —cuota = monto − cobrado, plan = suma de cuotas abiertas, partes = monto—; falta cuadrar con los cierres, que siguen en memoria.)* *(M)*
 
 ### 6.6 Contratos y planilla  *(Lote 3)*
 

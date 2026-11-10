@@ -189,6 +189,7 @@ export function buildPaymentRecord(input: PaymentRecordInput): { payment: Paymen
     enrollmentIds: input.enrollmentIds,
     user: input.user,
     comment: input.note || undefined,
+    ...(input.branchId ? { branchId: input.branchId } : {}),
   };
   const cashMovements = input.parts.map((p, i) => ({
     date: input.cashDate ?? new Date().toISOString(),

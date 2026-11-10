@@ -27,6 +27,7 @@ export function DepositBatchModal({ isOpen, onClose, currency }: Props) {
   const [bank, setBank] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -40,8 +41,11 @@ export function DepositBatchModal({ isOpen, onClose, currency }: Props) {
   const allSelected = pool.length > 0 && selected.length === pool.length;
   const toggle = (id: string) => { setSelected(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])); setError(null); };
 
-  const submit = () => {
-    const r = createDepositBatch({ date, bank, currency, movementIds: selected });
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    const r = await createDepositBatch({ date, bank, currency, movementIds: selected });
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo crear el lote.'); return; }
     onClose();
   };
@@ -55,7 +59,7 @@ export function DepositBatchModal({ isOpen, onClose, currency }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={submit} disabled={pool.length === 0}>Crear lote y registrar egreso</Button>
+          <Button variant="primary" onClick={submit} disabled={pool.length === 0 || saving}>{saving ? 'Guardando…' : 'Crear lote y registrar egreso'}</Button>
         </div>
       }
     >

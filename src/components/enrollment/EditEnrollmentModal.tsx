@@ -26,6 +26,7 @@ export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
   const [values, setValues] = useState<EnrollmentEditValues>({ observation: '', originId: '', advisorId: '' });
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!enrollment) return;
@@ -49,8 +50,11 @@ export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
     ? [{ id: values.advisorId, label: names.advisor(values.advisorId) || values.advisorId }, ...advisors.map(a => ({ id: a.staff.id, label: `${a.staff.names} ${a.staff.lastNameP} — ${a.branchName}` }))]
     : advisors.map(a => ({ id: a.staff.id, label: `${a.staff.names} ${a.staff.lastNameP} — ${a.branchName}` }));
 
-  const handleSave = () => {
-    const r = data.updateEnrollmentData(enrollment.id, values, reason);
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    const r = await data.updateEnrollmentData(enrollment.id, values, reason);
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo guardar.'); return; }
     onClose();
   };
@@ -71,7 +75,7 @@ export function EditEnrollmentModal({ enrollmentId, onClose }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>Guardar corrección</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar corrección'}</Button>
         </div>
       }
     >

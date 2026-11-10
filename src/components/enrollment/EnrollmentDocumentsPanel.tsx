@@ -21,6 +21,7 @@ export function EnrollmentDocumentsPanel({ enrollmentId }: { enrollmentId: strin
   const [signDate, setSignDate] = useState(todayLocalISO());
   const [signFile, setSignFile] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const ctx = useMemo(() => data.documentContextOf(enrollmentId), [enrollmentId, data.enrollments, data.students, data.guardians, data.plans, data.schedules, data.programs, data.branches, data.companies, data.contractTemplate]);
   if (!ctx) return null;
@@ -28,13 +29,18 @@ export function EnrollmentDocumentsPanel({ enrollmentId }: { enrollmentId: strin
   const built: Record<DocKind, BuiltDocument> = { contract: buildDocument('contract', ctx), ficha: buildDocument('ficha', ctx) };
   const canEdit = data.can(PERM.documents);
 
-  const generate = (kind: DocKind) => {
-    const r = data.generateEnrollmentDocument(enrollmentId, kind);
+  const generate = async (kind: DocKind) => {
+    if (saving) return;
+    setSaving(true);
+    const r = await data.generateEnrollmentDocument(enrollmentId, kind);
+    setSaving(false);
     setError(r.ok ? null : r.error ?? 'No se pudo generar el documento.');
   };
-  const submitSignature = () => {
-    if (!signing) return;
-    const r = data.registerDocumentSignature(enrollmentId, signing, { date: signDate, file: signFile });
+  const submitSignature = async () => {
+    if (!signing || saving) return;
+    setSaving(true);
+    const r = await data.registerDocumentSignature(enrollmentId, signing, { date: signDate, file: signFile });
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo registrar la firma.'); return; }
     setSigning(null); setError(null);
   };

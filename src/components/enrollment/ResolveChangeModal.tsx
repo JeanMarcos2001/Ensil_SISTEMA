@@ -21,6 +21,7 @@ export function ResolveChangeModal({ requestId, onClose }: Props) {
   const enrollment = data.enrollments.find(e => e.id === request?.enrollmentId);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => { setNote(''); setError(null); }, [requestId]);
 
   const ctx: ChangeContext | undefined = useMemo(() => {
@@ -41,8 +42,11 @@ export function ResolveChangeModal({ requestId, onClose }: Props) {
       : transferProblems(enrollment, { branchId: request.payload.branchId, firstDate: request.payload.firstDate ?? '', firstTime: request.payload.firstTime ?? '' }, ctx);
   const authority = canResolve({ user: data.currentUser, roles: data.roles, permissions: data.permissions }, request.kind, request.requestedBy);
 
-  const resolve = (decision: 'Aprobada' | 'Rechazada') => {
-    const r = data.resolveChangeRequest(request.id, decision, note);
+  const resolve = async (decision: 'Aprobada' | 'Rechazada') => {
+    if (saving) return;
+    setSaving(true);
+    const r = await data.resolveChangeRequest(request.id, decision, note);
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo resolver la solicitud.'); return; }
     onClose();
   };
@@ -58,8 +62,8 @@ export function ResolveChangeModal({ requestId, onClose }: Props) {
           <Button variant="ghost" onClick={onClose}>{pending ? 'Cancelar' : 'Cerrar'}</Button>
           {pending && (
             <>
-              <Button variant="secondary" onClick={() => resolve('Rechazada')} disabled={!authority.ok}>Rechazar solicitud</Button>
-              <Button variant="primary" onClick={() => resolve('Aprobada')} disabled={!authority.ok || blockers.length > 0}>Aprobar</Button>
+              <Button variant="secondary" onClick={() => resolve('Rechazada')} disabled={!authority.ok || saving}>Rechazar solicitud</Button>
+              <Button variant="primary" onClick={() => resolve('Aprobada')} disabled={!authority.ok || blockers.length > 0 || saving}>{saving ? 'Guardando…' : 'Aprobar'}</Button>
             </>
           )}
         </div>

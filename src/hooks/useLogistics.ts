@@ -160,6 +160,8 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
 
   return {
     stockItems: stock, kardex, adjustments, shipments, transfers, incidents, couriers, shippingMethods: methods, reload,
+    /** Vuelve a leer el stock y el kardex (lo usa quien movió stock dentro de otra operación de la base, como la venta en caja o la reversa). */
+    refreshStock: refreshLedger,
     registerStockEntry: entry, addAdjustment: adjust, packPackage: pack, unpackPackage: unpack, updateMinStock: minStock,
     sellFromStock: sell, deliverFromStock: deliver, restockReversedSale: restock,
     addShipment, updateShipment, updateShipmentStatus, deleteShipment,

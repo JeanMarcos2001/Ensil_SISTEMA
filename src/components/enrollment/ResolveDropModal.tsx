@@ -23,6 +23,7 @@ export function ResolveDropModal({ requestId, onClose }: Props) {
   const [forgive, setForgive] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => { setForgive(false); setNote(''); setError(null); }, [requestId]);
 
@@ -40,8 +41,11 @@ export function ResolveDropModal({ requestId, onClose }: Props) {
   if (!request || !enrollment || !preview) return null;
   const pending = request.status === 'Pendiente';
 
-  const resolve = (decision: 'Aprobada' | 'Rechazada') => {
-    const r = data.resolveEnrollmentDrop(request.id, decision, { note, forgiveOverdue: forgive });
+  const resolve = async (decision: 'Aprobada' | 'Rechazada') => {
+    if (saving) return;
+    setSaving(true);
+    const r = await data.resolveEnrollmentDrop(request.id, decision, { note, forgiveOverdue: forgive });
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo resolver la solicitud.'); return; }
     onClose();
   };
@@ -57,8 +61,8 @@ export function ResolveDropModal({ requestId, onClose }: Props) {
           <Button variant="ghost" onClick={onClose}>{pending ? 'Cancelar' : 'Cerrar'}</Button>
           {pending && (
             <>
-              <Button variant="secondary" onClick={() => resolve('Rechazada')}>Rechazar solicitud</Button>
-              <Button variant="primary" onClick={() => resolve('Aprobada')}>Aprobar caída</Button>
+              <Button variant="secondary" onClick={() => resolve('Rechazada')} disabled={saving}>Rechazar solicitud</Button>
+              <Button variant="primary" onClick={() => resolve('Aprobada')} disabled={saving}>{saving ? 'Guardando…' : 'Aprobar caída'}</Button>
             </>
           )}
         </div>

@@ -231,3 +231,14 @@ El almacén central pertenece a **SILEE**, igual que Los Olivos.
 - **Ilo** (en la web) **no se cargó**: el usuario pidió esperar; falta definir su empresa.
 - Las 4 empresas nuevas se cargaron con la razón social **como la escribió el usuario** y con una nota en «Observaciones»: confirmarla con la ficha RUC de SUNAT.
 - `supabase/seed/filiales_de_prueba.sql` quedó obsoleto (Piura ya no es de Colegio Ensil); se retira en la limpieza de pruebas.
+
+## Matrículas y dinero en la base de datos (2026-11-10)
+
+- **Migración 0015** (`supabase/migrations/20261110140000_matriculas_y_dinero.sql`; para deshacer, `supabase/deshacer/20261110140000_matriculas_y_dinero.down.sql`, que **borra las matrículas, planes, cuotas, pagos, movimientos de caja, notas de crédito y grupos promocionales guardados** y devuelve los alumnos y titulares a verse sin límite por sede): crea `matriculas`, `planes`, `cuotas` (con lo cobrado en cada una), `pagos` (con sus partes), `movimientos_caja`, `notas_credito` y `grupos_promocionales`, los candados de «solo se agrega» (pagos, caja y notas), la función pública `aplicar_cambios_matricula(p_accion text, p jsonb)` (una llamada atómica por acción, con la función del registro, las tablas permitidas, la sede y los invariantes del dinero) y el alcance por sede (también de alumnos y titulares).
+- **Cómo se aplicó (2026-11-10: la migración la pegó el usuario en el editor SQL; la carga de partida la ejecuté yo; ya está hecho y verificado: 5, 5, 10 y 11). Para una copia nueva de la base, el orden es este y va ANTES de subir el código:**
+  1. Pegar y ejecutar todo `supabase/migrations/20261110140000_matriculas_y_dinero.sql` (empieza con `begin;` y termina con `commit;`: es todo o nada).
+  2. Registrar la versión: `insert into supabase_migrations.schema_migrations (version, name) values ('20261110140000', 'matriculas_y_dinero');`
+  3. Pegar y ejecutar `supabase/seed/matriculas_de_ejemplo.sql` (las 5 matrículas de ejemplo con sus planes, pagos y caja; repetible: si ya existen no se vuelven a cargar). Requiere los titulares y alumnos de ejemplo (`personas_de_ejemplo.sql`), el catálogo comercial y las sedes reales, que ya están cargados.
+  4. Comprobar: `select (select count(*) from public.matriculas) m, (select count(*) from public.planes) pl, (select count(*) from public.pagos) pa, (select count(*) from public.movimientos_caja) c;` debe dar 5, 5, 10 y 11.
+- **Avisos del analizador de Supabase:** `aplicar_cambios_matricula` aparece como «ejecutable por usuarios con sesión»: es intencional (por dentro pide la función del registro de cada acción y la sede), como las funciones de contratos, artículos, stock y personas.
+- **Si no se aplica antes de subir:** al iniciar sesión el sistema muestra «No se pudieron cargar las matrículas, los pagos y la caja» con un botón para reintentar.

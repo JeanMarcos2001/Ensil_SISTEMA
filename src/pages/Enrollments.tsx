@@ -389,11 +389,12 @@ export function Enrollments() {
       <ConfirmDialog
         isOpen={!!toExtend}
         onClose={() => setToExtend(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!toExtend) return;
-          const r = enableExtension(toExtend.id);
-          if (!r.ok) setExtendError(r.error ?? 'No se pudo habilitar la extensión.');
+          const target = toExtend;
           setToExtend(null);
+          const r = await enableExtension(target.id);
+          if (!r.ok) setExtendError(r.error ?? 'No se pudo habilitar la extensión.');
         }}
         title="Habilitar extensión"
         description={toExtend
