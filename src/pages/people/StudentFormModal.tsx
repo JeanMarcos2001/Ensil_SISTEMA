@@ -40,6 +40,7 @@ export function StudentFormModal({ isOpen, onClose, editing }: Props) {
   const [query, setQuery] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [newGuardianOpen, setNewGuardianOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,12 +59,16 @@ export function StudentFormModal({ isOpen, onClose, editing }: Props) {
         .slice(0, 6)
     : [];
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     const found = validateStudentInput(input, students, guardians, today, editing?.id);
     if (found.length > 0) { setErrors(found); return; }
     const record = buildStudent(input, editing ?? undefined);
-    if (editing) updateStudent(editing.id, record);
-    else addStudent(record);
+    // El alumno se guarda en la base de datos: se espera su respuesta y, si la rechaza, se muestra el motivo
+    setSaving(true);
+    const res = editing ? await updateStudent(editing.id, record) : await addStudent(record);
+    setSaving(false);
+    if (!res.ok) { setErrors([res.error ?? 'No se pudo guardar el alumno.']); return; }
     onClose();
   };
 
@@ -91,7 +96,7 @@ export function StudentFormModal({ isOpen, onClose, editing }: Props) {
         footer={
           <div className="flex justify-end gap-3 w-full">
             <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-            <Button type="button" variant="primary" onClick={handleSave}>Guardar Alumno</Button>
+            <Button type="button" variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Alumno'}</Button>
           </div>
         }
       >

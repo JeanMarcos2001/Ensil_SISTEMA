@@ -1,5 +1,6 @@
 /**
- * Datos de ejemplo de personas, matrículas, planes, pagos y caja, armados con las MISMAS reglas que el sistema usa al registrar
+ * Datos de ejemplo de personas, matrículas, planes, pagos y caja (los titulares y alumnos YA viven en la base: se cargan con
+ * `supabase/seed/personas_de_ejemplo.sql`, generado desde aquí con `scripts/doc-personas-seed.ts`; el resto sigue en memoria), armados con las MISMAS reglas que el sistema usa al registrar
  * (`buildPaymentRecord`, `recomputePlan`, `installmentState`) para que ninguna pantalla encuentre datos que el flujo real no
  * podría producir. Las fechas son relativas a hoy (siempre hay casos visibles) y se verifican en `scripts/check-integrity.ts`.
  *

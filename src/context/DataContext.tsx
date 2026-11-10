@@ -55,6 +55,9 @@ import { useItemCatalog } from '../hooks/useItemCatalog';
 import type { ItemCatalogData } from '../services/itemCatalog';
 import { useLogistics } from '../hooks/useLogistics';
 import type { LogisticsData } from '../services/logistics';
+import { usePeople } from '../hooks/usePeople';
+import type { PeopleData } from '../services/people';
+import { planEnrollmentPeople, withCreatedPeople } from '../utils/enrollmentPeople';
 import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
 import type { CatalogData, CatalogLinks } from '../utils/catalog';
 import type { OpResult, OrgDirectoryData } from '../services/orgDirectory';
@@ -1460,14 +1463,15 @@ interface DataContextType {
   addStaff: (staff: Omit<Staff, 'id' | 'code'>) => Promise<OpResult<Staff>>;
   updateStaff: (id: string, staff: Partial<Staff>) => Promise<OpResult<Staff>>;
   /** Crea el alumno (correlativo ALU-000) y suma uno al contador de alumnos de sus titulares. */
-  addStudent: (student: Omit<Student, 'id'>) => Student;
-  updateStudent: (id: string, student: Partial<Student>) => void;
-  deleteStudent: (id: string) => StockResult;
-  addGuardian: (guardian: Omit<Guardian, 'id'>) => Guardian;
-  updateGuardian: (id: string, guardian: Partial<Guardian>) => void;
-  deleteGuardian: (id: string) => StockResult;
+  /** Titulares y alumnos viven en la base de datos: las acciones validan, guardan, vuelven a leer lo guardado y devuelven `{ ok, error, value }` (la persona tal como quedó, con su código). */
+  addStudent: (student: Omit<Student, 'id'>) => Promise<StockResult & { value?: Student }>;
+  updateStudent: (id: string, student: Partial<Student>) => Promise<StockResult & { value?: Student }>;
+  deleteStudent: (id: string) => Promise<StockResult>;
+  addGuardian: (guardian: Omit<Guardian, 'id'>) => Promise<StockResult & { value?: Guardian }>;
+  updateGuardian: (id: string, guardian: Partial<Guardian>) => Promise<StockResult & { value?: Guardian }>;
+  deleteGuardian: (id: string) => Promise<StockResult>;
   /** Guardado atómico del asistente: crea matrículas, planes, pagos, caja y grupos promocionales, o nada. */
-  registerEnrollments: (draft: EnrollmentDraft) => { ok: boolean; error?: string; enrollmentIds?: string[] };
+  registerEnrollments: (draft: EnrollmentDraft) => Promise<{ ok: boolean; error?: string; enrollmentIds?: string[] }>;
   /** Habilita el período de extensión (garantía) de una matrícula por vencer o con la duración base terminada. */
   enableExtension: (enrollmentId: string) => StockResult;
   dropRequests: DropRequest[];
@@ -1593,14 +1597,17 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 
 /**
  * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
- * almacén, leídos de la base en ese mismo momento; `logistics` = el stock, el kardex, los ajustes, los envíos y las transferencias (también de
- * la base); `accountId` = la cuenta con la que se ingresó.
+ * almacén, leídos de la base en ese mismo momento; `logistics` = el stock, el kardex, los ajustes, los envíos y las transferencias, y `people` =
+ * los titulares y los alumnos (también de la base); `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
-  const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
-  const [students, setStudents] = useState<Student[]>(() => structuredClone(PEOPLE_SEED.students));
+  // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
+  // puras, guardan, vuelven a leer lo guardado y devuelven `{ ok, error }`. Los datos de ejemplo están en `data/seedPeople.ts` (se cargan con
+  // `supabase/seed/personas_de_ejemplo.sql`, con los mismos códigos, porque las matrículas de ejemplo en memoria los nombran).
+  const people = usePeople(peopleData);
+  const { guardians, students } = people;
   const [enrollments, setEnrollments] = useState<Enrollment[]>(() => structuredClone(PEOPLE_SEED.enrollments));
   const [plans, setPlans] = useState<Plan[]>(() => structuredClone(PEOPLE_SEED.plans));
   const [payments, setPayments] = useState<Payment[]>(() => structuredClone(PEOPLE_SEED.payments));
@@ -2235,80 +2242,77 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const addStudent = (studentData: Omit<Student, 'id'>): Student => {
-    const newStudent: Student = { ...studentData, id: nextSequentialId('ALU', students.map(s => s.id)) };
-    setStudents(prev => [...prev, newStudent]);
-    return newStudent;
-  };
+  const addStudent: DataContextType['addStudent'] = async studentData => people.addStudent(studentData);
 
   /**
    * Edita al alumno. Si cambia su nombre, se corrige también la copia que guardan sus matrículas y su agenda (una sola puerta:
    * `syncStudentName`); los comprobantes ya emitidos conservan el nombre de ese día.
    */
-  const updateStudent = (id: string, studentData: Partial<Student>) => {
-    setStudents(prev => prev.map(s => s.id === id ? { ...s, ...studentData } : s));
-    if (studentData.name !== undefined) {
-      const synced = syncStudentName(id, studentData.name, enrollments, schedules);
+  const updateStudent: DataContextType['updateStudent'] = async (id, studentData) => {
+    const res = await people.updateStudent(id, studentData);
+    if (res.ok && res.value) {
+      const synced = syncStudentName(id, res.value.name, enrollments, schedules);
       if (synced.changed) { setEnrollments(synced.enrollments); setSchedules(synced.schedules); }
     }
+    return res;
   };
 
   /** Un alumno con matrículas, asesorías o seguimiento no se elimina: es historial (ya no tendría a quién mostrar). */
-  const deleteStudent = (id: string): StockResult => {
+  const deleteStudent: DataContextType['deleteStudent'] = async id => {
     if (enrollments.some(e => e.studentId === id) || schedules.some(s => s.studentId === id) || trackings.some(t => t.studentId === id)) {
       return { ok: false, error: 'El alumno tiene matrículas, asesorías o seguimiento registrados: no se puede eliminar.' };
     }
-    setStudents(prev => prev.filter(s => s.id !== id));
-    return { ok: true };
+    return people.removeStudent(id);
   };
 
-  const addGuardian = (guardianData: Omit<Guardian, 'id'>): Guardian => {
-    const newGuardian: Guardian = { ...guardianData, id: nextSequentialId('TIT', guardians.map(g => g.id)) };
-    setGuardians(prev => [...prev, newGuardian]);
-    return newGuardian;
-  };
+  const addGuardian: DataContextType['addGuardian'] = async guardianData => people.addGuardian(guardianData);
 
-  const updateGuardian = (id: string, guardianData: Partial<Guardian>) => {
-    setGuardians(prev => prev.map(g => g.id === id ? { ...g, ...guardianData } : g));
-  };
+  const updateGuardian: DataContextType['updateGuardian'] = async (id, guardianData) => people.updateGuardian(id, guardianData);
 
   /** Un titular con alumnos o matrículas a su cargo no se elimina. */
-  const deleteGuardian = (id: string): StockResult => {
+  const deleteGuardian: DataContextType['deleteGuardian'] = async id => {
     if (students.some(s => s.guardianIds.includes(id)) || enrollments.some(e => e.guardianIds.includes(id))) {
       return { ok: false, error: 'El titular tiene alumnos o matrículas a su cargo: no se puede eliminar.' };
     }
-    setGuardians(prev => prev.filter(g => g.id !== id));
-    return { ok: true };
+    return people.removeGuardian(id);
   };
 
-  const registerEnrollments = (draft: EnrollmentDraft) => {
-    const result = buildEnrollmentBatch(
-      draft,
-      {
-        branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians, students,
-        scheduling: { schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) },
-      },
-      { guardians, students, enrollments, plans, payments, promotionGroups, schedules },
-      { now: new Date().toISOString(), userName: currentUser.name }
-    );
-    if (!result.ok || !result.batch) return { ok: false, error: result.error };
+  /**
+   * Matricula. Las personas (titulares y alumnos nuevos, y la fecha de inicio y la situación de los que ya existían) se guardan primero en la base,
+   * en UNA operación (todo o nada); después se matricula a esas personas ya registradas. Antes de guardar a nadie se comprueba todo el borrador
+   * (si algo falla, no queda ninguna persona a medias).
+   */
+  const registerEnrollments: DataContextType['registerEnrollments'] = async draft => {
+    const catalogs = (g: Guardian[], s: Student[]) => ({
+      branches, leadSources, staff, assignments, programs, levels, tariffs, paymentTypes, promotions, guardians: g, students: s,
+      scheduling: { schedules, capacity: capacityConfig, activities: allActivities(monthlySchedules) },
+    });
+    const state = (g: Guardian[], s: Student[]) => ({ guardians: g, students: s, enrollments, plans, payments, promotionGroups, schedules });
+    const opts = { now: new Date().toISOString(), userName: currentUser.name };
+
+    // 1. Se comprueba todo el borrador antes de guardar a nadie
+    const checked = buildEnrollmentBatch(draft, catalogs(guardians, students), state(guardians, students), opts);
+    if (!checked.ok || !checked.batch) return { ok: false, error: checked.error };
+
+    // 2. Las personas se guardan en la base (los códigos TIT-NNN y ALU-NNN los asigna ella)
+    const plan = planEnrollmentPeople(draft);
+    let finalDraft = draft;
+    let g = guardians;
+    let s = students;
+    if (!plan.empty) {
+      const saved = await people.saveForEnrollment(plan.payload);
+      if (!saved.ok || !saved.value) return { ok: false, error: saved.error };
+      finalDraft = withCreatedPeople(draft, saved.value.created);
+      g = saved.value.guardians;
+      s = saved.value.students;
+    }
+
+    // 3. Se matricula a esas personas, ya registradas (lo que arma el lote sobre las personas se ignora: ya están en la base)
+    const result = buildEnrollmentBatch(finalDraft, catalogs(g, s), state(g, s), opts);
+    if (!result.ok || !result.batch) return { ok: false, error: `Las personas se guardaron, pero no se pudo matricular: ${result.error}` };
     const b = result.batch;
 
     // Una sola aplicación de cambios: si el armado falló arriba, no se creó nada.
-    setGuardians(prev => [
-      ...prev.map(g => {
-        const u = b.guardianUpdates.find(x => x.id === g.id);
-        return u ? { ...g, ...u.patch } : g;
-      }),
-      ...b.newGuardians,
-    ]);
-    setStudents(prev => [
-      ...prev.map(st => {
-        const u = b.studentUpdates.find(x => x.id === st.id);
-        return u ? { ...st, ...u.patch } : st;
-      }),
-      ...b.newStudents,
-    ]);
     setEnrollments(prev => [...prev, ...b.enrollments]);
     setPlans(prev => [...prev, ...b.plans]);
     setPayments(prev => [...b.payments, ...prev]);

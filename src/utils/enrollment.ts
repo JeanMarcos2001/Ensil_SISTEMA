@@ -464,6 +464,8 @@ export function validateHolders(draft: EnrollmentDraft, c: EnrollmentCatalogs, t
       e.push(...validatePerson(h, label, today, i === 0
         ? { needsPhone: true, needsAddress: true, needsCivilStatus: true }
         : { needsPhone: true }));
+      // Un titular es mayor de edad (la base de datos lo exige igual)
+      if (!h.existingId && h.birthDate && h.birthDate <= today && (ageOn(h.birthDate, today) ?? 0) < 18) e.push(`${label}: debe ser mayor de 18 años.`);
     });
   }
   // Documentos duplicados dentro del registro

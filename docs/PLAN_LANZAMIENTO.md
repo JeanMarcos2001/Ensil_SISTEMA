@@ -16,9 +16,9 @@ Documento de trabajo del **2026-11-06**. Reúne **todo lo que falta** para usar 
 - Inicio de sesión real (correo y contraseña), invitación por correo para fijar la contraseña, «olvidé mi contraseña» y «reenviar acceso».
 - Guardado en Supabase de: Empresas, Filiales (sedes), Almacén central, Roles y sus funciones, Cuentas de usuario, Personal y Asignaciones, Contratos y Planilla, el catálogo comercial (programas, niveles, tipos de pago, tarifarios, promociones y orígenes de leads) y los artículos con sus precios de venta y recetas de materiales, con seguridad por función y por sede (RLS).
 - Reglas del acceso: una cuenta nace de una persona de Personal; el rol real se elige solo en Usuarios y se filtra por el lugar de trabajo; el Superusuario es solo para cuentas técnicas; alcance por sede en Personal y Asignaciones.
-- Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía); el catálogo comercial de prueba (migración 0010): 4 programas, 4 niveles, 5 tipos de pago, 8 tarifarios, 2 promociones y 5 orígenes de leads; y los artículos de prueba (migración 0011): 5 artículos, 3 precios y 3 recetas.
+- Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía); el catálogo comercial de prueba (migración 0010): 4 programas, 4 niveles, 5 tipos de pago, 8 tarifarios, 2 promociones y 5 orígenes de leads; los artículos de prueba (migración 0011): 5 artículos, 3 precios y 3 recetas; el stock, el kardex, los envíos y las transferencias (migraciones 0012 y 0013) con el stock de partida; y los titulares y alumnos de prueba (migración 0014): 5 titulares y 5 alumnos.
 
-**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, alumnos, titulares, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, stock y kardex, envíos, transferencias, recepciones, ajustes, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
+**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
 
 > **Consecuencia:** el sistema **no puede usarse todavía con datos reales de alumnos ni dinero**. Eso es el centro de este plan (Fase 3). Todo lo demás lo rodea.
 
@@ -167,7 +167,7 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.4 Personas: titulares y alumnos
 
-- ☐ 🤖 Titulares, alumnos y su vínculo, con los datos de menores protegidos (ver Fase 4). *(L)*
+- ☑ 🤖 Titulares, alumnos y su vínculo (2026-11-10, migración 0014): se leen al iniciar sesión, se crean y cambian por funciones de la base que validan otra vez (documento sin repetir, titular mayor de edad, situación del alumno…), matricular guarda las personas nuevas en una sola operación y los datos de menores solo los lee quien tiene una función que los muestre. *Queda para cuando pasen las matrículas:* limitarlos por sede y proteger los datos de menores con lo que pida el asesor legal (Fase 4). *(L)*
 
 ### 6.5 Matrícula, plan, pagos y caja *(el corazón: aquí está el dinero)*
 

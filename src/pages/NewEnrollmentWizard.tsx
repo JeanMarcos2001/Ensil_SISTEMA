@@ -172,15 +172,16 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
 
   const goTo = (n: number) => { if (n < step) { setErrors([]); setStep(n); } };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (saving) return;
     // Revalida todos los pasos antes de guardar
     for (let n = 1; n <= 5; n++) {
       const e = validateStep(n);
       if (e.length) { setErrors(e); setStep(n); return; }
     }
+    // Las personas nuevas se guardan en la base (todo o nada) antes de matricular: se espera su respuesta
     setSaving(true);
-    const res = data.registerEnrollments(draft);
+    const res = await data.registerEnrollments(draft);
     setSaving(false);
     if (!res.ok) {
       setErrors([res.error || 'No se pudo guardar la matrícula.']);
@@ -327,7 +328,7 @@ export function NewEnrollmentWizard({ onClose }: NewEnrollmentWizardProps) {
           {step < STEPS.length ? (
             <Button variant="primary" onClick={next}>Siguiente</Button>
           ) : (
-            <Button variant="primary" onClick={handleConfirm} disabled={saving}>Guardar matrículas</Button>
+            <Button variant="primary" onClick={handleConfirm} disabled={saving}>{saving ? 'Guardando…' : 'Guardar matrículas'}</Button>
           )}
         </div>
       </div>

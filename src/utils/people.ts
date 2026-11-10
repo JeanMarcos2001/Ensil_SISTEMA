@@ -16,6 +16,7 @@ import {
   emptyPerson,
   fullName,
   situationData,
+  validateDocument,
   validatePerson,
   validateStudentSituation,
   type DocType,
@@ -133,4 +134,55 @@ export function buildStudent(input: StudentInput, existing?: Pick<Student, 'fech
     ...situationData(ds),
     fechaInicio: existing?.fechaInicio,
   };
+}
+
+// ---------------------------------------------------------------- Registros ya armados (lo que reciben las acciones)
+
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const NINE_DIGITS = /^\d{9}$/;
+
+/**
+ * Comprueba un titular ya armado (lo que recibe `addGuardian` / `updateGuardian`): documento, nombres, nacimiento (mayor de edad), teléfono de 9
+ * dígitos, correo y documento sin repetir. La base de datos vuelve a comprobar lo mismo. `null` si no hay problema.
+ */
+export function guardianRecordError(g: Partial<Guardian> & Pick<Guardian, 'doc'>, others: Guardian[], today: string, selfId?: string): string | null {
+  const doc = validateDocument((g.docType as DocType) || 'DNI', g.doc);
+  if (doc) return doc;
+  if (!g.names?.trim() || !g.lastNameP?.trim()) return 'Nombres y apellido paterno son obligatorios.';
+  if (!g.birthDate) return 'La fecha de nacimiento es obligatoria.';
+  if (g.birthDate > today) return 'La fecha de nacimiento no puede ser futura.';
+  if ((ageOn(g.birthDate, today) ?? 0) < MIN_GUARDIAN_AGE) return `El titular debe ser mayor de ${MIN_GUARDIAN_AGE} años.`;
+  if (!NINE_DIGITS.test((g.phone ?? '').trim())) return 'El teléfono debe tener 9 dígitos.';
+  if ((g.email ?? '').trim() && !EMAIL_PATTERN.test(g.email!.trim())) return 'El correo no es válido.';
+  if (others.some(o => o.id !== selfId && o.doc.toUpperCase() === g.doc.trim().toUpperCase())) return `El documento ${g.doc.trim()} ya está registrado.`;
+  return null;
+}
+
+/**
+ * Comprueba un alumno ya armado (lo que recibe `addStudent` / `updateStudent`): documento, nombres, nacimiento, teléfono y correo, qué hace
+ * (estudia, trabaja, ambas o ninguna), sus titulares (que existan; con apoderado, el parentesco; independiente, su teléfono) y documento sin
+ * repetir. La base de datos vuelve a comprobar lo mismo. `null` si no hay problema.
+ */
+export function studentRecordError(s: Partial<Student> & Pick<Student, 'doc'>, students: Student[], guardians: Guardian[], today: string, selfId?: string): string | null {
+  const doc = validateDocument((s.docType as DocType) || 'DNI', s.doc);
+  if (doc) return doc;
+  if (!s.names?.trim() || !s.lastNameP?.trim()) return 'Nombres y apellido paterno son obligatorios.';
+  if (!s.birthDate) return 'La fecha de nacimiento es obligatoria.';
+  if (s.birthDate > today) return 'La fecha de nacimiento no puede ser futura.';
+  if ((s.email ?? '').trim() && !EMAIL_PATTERN.test(s.email!.trim())) return 'El correo no es válido.';
+  if ((s.phone ?? '').trim() && !NINE_DIGITS.test(s.phone!.trim())) return 'El teléfono debe tener 9 dígitos.';
+  const situation = validateStudentSituation(
+    { situation: s.occupationStatus ?? '', institutionType: s.institutionType ?? '', school: s.colegio ?? '', grade: s.grado ?? '', occupation: s.occupation ?? '' }, 'Alumno',
+  );
+  if (situation.length > 0) return situation[0].replace(/^Alumno: /, '').replace(/^./, c => c.toUpperCase());
+  const ids = s.guardianIds ?? [];
+  if (ids.length === 0) {
+    if (!NINE_DIGITS.test((s.phone ?? '').trim())) return 'Un alumno independiente necesita su teléfono (9 dígitos).';
+  } else {
+    if (new Set(ids).size !== ids.length) return 'Un titular está repetido en el alumno.';
+    if (ids.some(id => !guardians.some(g => g.id === id))) return 'Algún titular elegido ya no existe.';
+    if (!(s.relationship ?? '').trim()) return 'Indique el parentesco con el titular.';
+  }
+  if (students.some(o => o.id !== selfId && o.doc.toUpperCase() === s.doc.trim().toUpperCase())) return `El documento ${s.doc.trim()} ya está registrado.`;
+  return null;
 }

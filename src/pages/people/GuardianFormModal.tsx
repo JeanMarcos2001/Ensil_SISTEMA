@@ -26,6 +26,7 @@ export function GuardianFormModal({ isOpen, onClose, editing, onSaved }: Props) 
   const today = todayLocalISO();
   const [person, setPerson] = useState<DraftPerson>(emptyPerson());
   const [errors, setErrors] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -33,17 +34,18 @@ export function GuardianFormModal({ isOpen, onClose, editing, onSaved }: Props) 
     setErrors([]);
   }, [isOpen, editing]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     const found = validateGuardian(person, guardians, today, editing?.id);
     if (found.length > 0) { setErrors(found); return; }
     const data = buildGuardian(person);
-    if (editing) {
-      // El nombre del titular no se copia en ningún otro registro: alumnos, matrículas y planes lo muestran desde su ficha.
-      updateGuardian(editing.id, data);
-    } else {
-      const created = addGuardian(data);
-      onSaved?.(created);
-    }
+    // El titular se guarda en la base de datos: se espera su respuesta y, si la rechaza, se muestra el motivo
+    setSaving(true);
+    // El nombre del titular no se copia en ningún otro registro: alumnos, matrículas y planes lo muestran desde su ficha.
+    const res = editing ? await updateGuardian(editing.id, data) : await addGuardian(data);
+    setSaving(false);
+    if (!res.ok) { setErrors([res.error ?? 'No se pudo guardar el titular.']); return; }
+    if (!editing && res.value) onSaved?.(res.value);
     onClose();
   };
 
@@ -56,7 +58,7 @@ export function GuardianFormModal({ isOpen, onClose, editing, onSaved }: Props) 
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button type="button" variant="primary" onClick={handleSave}>Guardar Titular</Button>
+          <Button type="button" variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Titular'}</Button>
         </div>
       }
     >
