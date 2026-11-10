@@ -32,6 +32,15 @@ export function Transfers() {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isPreparationOpen, setIsPreparationOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  /** Lo que la base rechazó al cambiar el estado desde la lista (aprobar, cancelar…). */
+  const [listError, setListError] = useState<string | null>(null);
+
+  const changeStatus = async (id: string, status: Transfer['status']) => {
+    setListError(null);
+    const result = await updateTransferStatus(id, status);
+    if (!result.ok) setListError(result.error ?? 'No se pudo cambiar el estado de la transferencia.');
+  };
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,8 +207,8 @@ export function Transfers() {
     return availabilityOf('log-transfer:dispatch', { branchId: t.destinationId, branchName: destination?.name ?? t.destinationId });
   };
 
-  const handleSaveRequest = (status: 'Borrador' | 'Solicitada') => {
-    if (!validateRequestForm()) return;
+  const handleSaveRequest = async (status: 'Borrador' | 'Solicitada') => {
+    if (saving || !validateRequestForm()) return;
 
     const newTransfer: Omit<Transfer, 'id'> = {
       date,
@@ -211,7 +220,10 @@ export function Transfers() {
       observation
     };
 
-    const created = addTransfer(newTransfer);
+    // La base de datos asigna el código (TRF-AAAA-NNN) y guarda la solicitud
+    setSaving(true);
+    const created = await addTransfer(newTransfer);
+    setSaving(false);
     if (!created.ok) {
       setFormError(created.error ?? 'No se pudo guardar la transferencia.');
       return;
@@ -239,8 +251,8 @@ export function Transfers() {
     setIsSummaryOpen(true);
   };
 
-  const handleFinalizeDispatch = () => {
-    if (!selectedTransfer) return;
+  const handleFinalizeDispatch = async () => {
+    if (!selectedTransfer || saving) return;
 
     // Aggregate items from boxes to update the transfer items list
     const flatItems: TransferItem[] = [];
@@ -255,8 +267,9 @@ export function Transfers() {
       });
     });
 
-    // Update transfer data
-    updateTransfer(selectedTransfer.id, {
+    // Primero se guardan los datos del despacho (cajas, transporte) y después se despacha: el stock sale del origen todo o nada
+    setSaving(true);
+    const saved = await updateTransfer(selectedTransfer.id, {
       items: flatItems,
       boxes,
       shippingMethodId: selectedShippingMethod,
@@ -269,9 +282,15 @@ export function Transfers() {
       eta,
       observation
     });
+    if (!saved.ok) {
+      setSaving(false);
+      setIsSummaryOpen(false);
+      setFormError(saved.error || 'No se pudieron guardar los datos del despacho.');
+      return;
+    }
 
-    // Change status to En tránsito (this triggers stock deduction in DataContext)
-    const dispatch = updateTransferStatus(selectedTransfer.id, 'En tránsito');
+    const dispatch = await updateTransferStatus(selectedTransfer.id, 'En tránsito');
+    setSaving(false);
     if (!dispatch.ok) {
       setIsSummaryOpen(false);
       setFormError(dispatch.error || 'No se pudo despachar la transferencia.');
@@ -441,6 +460,13 @@ export function Transfers() {
         </div>
       </div>
 
+      {listError && (
+        <div role="alert" className="mb-4 bg-danger-tint/50 border border-danger-text/20 rounded-xl p-3 flex items-start justify-between gap-3 text-sm text-danger-text">
+          <p>{listError}</p>
+          <button type="button" className="text-xs underline shrink-0" onClick={() => setListError(null)}>Cerrar</button>
+        </div>
+      )}
+
       {/* Main Content Card */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
         {/* Filters */}
@@ -542,21 +568,21 @@ export function Transfers() {
                         items={[
                           { label: 'Ver detalles', onClick: () => handleOpenDetail(transfer) },
                           ...(transfer.status === 'Borrador' ? [
-                            { label: 'Enviar solicitud', hidden: !can('log-transfer:req_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Solicitada') },
-                            { label: 'Cancelar', hidden: !can('log-transfer:req_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
+                            { label: 'Enviar solicitud', hidden: !can('log-transfer:req_transfer'), onClick: () => changeStatus(transfer.id, 'Solicitada') },
+                            { label: 'Cancelar', hidden: !can('log-transfer:req_transfer'), onClick: () => changeStatus(transfer.id, 'Cancelada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'Solicitada' ? [
-                            { label: 'Aprobar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Aprobada') },
-                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
+                            { label: 'Aprobar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Aprobada') },
+                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Rechazada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'Aprobada' ? [
                             { label: 'Preparar despacho', hidden: !can('log-transfer:dispatch'), disabled: !dispatchAvailability(transfer).available, reason: dispatchAvailability(transfer).reason, onClick: () => handleOpenPreparation(transfer) },
-                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => updateTransferStatus(transfer.id, 'Rechazada'), danger: true }
+                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Rechazada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'En tránsito' ? [
-                            { label: 'Marcar listo para recepción', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransferStatus(transfer.id, 'Listo para recepción') },
-                            { label: 'Habilitar recepción manual', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransfer(transfer.id, { manualEnable: true }) },
-                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch'), onClick: () => updateTransferStatus(transfer.id, 'Cancelada'), danger: true }
+                            { label: 'Marcar listo para recepción', hidden: !can('log-transfer:dispatch'), onClick: () => changeStatus(transfer.id, 'Listo para recepción') },
+                            { label: 'Habilitar recepción manual', hidden: !can('log-transfer:dispatch'), onClick: async () => { setListError(null); const r = await updateTransfer(transfer.id, { manualEnable: true }); if (!r.ok) setListError(r.error ?? 'No se pudo habilitar la recepción manual.'); } },
+                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch'), onClick: () => changeStatus(transfer.id, 'Cancelada'), danger: true }
                           ] : []),
                         ]}
                       />
@@ -594,8 +620,8 @@ export function Transfers() {
               <Button variant="ghost" onClick={() => setIsNewTransferOpen(false)}>Cancelar</Button>
               {can('log-transfer:req_transfer') && (
                 <>
-                  <Button variant="secondary" onClick={() => handleSaveRequest('Borrador')}>Guardar Borrador</Button>
-                  <Button variant="primary" onClick={() => handleSaveRequest('Solicitada')}>Enviar Solicitud</Button>
+                  <Button variant="secondary" onClick={() => handleSaveRequest('Borrador')} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Borrador'}</Button>
+                  <Button variant="primary" onClick={() => handleSaveRequest('Solicitada')} disabled={saving}>{saving ? 'Guardando…' : 'Enviar Solicitud'}</Button>
                 </>
               )}
             </div>
@@ -995,7 +1021,7 @@ export function Transfers() {
               <p key={a} className="mr-auto text-xs text-warning-text">{a}</p>
             ))}
             <Button variant="secondary" onClick={() => setIsSummaryOpen(false)}>Volver a editar</Button>
-            <Button variant="primary" onClick={handleFinalizeDispatch} disabled={!can('log-transfer:dispatch') || (!!selectedTransfer && !dispatchAvailability(selectedTransfer).available)}>Confirmar Despacho</Button>
+            <Button variant="primary" onClick={handleFinalizeDispatch} disabled={saving || !can('log-transfer:dispatch') || (!!selectedTransfer && !dispatchAvailability(selectedTransfer).available)}>Confirmar Despacho</Button>
           </div>
         </div>
       </Modal>

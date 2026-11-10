@@ -12,9 +12,12 @@ import { todayLocalISO } from '../../utils/schedule';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
+import { signedAdjustment } from '../../utils/inventory';
 
 export function Stock() {
   const { stockItems, items, stockLocations, unpackPackage, packPackage, registerStockEntry, addAdjustment, updateMinStock, currentBranchId, can } = useData();
+  // Cada operación espera la respuesta de la base de datos: mientras tanto, los botones de guardar quedan apagados
+  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
@@ -469,7 +472,8 @@ export function Stock() {
               setEntryItemId('');
               setFormError(null);
             }}>Cancelar</Button>
-            <Button variant="primary" onClick={() => {
+            <Button variant="primary" disabled={busy} onClick={async () => {
+              if (busy) return;
               const qtyInput = document.getElementById('entry-qty') as HTMLInputElement;
               const typeInput = document.getElementById('entry-type') as HTMLSelectElement;
               const docInput = document.getElementById('entry-doc') as HTMLInputElement;
@@ -479,13 +483,15 @@ export function Stock() {
               const itemIdToUse = selectedStock ? selectedStock.itemId : entryItemId;
 
               // Las reglas (cantidad entera, documento de respaldo, permiso) y el kardex viven en la acción
-              const entry = registerStockEntry({
+              setBusy(true);
+              const entry = await registerStockEntry({
                 branchId: branchIdToUse,
                 itemId: itemIdToUse,
                 qty: parseInt(qtyInput.value, 10),
                 doc: docInput.value,
                 reason: reasonInput.value,
               });
+              setBusy(false);
               if (!entry.ok) {
                 setFormError(entry.error ?? 'No se pudo registrar el ingreso.');
                 return;
@@ -495,7 +501,7 @@ export function Stock() {
               setEntryBranchId('');
               setEntryItemId('');
               setFormError(null);
-            }}>Guardar movimiento</Button>
+            }}>{busy ? 'Guardando…' : 'Guardar movimiento'}</Button>
           </div>
         }
       >
@@ -601,13 +607,15 @@ export function Stock() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsUnpackOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => {
-              if (selectedStock) {
-                const res = unpackPackage(selectedStock.id);
+            <Button variant="primary" disabled={busy} onClick={async () => {
+              if (selectedStock && !busy) {
+                setBusy(true);
+                const res = await unpackPackage(selectedStock.id);
+                setBusy(false);
                 setActionError(res.ok ? null : res.error || 'No se pudo desempaquetar.');
                 setIsUnpackOpen(false);
               }
-            }}>Confirmar desempaquetado</Button>
+            }}>{busy ? 'Guardando…' : 'Confirmar desempaquetado'}</Button>
           </div>
         }
       >
@@ -646,13 +654,15 @@ export function Stock() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsPackOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => {
-              if (selectedStock) {
-                const res = packPackage(selectedStock.id);
+            <Button variant="primary" disabled={busy} onClick={async () => {
+              if (selectedStock && !busy) {
+                setBusy(true);
+                const res = await packPackage(selectedStock.id);
+                setBusy(false);
                 setActionError(res.ok ? null : res.error || 'No se pudo empaquetar.');
                 setIsPackOpen(false);
               }
-            }}>Confirmar empaquetado</Button>
+            }}>{busy ? 'Guardando…' : 'Confirmar empaquetado'}</Button>
           </div>
         }
       >
@@ -691,8 +701,8 @@ export function Stock() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsAdjustOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => {
-              if (selectedStock) {
+            <Button variant="primary" disabled={busy} onClick={async () => {
+              if (selectedStock && !busy) {
                 const qtyInput = document.getElementById('adjust-qty') as HTMLInputElement;
                 const typeInput = document.getElementById('adjust-type') as HTMLSelectElement;
                 const reasonInput = document.getElementById('adjust-reason') as HTMLTextAreaElement;
@@ -711,30 +721,29 @@ export function Stock() {
                     finalType = qty > 0 ? 'Ajuste Positivo' : 'Ajuste Negativo';
                   }
                   
-                  const item = items.find(i => i.id === selectedStock.itemId);
-                  const branch = stockLocations.find(b => b.id === selectedStock.branchId);
 
-                  const res = addAdjustment({
-                    branch: branch?.name || 'Desconocida',
-                    material: item?.name || 'Artículo desconocido',
+                  // El signo lo define el tipo de operación; en Regularización administrativa se respeta el signo ingresado
+                  setBusy(true);
+                  const res = await addAdjustment({
                     type: finalType,
-                    qty,
+                    qty: signedAdjustment(finalType, qty),
                     reason: reasonInput.value || 'Ajuste manual desde Stock',
                     observation: 'Registro generado desde el módulo de Stock'
                   }, selectedStock.id);
+                  setBusy(false);
                   setActionError(res.ok ? null : res.error || 'No se pudo registrar el ajuste.');
                   
                   setIsAdjustOpen(false);
                 }
               }
-            }}>Guardar ajuste</Button>
+            }}>{busy ? 'Guardando…' : 'Guardar ajuste'}</Button>
           </div>
         }
       >
         <div className="space-y-4">
           <div className="bg-warning-tint/30 border border-warning-text/20 rounded-xl p-3 flex gap-2 text-sm text-warning-text mb-2">
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-            <p>Use valores negativos para mermas o pérdidas, y positivos para correcciones de inventario.</p>
+            <p>El tipo define el signo: la merma y el ajuste negativo descuentan, el ajuste positivo suma. Solo en la regularización administrativa se respeta el signo que escriba.</p>
           </div>
 
           <div className="space-y-1.5">
@@ -758,7 +767,7 @@ export function Stock() {
               </select>
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-text-secondary">Cantidad (ej: -5) *</label>
+              <label className="text-sm font-medium text-text-secondary">Cantidad *</label>
               <input id="adjust-qty" type="number" className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none" placeholder="0" />
             </div>
           </div>
@@ -779,15 +788,18 @@ export function Stock() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsEditMinStockOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={() => {
-              if (selectedStock) {
+            <Button variant="primary" disabled={busy} onClick={async () => {
+              if (selectedStock && !busy) {
                 const minQtyInput = document.getElementById('min-stock-qty') as HTMLInputElement;
                 if (minQtyInput.value) {
-                  updateMinStock(selectedStock.id, parseInt(minQtyInput.value));
+                  setBusy(true);
+                  const res = await updateMinStock(selectedStock.id, parseInt(minQtyInput.value, 10));
+                  setBusy(false);
+                  setActionError(res.ok ? null : res.error || 'No se pudo guardar el stock mínimo.');
                   setIsEditMinStockOpen(false);
                 }
               }
-            }}>Actualizar mínimo</Button>
+            }}>{busy ? 'Guardando…' : 'Actualizar mínimo'}</Button>
           </div>
         }
       >

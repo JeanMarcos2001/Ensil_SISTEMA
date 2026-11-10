@@ -162,7 +162,7 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 ### 6.3 Logística y stock
 
 - ☑ 🤖 Artículos, sus precios de venta (con historial que no se sobrescribe) y recetas de materiales (2026-11-07, migración 0011): se leen al iniciar sesión, se cambian con la función de cada pantalla, la base valida otra vez (incluida «una sola receta activa por programa, nivel, sede y período») y los artículos se inactivan, no se eliminan. *(L)*
-- ☐ 🤖 **El stock como movimientos que nunca se editan** (entrada de compra, despacho, recepción, venta, devolución, ajuste con motivo). Envíos, transferencias, recepciones, ajustes y mermas. *(XL)*
+- ☑ 🤖 **El stock como movimientos que nunca se editan** (2026-11-09, migraciones 0012 y 0013): ingreso de compra, ajuste con motivo, venta, entrega de materiales, reversa, paquetes, envíos, transferencias, recepciones con incidencias y mermas; el kardex solo se agrega, la cantidad solo cambia con un movimiento y todo es todo o nada. *(XL)*
 - ☐ 🧑 **Inventario inicial:** conteo físico del almacén y de cada sede; se carga como un movimiento de ajuste por ubicación. *(M)*
 
 ### 6.4 Personas: titulares y alumnos

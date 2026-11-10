@@ -53,6 +53,8 @@ import { availabilityForViewer, denialMessage, guardActions, unmetClause, userCh
 import { useCatalog } from '../hooks/useCatalog';
 import { useItemCatalog } from '../hooks/useItemCatalog';
 import type { ItemCatalogData } from '../services/itemCatalog';
+import { useLogistics } from '../hooks/useLogistics';
+import type { LogisticsData } from '../services/logistics';
 import { useOrgDirectory, type OrgDirectoryStatus } from '../hooks/useOrgDirectory';
 import type { CatalogData, CatalogLinks } from '../utils/catalog';
 import type { OpResult, OrgDirectoryData } from '../services/orgDirectory';
@@ -69,7 +71,8 @@ import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, se
 import { markRead, noticesFor, visibility, type NoticeScope } from '../utils/notifications';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
-import { availableStock, getCurrentPrice, itemSaleError, stockEntryError, stockMovesError } from '../utils/inventory';
+import { availableStock, getCurrentPrice, itemSaleError } from '../utils/inventory';
+import { receptionOutcome, shipmentMovesStock, transferMovesStock } from '../utils/logisticsDocs';
 
 // Types
 export interface Guardian {
@@ -1320,7 +1323,7 @@ interface DataContextType {
   cashMovements: CashMovement[];
   addCashMovement: (movement: Omit<CashMovement, 'id' | 'date' | 'user' | 'status'> & { date?: string }) => CashMovement;
   /** Reversa un movimiento de caja manual, venta o lote de depósito (los de un pago se reversan desde el pago). */
-  reverseCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
+  reverseCashMovement: (id: string, input: { reason: string; detail: string }) => Promise<StockResult>;
   /** Lleva ingresos en efectivo al banco: un egreso «Depósito bancario» y los ingresos quedan depositados. */
   createDepositBatch: (input: DepositInput) => StockResult & { code?: string };
   pettyCashMovements: PettyCashMovement[];
@@ -1332,13 +1335,14 @@ interface DataContextType {
   kardex: KardexEntry[];
   transfers: Transfer[];
   couriers: Courier[];
-  addCourier: (courier: Omit<Courier, 'id'>) => StockResult;
-  updateCourier: (id: string, courier: Partial<Omit<Courier, 'id'>>) => StockResult;
+  addCourier: (courier: Omit<Courier, 'id'>) => Promise<StockResult>;
+  updateCourier: (id: string, courier: Partial<Omit<Courier, 'id'>>) => Promise<StockResult>;
   shippingMethods: ShippingMethod[];
-  addShippingMethod: (method: Omit<ShippingMethod, 'id'>) => StockResult;
-  updateShippingMethod: (id: string, method: Partial<Omit<ShippingMethod, 'id'>>) => StockResult;
+  addShippingMethod: (method: Omit<ShippingMethod, 'id'>) => Promise<StockResult>;
+  updateShippingMethod: (id: string, method: Partial<Omit<ShippingMethod, 'id'>>) => Promise<StockResult>;
   adjustments: Adjustment[];
-  addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string) => StockResult;
+  /** Un ajuste, una merma, una devolución o una regularización del stock elegido (el lugar y el artículo salen de ese registro). La cantidad ya lleva el signo de su tipo. */
+  addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user' | 'branch' | 'material'>, stockId: string) => Promise<StockResult>;
   schedules: Schedule[];
   addSchedule: (data: Omit<Schedule, 'id'>) => Schedule;
   /** Una primera asesoría con la matrícula sin verificar no admite «Asistió» ni «Faltó» (ver `utils/verificationGate.ts`). */
@@ -1442,16 +1446,16 @@ interface DataContextType {
   /** La copia nace inactiva (si no, chocaría con la original). */
   duplicateRecipe: (id: string) => Promise<StockResult & { id?: string }>;
   setRecipeStatus: (id: string, status: Recipe['status']) => Promise<StockResult>;
-  unpackPackage: (stockId: string) => StockResult;
-  packPackage: (stockId: string) => StockResult;
+  unpackPackage: (stockId: string) => Promise<StockResult>;
+  packPackage: (stockId: string) => Promise<StockResult>;
   /** Vende un artículo en caja: descuenta el stock de la sede y registra el ingreso en una sola operación. */
-  registerItemSale: (input: ItemSaleInput) => StockResult;
+  registerItemSale: (input: ItemSaleInput) => Promise<StockResult>;
   /** Ingreso de stock (compra o reposición) con el documento que lo respalda; queda en el kardex. */
-  registerStockEntry: (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }) => StockResult;
-  updateMinStock: (stockId: string, minStock: number) => void;
-  updateTransferStatus: (id: string, status: Transfer['status']) => StockResult;
-  updateTransfer: (id: string, transfer: Partial<Transfer>) => StockResult;
-  addTransfer: (transfer: Omit<Transfer, 'id'>) => StockResult;
+  registerStockEntry: (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }) => Promise<StockResult>;
+  updateMinStock: (stockId: string, minStock: number) => Promise<StockResult>;
+  updateTransferStatus: (id: string, status: Transfer['status']) => Promise<StockResult>;
+  updateTransfer: (id: string, transfer: Partial<Transfer>) => Promise<StockResult>;
+  addTransfer: (transfer: Omit<Transfer, 'id'>) => Promise<StockResult & { id?: string }>;
   /** El id `STF-NNN` y el código los asigna el sistema. */
   addStaff: (staff: Omit<Staff, 'id' | 'code'>) => Promise<OpResult<Staff>>;
   updateStaff: (id: string, staff: Partial<Staff>) => Promise<OpResult<Staff>>;
@@ -1531,7 +1535,7 @@ interface DataContextType {
     observation?: string;
     date: string;
     verifier: string;
-  }, deductions?: { itemId: string; quantity: number }[]) => StockResult;
+  }, deductions?: { itemId: string; quantity: number }[]) => Promise<StockResult>;
   addProgram: (program: Omit<Program, 'id'>) => Promise<OpResult<Program>>;
   updateProgram: (id: string, program: Partial<Program>) => Promise<OpResult<Program>>;
   /** Un programa que ya se usa (niveles, tarifarios, promociones, matrículas o recetas) no se elimina: se inactiva. */
@@ -1556,10 +1560,10 @@ interface DataContextType {
   isEnrollmentWizardOpen: boolean;
   setIsEnrollmentWizardOpen: (isOpen: boolean) => void;
   shipments: Shipment[];
-  addShipment: (shipment: Omit<Shipment, 'id'>) => StockResult & { id?: string };
-  updateShipmentStatus: (id: string, status: Shipment['status'], observation?: string) => StockResult;
-  updateShipment: (id: string, shipment: Partial<Shipment>) => StockResult;
-  deleteShipment: (id: string) => void;
+  addShipment: (shipment: Omit<Shipment, 'id'>) => Promise<StockResult & { id?: string }>;
+  updateShipmentStatus: (id: string, status: Shipment['status'], observation?: string) => Promise<StockResult>;
+  updateShipment: (id: string, shipment: Partial<Shipment>) => Promise<StockResult>;
+  deleteShipment: (id: string) => Promise<StockResult>;
   notifications: Notification[];
   /** Los avisos que le corresponden al usuario actual (según las funciones de su rol y su sede), con la marca de leído. */
   myNotifications: NoticeView[];
@@ -1579,7 +1583,7 @@ interface DataContextType {
     docType: 'Envío' | 'Transferencia';
     receivedItems: { itemId: string; quantity: number; status: 'ok' | 'missing' | 'damaged' | 'extra'; observation?: string }[];
     generalObservation?: string;
-  }) => StockResult;
+  }) => Promise<StockResult>;
 }
 
 export const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -1589,9 +1593,10 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 
 /**
  * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
- * almacén, leídos de la base en ese mismo momento; `accountId` = la cuenta con la que se ingresó.
+ * almacén, leídos de la base en ese mismo momento; `logistics` = el stock, el kardex, los ajustes, los envíos y las transferencias (también de
+ * la base); `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   const [guardians, setGuardians] = useState<Guardian[]>(() => structuredClone(PEOPLE_SEED.guardians));
@@ -1632,142 +1637,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return created;
   };
 
-  const [stockItems, setStockItems] = useState<StockItem[]>([
-    { id: 'STK-001', itemId: 'ITM-LIB-K1', branchId: 'FIL-002', stock: 100, minStock: 50 },
-    { id: 'STK-002', itemId: 'ITM-MAT-01', branchId: 'FIL-002', stock: 50, minStock: 30 },
-    { id: 'STK-003', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-002', stock: 25, minStock: 5 },
-    { id: 'STK-004', itemId: 'ITM-HER-01', branchId: 'FIL-002', stock: 40, minStock: 10 },
-    { id: 'STK-005', itemId: 'ITM-HER-02', branchId: 'FIL-002', stock: 40, minStock: 5 },
-    { id: 'STK-006', itemId: 'ITM-LIB-K1', branchId: 'FIL-003', stock: 85, minStock: 40 },
-    { id: 'STK-007', itemId: 'ITM-HER-01', branchId: 'FIL-003', stock: 5, minStock: 5 },
-    { id: 'STK-008', itemId: 'ITM-MAT-01', branchId: 'FIL-003', stock: 15, minStock: 10 },
-    { id: 'STK-009', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-003', stock: 8, minStock: 3 },
-    { id: 'STK-010', itemId: 'ITM-HER-02', branchId: 'FIL-003', stock: 10, minStock: 5 },
-    // Almacén central (aparte de las sedes): de aquí salen los envíos a todas las filiales
-    { id: 'STK-011', itemId: 'ITM-LIB-K1', branchId: 'ALM-001', stock: 400, minStock: 100 },
-    { id: 'STK-012', itemId: 'ITM-MAT-01', branchId: 'ALM-001', stock: 250, minStock: 60 },
-    { id: 'STK-013', itemId: 'ITM-KIT-BIENV', branchId: 'ALM-001', stock: 80, minStock: 20 },
-    { id: 'STK-014', itemId: 'ITM-HER-01', branchId: 'ALM-001', stock: 150, minStock: 30 },
-    { id: 'STK-015', itemId: 'ITM-HER-02', branchId: 'ALM-001', stock: 150, minStock: 30 },
-    // Los Olivos es una sede como las demás: stock de venta propio
-    { id: 'STK-016', itemId: 'ITM-LIB-K1', branchId: 'FIL-001', stock: 60, minStock: 30 },
-    { id: 'STK-017', itemId: 'ITM-MAT-01', branchId: 'FIL-001', stock: 40, minStock: 20 },
-    { id: 'STK-018', itemId: 'ITM-KIT-BIENV', branchId: 'FIL-001', stock: 12, minStock: 5 },
-    { id: 'STK-019', itemId: 'ITM-HER-01', branchId: 'FIL-001', stock: 25, minStock: 10 },
-    { id: 'STK-020', itemId: 'ITM-HER-02', branchId: 'FIL-001', stock: 25, minStock: 5 },
-  ]);
-
-  const [kardex, setKardex] = useState<KardexEntry[]>([
-    { id: 'KDX-001', date: '2024-03-15 14:30', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Ingreso', qty: 50, prevBalance: 100, newBalance: 150, user: 'Admin', doc: 'COMP-2024-001' },
-    { id: 'KDX-002', date: '2024-03-15 10:15', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Salida por matrícula', qty: -1, prevBalance: 151, newBalance: 150, user: 'Ventas Piura', doc: 'MAT-2024-001' },
-    { id: 'KDX-003', date: '2024-03-14 16:45', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Transferencia Salida', qty: -10, prevBalance: 160, newBalance: 150, user: 'Logística Central', doc: 'TRF-2024-001' },
-    { id: 'KDX-004', date: '2024-03-10 11:30', branch: 'Chiclayo', material: 'Mochila Institucional', type: 'Transferencia Entrada', qty: 5, prevBalance: 0, newBalance: 5, user: 'Logística Chiclayo', doc: 'TRF-2024-003' },
-    { id: 'KDX-005', date: '2024-03-13 11:20', branch: 'Piura', material: 'Material Lógico Matemático', type: 'Ajuste Positivo', qty: 5, prevBalance: 45, newBalance: 50, user: 'Admin', doc: 'AJU-2024-001' },
-    { id: 'KDX-008', date: '2024-03-15 16:00', branch: 'Piura', material: 'Mochila Institucional', type: 'Transferencia Salida', qty: -20, prevBalance: 60, newBalance: 40, user: 'Logística Central', doc: 'ENV-2024-001', observation: 'Despacho de envío ENV-2024-001' },
-    { id: 'KDX-007', date: '2024-03-15 16:00', branch: 'Piura', material: 'Libro Kids Nivel 1', type: 'Transferencia Salida', qty: -50, prevBalance: 150, newBalance: 100, user: 'Logística Central', doc: 'ENV-2024-001', observation: 'Despacho de envío ENV-2024-001' },
-    { id: 'KDX-006', date: '2024-03-12 15:00', branch: 'Chiclayo', material: 'Libro Kids Nivel 1', type: 'Merma', qty: -2, prevBalance: 87, newBalance: 85, user: 'Logística Chiclayo', doc: 'MER-2024-001' },
-  ]);
-
-  const [transfers, setTransfers] = useState<Transfer[]>([
-    { 
-      id: 'TRF-2024-001', 
-      date: '2024-03-15', 
-      originId: 'ALM-001', 
-      destinationId: 'FIL-003', 
-      status: 'En tránsito', 
-      eta: '2024-03-20',
-      items: [
-        { itemId: 'ITM-LIB-K1', quantity: 10 },
-        { itemId: 'ITM-MAT-01', quantity: 5 }
-      ], 
-      reason: 'Reposición', 
-      shippingMethodId: 'SM-001', 
-      courierId: 'COUR-001', 
-      trackingNumber: 'TRK-123456' 
-    },
-    { 
-      id: 'TRF-2024-002', 
-      date: '2024-03-14', 
-      originId: 'FIL-003', 
-      destinationId: 'ALM-001', 
-      status: 'Borrador', 
-      items: [
-        { itemId: 'ITM-KIT-BIENV', quantity: 2 }
-      ], 
-      reason: 'Redistribución', 
-      shippingMethodId: 'SM-002', 
-      travelerName: 'Juan Pérez' 
-    },
-    { 
-      id: 'TRF-2024-003', 
-      date: '2024-03-10', 
-      originId: 'ALM-001', 
-      destinationId: 'FIL-003', 
-      status: 'Recibida', 
-      receptionDate: '2024-03-10',
-      receivedBy: 'María Torres',
-      items: [
-        { itemId: 'ITM-HER-01', quantity: 5 }
-      ], 
-      reason: 'Apoyo temporal', 
-      shippingMethodId: 'SM-003', 
-      internalLogisticsObservation: 'Vehículo de la empresa' 
-    },
-  ]);
-
-  const [shipments, setShipments] = useState<Shipment[]>([
-    {
-      id: 'ENV-2024-001',
-      date: '2024-03-15',
-      originId: 'ALM-001', // Almacén central
-      destinationId: 'FIL-003', // Chiclayo
-      status: 'En tránsito',
-      boxes: [
-        {
-          id: 'BOX-1',
-          boxNumber: 'Caja 1',
-          items: [
-            { itemId: 'ITM-LIB-K1', quantity: 50 }
-          ]
-        },
-        {
-          id: 'BOX-2',
-          boxNumber: 'Caja 2',
-          items: [
-            { itemId: 'ITM-HER-01', quantity: 20 }
-          ]
-        }
-      ],
-      items: [
-        { itemId: 'ITM-LIB-K1', quantity: 50 },
-        { itemId: 'ITM-HER-01', quantity: 20 }
-      ],
-      shippingMethodId: 'SM-001',
-      courierId: 'COUR-001',
-      trackingNumber: 'TRK-123456',
-      eta: '2024-03-18',
-      etaTime: '15:00'
-    }
-  ]);
-
-  const [couriers, setCouriers] = useState<Courier[]>([
-    { id: 'COUR-001', code: 'C-001', name: 'Olva Courier', address: 'Av. Argentina 123', reference: 'Frente al parque', phone: '01-123-4567', status: 'Activo', observations: 'Entrega en 24h' },
-    { id: 'COUR-002', code: 'C-002', name: 'Shalom', address: 'Av. Javier Prado 456', reference: 'Cerca al óvalo', phone: '01-987-6543', status: 'Activo', observations: 'Recojo en agencia' },
-  ]);
-
-  const [shippingMethods, setShippingMethods] = useState<ShippingMethod[]>([
-    { id: 'SM-001', name: 'Courier', status: 'Activo', observations: 'Envío por agencia externa' },
-    { id: 'SM-002', name: 'Viajero', status: 'Activo', observations: 'Envío con personal viajero' },
-    { id: 'SM-003', name: 'Recojo interno', status: 'Activo', observations: 'Recojo por logística interna' },
-    { id: 'SM-004', name: 'Otro', status: 'Activo', observations: 'Otros métodos' },
-  ]);
-
-  const [adjustments, setAdjustments] = useState<Adjustment[]>([
-    { id: 'AJU-2024-001', date: '2024-03-15', branch: 'Piura', material: 'Material Lógico Matemático', type: 'Ajuste Positivo', qty: 5, reason: 'Diferencia de conteo', user: 'Admin' },
-    { id: 'MER-2024-001', date: '2024-03-14', branch: 'Chiclayo', material: 'Libro Kids Nivel 1', type: 'Merma', qty: -2, reason: 'Deterioro', user: 'Logística Chiclayo' },
-    { id: 'AJU-2024-002', date: '2024-03-10', branch: 'Piura', material: 'Mochila Institucional', type: 'Ajuste Negativo', qty: -1, reason: 'Error anterior', user: 'Superadmin' },
-    { id: 'DEV-2024-001', date: '2024-03-05', branch: 'Piura', material: 'Cartuchera', type: 'Devolución', qty: 1, reason: 'Devolución', user: 'Ventas Piura' },
-  ]);
+  // El stock, el kardex, los ajustes, los envíos, las transferencias, las incidencias de recepción, los couriers y los métodos de envío viven en la
+  // base de datos (`useLogistics`, más abajo): ya no hay datos de ejemplo en memoria.
 
   // Reservas de ejemplo con fechas relativas a hoy (siempre en días con atención y en horarios permitidos): `data/seedPeople.ts`
   // Diego Torres: su primera asesoría fue hace casi 3 meses, así que su duración base está por vencer (ejemplo de la alerta)
@@ -1984,8 +1855,6 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
-  const [incidents, setIncidents] = useState<ReceptionIncident[]>([]);
-
   const [notifications, setNotifications] = useState<Notification[]>([
     { id: 'NOT-001', title: 'Bienvenido', message: 'Bienvenido al sistema ENSIL', type: 'info', date: new Date().toISOString(), readBy: [] }
   ]);
@@ -2002,83 +1871,21 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     setNotifications(prev => markRead(prev, id, currentUser.id));
   };
 
-  const confirmReception = (data: {
-    docId: string;
-    docType: 'Envío' | 'Transferencia';
-    receivedItems: { itemId: string; quantity: number; status: 'ok' | 'missing' | 'damaged' | 'extra'; observation?: string }[];
-    generalObservation?: string;
-  }) => {
+  const confirmReception: DataContextType['confirmReception'] = async data => {
     const { docId, docType, receivedItems, generalObservation } = data;
-
-    // 1. Find the document
-    let doc: Shipment | Transfer | undefined;
-    if (docType === 'Envío') {
-      doc = shipments.find(s => s.id === docId);
-    } else {
-      doc = transfers.find(t => t.id === docId);
-    }
-
+    const doc = docType === 'Envío' ? log.shipments.find(s => s.id === docId) : log.transfers.find(t => t.id === docId);
     if (!doc) return { ok: false, error: 'No se encontró el documento a recepcionar.' };
     // Recibir en el almacén (devoluciones) mueve su stock: solo lo confirma quien trabaja en él
     const deniedReception = warehouseProblem(doc.destinationId);
     if (deniedReception) return { ok: false, error: deniedReception };
-
-    // 2. Determine final status
-    const hasDifferences = receivedItems.some(ri => ri.status !== 'ok' || ri.quantity !== (doc?.items.find(i => i.itemId === ri.itemId)?.quantity || 0));
-    const finalStatus = hasDifferences ? (docType === 'Envío' ? 'Recibido con diferencias' : 'Recibida con diferencias') : (docType === 'Envío' ? 'Recibido' : 'Recibida');
-
-    // 3. Update document status
-    const receptionData = {
-      status: finalStatus as any,
-      receptionObservation: generalObservation,
-      receptionDate: new Date().toISOString(),
-      receivedBy: currentUser.name
-    };
-
-    if (docType === 'Envío') {
-      setShipments(prev => prev.map(s => s.id === docId ? { ...s, ...receptionData } : s));
-    } else {
-      setTransfers(prev => prev.map(t => t.id === docId ? { ...t, ...receptionData } : t));
-    }
-
-    // 4. Update Stock, Kardex and Incidents
-    receivedItems.forEach(ri => {
-      // Add incident if not ok
-      if (ri.status !== 'ok') {
-        const newIncident: ReceptionIncident = {
-          id: allocId('INC', incidents.map(x => x.id)),
-          docId,
-          docType,
-          itemId: ri.itemId,
-          type: ri.status as any,
-          quantity: ri.status === 'missing' ? (doc?.items.find(i => i.itemId === ri.itemId)?.quantity || 0) - ri.quantity : ri.quantity,
-          observation: ri.observation || '',
-          date: new Date().toISOString(),
-          branchId: doc?.destinationId || ''
-        };
-        setIncidents(prev => [...prev, newIncident]);
-      }
-
-      if (ri.quantity > 0) {
-        // Regla de stock: el origen se descuenta UNA sola vez, al despachar. Aquí solo se suma lo recibido al destino.
-        // Faltantes: ya salieron del origen; quedan registrados como incidencia.
-        // Add to Destination
-        updateStock(
-          doc?.destinationId || '',
-          ri.itemId,
-          ri.quantity,
-          docType === 'Envío' ? 'Ingreso' : 'Transferencia Entrada',
-          `Recepción de ${docType} ${docId}. Estado: ${ri.status}. ${ri.observation || ''}`,
-          docId
-        );
-      }
-    });
-
-    // 5. Send Notification
-    notify(hasDifferences ? 'reception_with_differences' : docType === 'Envío' ? 'shipment_received' : 'transfer_received', {
-      title: hasDifferences ? 'Recepción con diferencias' : 'Recepción confirmada',
-      message: `El ${docType} ${docId} ha sido recibido en ${locationName(doc?.destinationId)}. Estado: ${finalStatus}`,
-      type: hasDifferences ? 'warning' : 'success',
+    // La base suma al destino lo recibido, anota las incidencias y deja el documento recibido (con o sin diferencias), todo o nada
+    const outcome = receptionOutcome(docType, doc.items, receivedItems);
+    const res = await log.confirmReception({ docId, docType, receivedItems, generalObservation });
+    if (!res.ok) return { ok: false, error: res.error };
+    notify(outcome.hasDifferences ? 'reception_with_differences' : docType === 'Envío' ? 'shipment_received' : 'transfer_received', {
+      title: outcome.hasDifferences ? 'Recepción con diferencias' : 'Recepción confirmada',
+      message: `El ${docType} ${docId} ha sido recibido en ${locationName(doc.destinationId)}. Estado: ${outcome.finalStatus}`,
+      type: outcome.hasDifferences ? 'warning' : 'success',
       scope: { originBranchId: doc.originId, destinationBranchId: doc.destinationId, subjectBranchId: doc.destinationId },
     });
     return { ok: true };
@@ -2160,25 +1967,25 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const itemCat = useItemCatalog(itemCatalogData, { programs, levels, branches });
   const { items, itemPrices, recipes } = itemCat;
 
-  const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = (enrollmentId, data, deductions = []) => {
+  // Stock, kardex, ajustes, envíos, transferencias, incidencias, couriers y métodos de envío: de la base de datos (`AccessGate` los lee al iniciar sesión).
+  // El stock solo lo mueve la base: cada operación es UNA llamada que descuenta o suma, comprueba que el saldo no quede negativo y deja el kardex.
+  // Las acciones de más abajo son asíncronas: validan, guardan, avisan y devuelven `{ ok, error }`. Los datos de partida están en `data/seedCatalog.ts`
+  // (se cargan con `supabase/seed/logistica_inicial.sql`).
+  const log = useLogistics(logisticsData, { items, locations });
+  const { stockItems, kardex, transfers, shipments, couriers, shippingMethods, adjustments, incidents } = log;
+
+  const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
-    // Todo o nada: primero se comprueba el stock de TODAS las líneas, después se descuenta
-    const moves = deductions.map(d => ({ branchId: enrollment.branchId || '', itemId: d.itemId, qty: -d.quantity }));
-    const shortage = stockMovesError(stockRef.current, moves, id => items.find(i => i.id === id)?.name ?? id);
-    if (shortage) return { ok: false, error: shortage };
-    moves.forEach(m => updateStock(m.branchId, m.itemId, m.qty, 'Entrega por Verificación', `Entrega a alumno ${enrollment.student} (Matrícula: ${enrollment.id})`, enrollment.id));
+    // Todo o nada: la base descuenta TODAS las líneas en una sola operación (si falta stock de una, no se descuenta ninguna) y deja el kardex
+    const moved = await log.deliverFromStock({ branchId: enrollment.branchId || '', enrollmentId: enrollment.id, student: enrollment.student, lines: deductions });
+    if (!moved.ok) return { ok: false, error: moved.error };
     setEnrollments(prev => prev.map(e => (e.id === enrollmentId
       ? { ...e, verificationStatus: data.status, verifiedItems: data.items, verificationObservation: data.observation, verificationDate: data.date, verifier: data.verifier }
       : e)));
     return { ok: true };
   };
-
-  // Último estado del inventario: permite encadenar movimientos en un mismo evento y evita efectos secundarios
-  // dentro de actualizadores de estado (con StrictMode duplicaban las líneas de kardex).
-  const stockRef = useRef<StockItem[]>(stockItems);
-  stockRef.current = stockItems;
 
   /**
    * Mover stock del almacén pide estar asignado a él (o ser Superusuario): alcanzar todas las sedes permite VER el almacén, no despachar
@@ -2191,93 +1998,17 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return null;
   };
 
-  /** Primer artículo sin saldo suficiente en la sede, o `null` si hay para todos. */
-  const findInsufficientStock = (branchId: string, lines: { itemId: string; quantity: number }[]): string | null => {
-    const needed = new Map<string, number>();
-    lines.forEach(l => needed.set(l.itemId, (needed.get(l.itemId) ?? 0) + l.quantity));
-    for (const [itemId, qty] of needed) {
-      const have = stockRef.current.find(x => x.branchId === branchId && x.itemId === itemId)?.stock ?? 0;
-      if (have < qty) {
-        const name = items.find(i => i.id === itemId)?.name || itemId;
-        return `Stock insuficiente de "${name}" en ${locationName(branchId)}: disponible ${have}, requerido ${qty}.`;
-      }
-    }
-    return null;
-  };
-
-  const updateStock = (branchId: string, itemId: string, qty: number, type: KardexEntry['type'], observation: string, doc?: string): StockResult => {
-    const list = stockRef.current;
-    const idx = list.findIndex(x => x.branchId === branchId && x.itemId === itemId);
-    const prevBalance = idx >= 0 ? list[idx].stock : 0;
-    const newBalance = prevBalance + qty;
-
-    if (qty < 0 && newBalance < 0) {
-      const name = items.find(i => i.id === itemId)?.name || itemId;
-      return { ok: false, error: `Stock insuficiente de "${name}": disponible ${prevBalance}, se intentó descontar ${-qty}.` };
-    }
-
-    const nextList = idx >= 0
-      ? list.map((x, i) => i === idx ? { ...x, stock: newBalance } : x)
-      : [...list, { id: allocId('STK', list.map(x => x.id)), itemId, branchId, stock: newBalance, minStock: 0 }];
-
-    const entry: KardexEntry = {
-      id: allocId('KDX', kardex.map(k => k.id)),
-      date: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      branch: locationName(branchId),
-      material: items.find(i => i.id === itemId)?.name || itemId,
-      type,
-      qty,
-      prevBalance,
-      newBalance,
-      user: currentUser.name,
-      doc: doc || 'S/N',
-      observation
-    };
-
-    stockRef.current = nextList;
-    setStockItems(nextList);
-    setKardex(prevK => [entry, ...prevK]);
-    return { ok: true };
-  };
-
   const addItemPrice: DataContextType['addItemPrice'] = price => itemCat.addItemPrice(price);
   const addItems: DataContextType['addItems'] = (newItems, prices = []) => itemCat.addItems(newItems, prices);
   const updateItem: DataContextType['updateItem'] = (id, item) => itemCat.updateItem(id, item);
 
-  const addCourier = (courier: Omit<Courier, 'id'>): StockResult => {
-    if (!courier.code?.trim() || !courier.name?.trim()) return { ok: false, error: 'El código y nombre son obligatorios.' };
-    if (couriers.some(c => c.code.trim().toLowerCase() === courier.code.trim().toLowerCase())) return { ok: false, error: 'Ya existe un courier con ese código.' };
-    setCouriers(prev => [...prev, { ...courier, id: nextSequentialId('COUR', prev.map(x => x.id)) }]);
-    return { ok: true };
-  };
-
-  const updateCourier = (id: string, courier: Partial<Omit<Courier, 'id'>>): StockResult => {
-    const current = couriers.find(c => c.id === id);
-    if (!current) return { ok: false, error: 'No se encontró el courier.' };
-    const next = { ...current, ...courier };
-    if (!next.code?.trim() || !next.name?.trim()) return { ok: false, error: 'El código y nombre son obligatorios.' };
-    if (couriers.some(c => c.id !== id && c.code.trim().toLowerCase() === next.code.trim().toLowerCase())) return { ok: false, error: 'Ya existe un courier con ese código.' };
-    setCouriers(prev => prev.map(c => (c.id === id ? next : c)));
-    return { ok: true };
-  };
-
-  const addShippingMethod = (method: Omit<ShippingMethod, 'id'>): StockResult => {
-    if (!method.name?.trim()) return { ok: false, error: 'El nombre del método es obligatorio.' };
-    setShippingMethods(prev => [...prev, { ...method, id: nextSequentialId('SM', prev.map(x => x.id)) }]);
-    return { ok: true };
-  };
-
-  const updateShippingMethod = (id: string, method: Partial<Omit<ShippingMethod, 'id'>>): StockResult => {
-    const current = shippingMethods.find(m => m.id === id);
-    if (!current) return { ok: false, error: 'No se encontró el método de envío.' };
-    const next = { ...current, ...method };
-    if (!next.name?.trim()) return { ok: false, error: 'El nombre del método es obligatorio.' };
-    setShippingMethods(prev => prev.map(m => (m.id === id ? next : m)));
-    return { ok: true };
-  };
+  const addCourier: DataContextType['addCourier'] = async courier => log.addCourier(courier);
+  const updateCourier: DataContextType['updateCourier'] = async (id, courier) => log.updateCourier(id, courier);
+  const addShippingMethod: DataContextType['addShippingMethod'] = async method => log.addShippingMethod(method);
+  const updateShippingMethod: DataContextType['updateShippingMethod'] = async (id, method) => log.updateShippingMethod(id, method);
 
   /** Venta de un artículo en caja: todo o nada (stock + ingreso), con el precio vigente de la sede y el cierre de caja respetado. */
-  const registerItemSale = (input: ItemSaleInput): StockResult => {
+  const registerItemSale = async (input: ItemSaleInput): Promise<StockResult> => {
     if (!can(PERM.itemSale)) return { ok: false, error: 'Su rol no puede vender artículos en caja.' };
     if (!input.branchId || !input.itemId) return { ok: false, error: 'Por favor complete todos los campos obligatorios.' };
     const notSold = locationSaleError(input.branchId);
@@ -2286,13 +2017,17 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (!item || !item.isSold || item.status !== 'Activo') return { ok: false, error: 'El artículo no está habilitado para la venta.' };
     const unitPrice = getCurrentPrice(itemPrices, input.itemId, input.branchId)?.amount ?? 0;
     if (!(unitPrice > 0)) return { ok: false, error: 'El artículo no tiene un precio de venta vigente. Configúrelo en Logística → Catálogo de artículos.' };
-    const invalid = itemSaleError({ qty: input.qty, available: availableStock(stockRef.current, input.branchId, input.itemId), currency: input.currency, exchangeRate: input.exchangeRate });
+    const invalid = itemSaleError({ qty: input.qty, available: availableStock(log.stockItems, input.branchId, input.itemId), currency: input.currency, exchangeRate: input.exchangeRate });
     if (invalid) return { ok: false, error: invalid };
     const closed = closedMessage(cashClosures, 'caja', input.currency, todayLocalISO());
     if (closed) return { ok: false, error: closed };
     const totalUsd = Math.round(unitPrice * input.qty * 100) / 100;
-    const out = updateStock(input.branchId, input.itemId, -input.qty, 'Venta', `Venta directa en caja a ${input.customerName || 'Cliente General'}. Comprobante: ${input.receiptType} ${input.receiptNumber}`, input.receiptNumber);
-    if (!out.ok) return out;
+    // El stock y el kardex los mueve la base; el ingreso en caja se registra solo si el stock salió bien
+    const out = await log.sellFromStock({
+      branchId: input.branchId, itemId: input.itemId, qty: input.qty, doc: input.receiptNumber,
+      observation: `Venta directa en caja a ${input.customerName || 'Cliente General'}. Comprobante: ${input.receiptType} ${input.receiptNumber}`,
+    });
+    if (!out.ok) return { ok: false, error: out.error };
     addCashMovement({
       kind: 'Ingreso',
       concept: 'Venta de artículo',
@@ -2308,60 +2043,37 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const registerStockEntry = (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }): StockResult => {
+  const registerStockEntry: DataContextType['registerStockEntry'] = async input => {
     if (!can(PERM.stockEntry)) return { ok: false, error: 'Su rol no puede registrar ingresos de stock.' };
-    const invalid = stockEntryError(input);
-    if (invalid) return { ok: false, error: invalid };
     const denied = warehouseProblem(input.branchId);
     if (denied) return { ok: false, error: denied };
-    return updateStock(input.branchId, input.itemId, input.qty, 'Ingreso', input.reason?.trim() || 'Ingreso manual de stock', input.doc.trim());
+    return log.registerStockEntry(input);
   };
 
   const saveRecipe: DataContextType['saveRecipe'] = recipe => itemCat.saveRecipe(recipe);
   const duplicateRecipe: DataContextType['duplicateRecipe'] = id => itemCat.duplicateRecipe(id);
   const setRecipeStatus: DataContextType['setRecipeStatus'] = (id, status) => itemCat.setRecipeStatus(id, status);
 
-  const addAdjustment = (adjData: Omit<Adjustment, 'id' | 'date' | 'user'>, stockId: string): StockResult => {
-    const stock = stockRef.current.find(s => s.id === stockId);
+  const addAdjustment: DataContextType['addAdjustment'] = async (adjData, stockId) => {
+    const stock = log.stockItems.find(s => s.id === stockId);
     if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
     const denied = warehouseProblem(stock.branchId);
     if (denied) return { ok: false, error: denied };
-
-    const newAdjustment: Adjustment = {
-      ...adjData,
-      id: allocId('ADJ', adjustments.map(a => a.id)),
-      date: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      user: currentUser.name
-    };
-
-    const result = updateStock(stock.branchId, stock.itemId, adjData.qty, adjData.type, adjData.reason, newAdjustment.id);
-    if (!result.ok) return result;
-    setAdjustments(prev => [newAdjustment, ...prev]);
-    return { ok: true };
+    return log.addAdjustment({ type: adjData.type, qty: adjData.qty, reason: adjData.reason, observation: adjData.observation }, stockId);
   };
 
-  const updateMinStock = (stockId: string, minStock: number) => {
-    setStockItems(prev => prev.map(s => {
-      if (s.id === stockId) {
-        return { ...s, minStock };
-      }
-      return s;
-    }));
+  const updateMinStock: DataContextType['updateMinStock'] = async (stockId, minStock) => {
+    const stock = log.stockItems.find(s => s.id === stockId);
+    const denied = stock ? warehouseProblem(stock.branchId) : null;
+    if (denied) return { ok: false, error: denied };
+    return log.updateMinStock(stockId, minStock);
   };
 
-  const addTransfer = (transfer: Omit<Transfer, 'id'>): StockResult => {
-    // Entre filiales todo pasa por el almacén central (utils/logisticsRoutes.ts)
-    const routeError = transferRouteError(transfer.originId, transfer.destinationId, locations);
-    if (routeError) return { ok: false, error: routeError };
-    const newTransfer = {
-      ...transfer,
-      id: `TRF-${new Date().getFullYear()}-${String(transfers.length + 1).padStart(3, '0')}`,
-      requestedBy: currentUser.name,
-      requestedById: currentUser.id,
-    } as Transfer;
-    setTransfers(prev => [newTransfer, ...prev]);
-    if (newTransfer.status === 'Solicitada') announceTransfer(newTransfer, 'Solicitada');
-    return { ok: true };
+  const addTransfer: DataContextType['addTransfer'] = async transfer => {
+    const res = await log.addTransfer(transfer);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (transfer.status === 'Solicitada') announceTransfer({ ...transfer, id: res.id ?? '', requestedBy: currentUser.name, requestedById: currentUser.id } as Transfer, 'Solicitada');
+    return { ok: true, id: res.id };
   };
 
   /** Avisos de una transferencia: pedida (a quien aprueba) y aprobada o rechazada (a quien la pidió). */
@@ -2377,31 +2089,16 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     }
   };
 
-  // Referencias al último estado: varias operaciones encadenadas en un mismo evento (p. ej. updateTransfer + updateTransferStatus)
-  // deben ver los cambios anteriores y no descontar stock dos veces ni con ítems desactualizados.
-  const transfersRef = useRef<Transfer[]>(transfers);
-  transfersRef.current = transfers;
-  const commitTransfers = (next: Transfer[]) => {
-    transfersRef.current = next;
-    setTransfers(next);
-  };
-
-  const updateTransferStatus = (transferId: string, newStatus: Transfer['status']): StockResult => {
-    const transfer = transfersRef.current.find(t => t.id === transferId);
+  const updateTransferStatus: DataContextType['updateTransferStatus'] = async (transferId, newStatus) => {
+    const transfer = log.transfers.find(t => t.id === transferId);
     if (!transfer) return { ok: false, error: 'Transferencia no encontrada.' };
-    const movesStock = (newStatus === 'En tránsito' && (transfer.status === 'Aprobada' || transfer.status === 'Solicitada'))
-      || (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción'));
-    const deniedMove = movesStock ? warehouseProblem(transfer.originId) : null;
+    // Despachar y cancelar algo ya despachado mueven el stock del origen: si es el almacén, solo lo hace quien trabaja en él
+    const deniedMove = transferMovesStock(transfer.status, newStatus) ? warehouseProblem(transfer.originId) : null;
     if (deniedMove) return { ok: false, error: deniedMove };
-
-    // Regla de stock: sale del origen al DESPACHAR (una sola vez); el destino suma al RECIBIR.
-    if (newStatus === 'En tránsito' && (transfer.status === 'Aprobada' || transfer.status === 'Solicitada')) {
-      const shortage = findInsufficientStock(transfer.originId, transfer.items);
-      if (shortage) return { ok: false, error: shortage };
-      transfer.items.forEach(item => {
-        updateStock(transfer.originId, item.itemId, -item.quantity, 'Transferencia Salida', `Despacho TRF: ${transfer.id}`, transfer.id);
-      });
-
+    // Regla de stock: sale del origen al DESPACHAR (una sola vez); el destino suma al RECIBIR. La base lo hace todo o nada.
+    const res = await log.updateTransferStatus(transferId, newStatus);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (newStatus === 'En tránsito' && transfer.status === 'Aprobada') {
       notify('transfer_dispatched', {
         title: 'Transferencia en tránsito',
         message: `La transferencia ${transfer.id} desde ${locationName(transfer.originId)} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
@@ -2410,69 +2107,23 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       });
     }
     if (newStatus !== transfer.status && (newStatus === 'Solicitada' || newStatus === 'Aprobada' || newStatus === 'Rechazada')) announceTransfer(transfer, newStatus);
-
-    // Cancelación con mercadería ya despachada: vuelve al origen.
-    if (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción')) {
-      transfer.items.forEach(item => {
-        updateStock(transfer.originId, item.itemId, item.quantity, 'Ingreso', `Cancelación TRF: ${transfer.id}`, transfer.id);
-      });
-    }
-
-    commitTransfers(transfersRef.current.map(t => t.id === transferId ? { ...t, status: newStatus } : t));
     return { ok: true };
   };
 
-  const updateTransfer = (transferId: string, updatedData: Partial<Transfer>): StockResult => {
-    const current = transfersRef.current.find(t => t.id === transferId);
-    if (!current) return { ok: false, error: 'Transferencia no encontrada.' };
-    const next = { ...current, ...updatedData };
-    if (next.originId !== current.originId || next.destinationId !== current.destinationId) {
-      const routeError = transferRouteError(next.originId, next.destinationId, locations);
-      if (routeError) return { ok: false, error: routeError };
-    }
-    commitTransfers(transfersRef.current.map(t => t.id === transferId ? next : t));
-    return { ok: true };
+  const updateTransfer: DataContextType['updateTransfer'] = async (transferId, updatedData) => log.updateTransfer(transferId, updatedData);
+
+  const unpackPackage: DataContextType['unpackPackage'] = async stockId => {
+    const stock = log.stockItems.find(s => s.id === stockId);
+    const denied = stock ? warehouseProblem(stock.branchId) : null;
+    if (denied) return { ok: false, error: denied };
+    return log.unpackPackage(stockId);
   };
 
-  const unpackPackage = (stockId: string): StockResult => {
-    const stock = stockRef.current.find(s => s.id === stockId);
-    if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
-
-    const item = items.find(i => i.id === stock.itemId);
-    if (!item || !item.isPackage || !item.composition) return { ok: false, error: 'El artículo no es un paquete con composición.' };
-    if (!item.allowUnpacking) return { ok: false, error: 'Este paquete no permite desempaquetado.' };
-
-    // 1. Restar 1 del paquete
-    const removed = updateStock(stock.branchId, stock.itemId, -1, 'Desempaquetado', `Desempaquetado de ${item.name}`, 'DESEMP-001');
-    if (!removed.ok) return removed;
-
-    // 2. Sumar componentes
-    item.composition.forEach(comp => {
-      updateStock(stock.branchId, comp.itemId, comp.quantity, 'Desempaquetado', `Componente de ${item.name}`, 'DESEMP-001');
-    });
-    return { ok: true };
-  };
-
-  const packPackage = (stockId: string): StockResult => {
-    const stock = stockRef.current.find(s => s.id === stockId);
-    if (!stock) return { ok: false, error: 'No se encontró el registro de stock.' };
-
-    const item = items.find(i => i.id === stock.itemId);
-    if (!item || !item.isPackage || !item.composition) return { ok: false, error: 'El artículo no es un paquete con composición.' };
-    if (item.composition.length === 0) return { ok: false, error: 'El paquete no tiene composición definida.' };
-
-    // 1. Verificar que haya stock de todos los componentes
-    const shortage = findInsufficientStock(stock.branchId, item.composition.map(c => ({ itemId: c.itemId, quantity: c.quantity })));
-    if (shortage) return { ok: false, error: `No hay stock suficiente de todos los componentes para empaquetar. ${shortage}` };
-
-    // 2. Restar componentes
-    item.composition.forEach(comp => {
-      updateStock(stock.branchId, comp.itemId, -comp.quantity, 'Empaquetado', `Componente para ${item.name}`, 'EMP-001');
-    });
-
-    // 3. Sumar 1 al paquete
-    updateStock(stock.branchId, stock.itemId, 1, 'Empaquetado', `Empaquetado de ${item.name}`, 'EMP-001');
-    return { ok: true };
+  const packPackage: DataContextType['packPackage'] = async stockId => {
+    const stock = log.stockItems.find(s => s.id === stockId);
+    const denied = stock ? warehouseProblem(stock.branchId) : null;
+    if (denied) return { ok: false, error: denied };
+    return log.packPackage(stockId);
   };
 
   /**
@@ -2910,7 +2561,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   };
 
   // ---- Caja: reversa de movimientos y lotes de depósito
-  const reverseCashMovement = (id: string, input: { reason: string; detail: string }): StockResult => {
+  const reverseCashMovement = async (id: string, input: { reason: string; detail: string }): Promise<StockResult> => {
     const movement = cashMovements.find(m => m.id === id);
     if (!movement) return { ok: false, error: 'No se encontró el movimiento.' };
     if (!can(PERM.reverseCash)) return { ok: false, error: 'Su rol no puede reversar movimientos de caja.' };
@@ -2920,8 +2571,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const check = cashReversalCheck(movement, cashMovements);
     if (check.restock) {
-      const r = updateStock(check.restock.branchId, check.restock.itemId, check.restock.qty, 'Devolución', `Reversa de la venta registrada en caja (${movement.id})`, movement.id);
-      if (!r.ok) return r;
+      // La base devuelve las unidades al stock (y deja el kardex); si eso falla, el movimiento de caja no se reversa
+      const r = await log.restockReversedSale({ branchId: check.restock.branchId, itemId: check.restock.itemId, qty: check.restock.qty, movementId: movement.id });
+      if (!r.ok) return { ok: false, error: r.error };
     }
     setCashMovements(prev => applyCashReversal(prev, id, { ...input, at: new Date().toISOString(), by: currentUser.name }));
     notify('cash_movement_reversed', { title: 'Movimiento de caja reversado', message: `${currentUser.name} reversó el movimiento ${movement.id} (${movement.concept}): ${input.reason}.`, type: 'warning', scope: { subjectBranchId: movement.branchId } });
@@ -3308,93 +2960,51 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const updateLeadSource: DataContextType['updateLeadSource'] = (id, name, status) => catalog.edit('leadSource', id, { name, status });
   const deleteLeadSource: DataContextType['deleteLeadSource'] = id => catalog.remove('leadSource', id, catalogLinks());
 
-  const shipmentsRef = useRef<Shipment[]>(shipments);
-  shipmentsRef.current = shipments;
-  const commitShipments = (next: Shipment[]) => {
-    shipmentsRef.current = next;
-    setShipments(next);
+  const notifyShipmentDispatched = (s: { id: string; originId: string; destinationId: string }) => notify('shipment_dispatched', {
+    title: 'Envío en tránsito',
+    message: `El envío ${s.id} desde ${locationName(s.originId) || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
+    type: 'info',
+    scope: { originBranchId: s.originId, destinationBranchId: s.destinationId },
+  });
+  const notifyShipmentCancelled = (s: { id: string; originId: string; destinationId: string }) => notify('shipment_cancelled', {
+    title: 'Envío cancelado',
+    message: `El envío ${s.id} hacia ${locationName(s.destinationId) || 'la filial'} fue cancelado. El stock volvió al almacén de origen.`,
+    type: 'warning',
+    scope: { originBranchId: s.originId, destinationBranchId: s.destinationId },
+  });
+
+  const addShipment: DataContextType['addShipment'] = async shipment => {
+    // El stock del almacén solo lo mueve quien trabaja en él (despachar lo mueve)
+    const denied = shipment.status === 'En tránsito' ? warehouseProblem(shipment.originId) : null;
+    if (denied) return { ok: false, error: denied };
+    const res = await log.addShipment(shipment);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (shipment.status === 'En tránsito') notifyShipmentDispatched({ id: res.id ?? '', originId: shipment.originId, destinationId: shipment.destinationId });
+    return { ok: true, id: res.id };
   };
 
-  const IN_TRANSIT_STATUSES: Shipment['status'][] = ['En tránsito', 'Listo para recepción'];
-
-  /** Efectos de cambio de estado de un envío (misma regla que Transferencias: sale del origen al despachar). */
-  const checkShipmentDispatch = (prev: Shipment | undefined, next: Shipment): string | null => {
-    const dispatching = IN_TRANSIT_STATUSES.includes(next.status) && (!prev || prev.status === 'Borrador');
-    const cancelling = !!prev && IN_TRANSIT_STATUSES.includes(prev.status) && next.status === 'Cancelado';
-    // El stock del almacén solo lo mueve quien trabaja en él (despachar y cancelar un envío en tránsito lo mueven)
-    const denied = dispatching || cancelling ? warehouseProblem(next.originId) : null;
-    if (denied) return denied;
-    return dispatching ? findInsufficientStock(next.originId, next.items) : null;
-  };
-
-  const applyShipmentTransition = (prev: Shipment | undefined, next: Shipment) => {
-    const wasDispatched = !!prev && IN_TRANSIT_STATUSES.includes(prev.status);
-    const isDispatched = IN_TRANSIT_STATUSES.includes(next.status);
-
-    if (!wasDispatched && isDispatched && (!prev || prev.status === 'Borrador')) {
-      next.items.forEach(i => {
-        updateStock(next.originId, i.itemId, -i.quantity, 'Transferencia Salida', `Despacho de envío ${next.id}`, next.id);
-      });
-      notify('shipment_dispatched', {
-        title: 'Envío en tránsito',
-        message: `El envío ${next.id} desde ${locationName(next.originId) || 'la sede de origen'} ha sido despachado. El stock salió del origen y se sumará al recepcionar.`,
-        type: 'info',
-        scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
-      });
-    }
-
-    if (wasDispatched && next.status === 'Cancelado') {
-      next.items.forEach(i => {
-        updateStock(next.originId, i.itemId, i.quantity, 'Ingreso', `Cancelación de envío ${next.id}`, next.id);
-      });
-      notify('shipment_cancelled', {
-        title: 'Envío cancelado',
-        message: `El envío ${next.id} hacia ${locationName(next.destinationId) || 'la filial'} fue cancelado. El stock volvió al almacén de origen.`,
-        type: 'warning',
-        scope: { originBranchId: next.originId, destinationBranchId: next.destinationId },
-      });
-    }
-  };
-
-  const addShipment = (shipment: Omit<Shipment, 'id'>): StockResult & { id?: string } => {
-    const routeError = shipmentRouteError(shipment.originId, shipment.destinationId, locations);
-    if (routeError) return { ok: false, error: routeError };
-    const newId = `ENV-${new Date().getFullYear()}-${String(shipmentsRef.current.length + 1).padStart(3, '0')}`;
-    const created: Shipment = { ...shipment, id: newId };
-    const shortage = checkShipmentDispatch(undefined, created);
-    if (shortage) return { ok: false, error: shortage };
-    commitShipments([...shipmentsRef.current, created]);
-    applyShipmentTransition(undefined, created);
-    return { ok: true, id: newId };
-  };
-
-  const updateShipmentStatus = (id: string, status: Shipment['status'], observation?: string): StockResult => {
-    const prev = shipmentsRef.current.find(s => s.id === id);
+  const updateShipmentStatus: DataContextType['updateShipmentStatus'] = async (id, status, observation) => {
+    const prev = log.shipments.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
-    const next: Shipment = { ...prev, status, observation: observation || prev.observation };
-    const shortage = checkShipmentDispatch(prev, next);
-    if (shortage) return { ok: false, error: shortage };
-    commitShipments(shipmentsRef.current.map(s => s.id === id ? next : s));
-    applyShipmentTransition(prev, next);
+    const denied = shipmentMovesStock(prev.status, status) ? warehouseProblem(prev.originId) : null;
+    if (denied) return { ok: false, error: denied };
+    const res = await log.updateShipmentStatus(id, status, observation);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (shipmentMovesStock(prev.status, status)) (status === 'Cancelado' ? notifyShipmentCancelled : notifyShipmentDispatched)(prev);
     return { ok: true };
   };
-  
-  const deleteShipment = (id: string) => {
-    commitShipments(shipmentsRef.current.filter(s => s.id !== id));
-  };
 
-  const updateShipment = (id: string, shipment: Partial<Shipment>): StockResult => {
-    const prev = shipmentsRef.current.find(s => s.id === id);
+  const deleteShipment: DataContextType['deleteShipment'] = async id => log.deleteShipment(id);
+
+  const updateShipment: DataContextType['updateShipment'] = async (id, shipment) => {
+    const prev = log.shipments.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
-    const next: Shipment = { ...prev, ...shipment };
-    if (next.originId !== prev.originId || next.destinationId !== prev.destinationId) {
-      const routeError = shipmentRouteError(next.originId, next.destinationId, locations);
-      if (routeError) return { ok: false, error: routeError };
-    }
-    const shortage = checkShipmentDispatch(prev, next);
-    if (shortage) return { ok: false, error: shortage };
-    commitShipments(shipmentsRef.current.map(s => s.id === id ? next : s));
-    applyShipmentTransition(prev, next);
+    const dispatching = prev.status === 'Borrador' && shipment.status === 'En tránsito';
+    const denied = dispatching ? warehouseProblem(shipment.originId ?? prev.originId) : null;
+    if (denied) return { ok: false, error: denied };
+    const res = await log.updateShipment(id, shipment);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (dispatching) notifyShipmentDispatched({ id, originId: shipment.originId ?? prev.originId, destinationId: shipment.destinationId ?? prev.destinationId });
     return { ok: true };
   };
 

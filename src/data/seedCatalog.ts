@@ -6,10 +6,11 @@
  * El catálogo comercial (programas, niveles, tipos de pago, tarifarios, promociones y orígenes de leads) y los artículos con sus precios y
  * recetas YA viven en la base: el sistema no lee estas listas para mostrar nada. Sirven como datos de partida
  * (`supabase/seed/catalogo_comercial.sql` y `supabase/seed/articulos_y_recetas.sql`, generados desde aquí con `scripts/doc-catalogo-seed.ts` y
- * `scripts/doc-articulos-seed.ts`) y para que los datos de ejemplo en memoria (matrículas, stock) apunten a ids que existen.
+ * `scripts/doc-articulos-seed.ts`) y para que los datos de ejemplo en memoria (matrículas) apunten a ids que existen. El stock de partida, los
+ * couriers y los métodos de envío también viven en la base (`supabase/seed/logistica_inicial.sql`, generado con `scripts/doc-logistica-seed.ts`).
  */
 import type {
-  Assignment, Branch, Contract, Item, ItemPrice, LeadSource, Level, PaymentType, Permission, Program, Promotion, Recipe, Role, Staff, Tariff, TariffInstallment, User, Warehouse,
+  Assignment, Branch, Contract, Courier, Item, ItemPrice, LeadSource, ShippingMethod, Level, PaymentType, Permission, Program, Promotion, Recipe, Role, Staff, Tariff, TariffInstallment, User, Warehouse,
 } from '../context/DataContext';
 import { ROLE_TEMPLATES, templatePermissions } from '../utils/roleTemplates';
 import { REAL_BRANCHES, RUC, realBranchId, realCompanyId, realCompanyName } from './realOrg';
@@ -155,6 +156,50 @@ export const seedRecipes = (): Recipe[] => [
     id: 'REC-003', name: 'Pack Pre-Kids Nivel 1 2026', programId: '2', levelId: '4', branchIds: [], applyToAllBranches: true, status: 'Activo',
     items: [{ itemId: 'ITM-KIT-BIENV', quantity: 1 }, { itemId: 'ITM-MAT-01', quantity: 1 }], startDate: '2026-01-01', endDate: '2026-12-31',
   },
+];
+
+/**
+ * Stock de partida (datos de prueba): lo que hay en el almacén central y en las sedes de ejemplo, con su mínimo de alerta. Se carga con
+ * `supabase/seed/stock_inicial.sql` (generado con `scripts/doc-stock-seed.ts`): cada fila entra como un ingreso «Saldo inicial» en el kardex,
+ * para que lo que hay en stock siempre tenga su movimiento detrás. `branchId` es la ubicación: `ALM-001` (almacén) o el código de la sede.
+ */
+export const seedStock = (): { itemId: string; branchId: string; stock: number; minStock: number }[] => [
+  { itemId: 'ITM-LIB-K1', branchId: 'FIL-002', stock: 100, minStock: 50 },
+  { itemId: 'ITM-MAT-01', branchId: 'FIL-002', stock: 50, minStock: 30 },
+  { itemId: 'ITM-KIT-BIENV', branchId: 'FIL-002', stock: 25, minStock: 5 },
+  { itemId: 'ITM-HER-01', branchId: 'FIL-002', stock: 40, minStock: 10 },
+  { itemId: 'ITM-HER-02', branchId: 'FIL-002', stock: 40, minStock: 5 },
+  { itemId: 'ITM-LIB-K1', branchId: 'FIL-003', stock: 85, minStock: 40 },
+  { itemId: 'ITM-HER-01', branchId: 'FIL-003', stock: 5, minStock: 5 },
+  { itemId: 'ITM-MAT-01', branchId: 'FIL-003', stock: 15, minStock: 10 },
+  { itemId: 'ITM-KIT-BIENV', branchId: 'FIL-003', stock: 8, minStock: 3 },
+  { itemId: 'ITM-HER-02', branchId: 'FIL-003', stock: 10, minStock: 5 },
+  // Almacén central (aparte de las sedes): de aquí salen los envíos a todas las filiales
+  { itemId: 'ITM-LIB-K1', branchId: 'ALM-001', stock: 400, minStock: 100 },
+  { itemId: 'ITM-MAT-01', branchId: 'ALM-001', stock: 250, minStock: 60 },
+  { itemId: 'ITM-KIT-BIENV', branchId: 'ALM-001', stock: 80, minStock: 20 },
+  { itemId: 'ITM-HER-01', branchId: 'ALM-001', stock: 150, minStock: 30 },
+  { itemId: 'ITM-HER-02', branchId: 'ALM-001', stock: 150, minStock: 30 },
+  // Los Olivos es una sede como las demás: stock de venta propio
+  { itemId: 'ITM-LIB-K1', branchId: 'FIL-001', stock: 60, minStock: 30 },
+  { itemId: 'ITM-MAT-01', branchId: 'FIL-001', stock: 40, minStock: 20 },
+  { itemId: 'ITM-KIT-BIENV', branchId: 'FIL-001', stock: 12, minStock: 5 },
+  { itemId: 'ITM-HER-01', branchId: 'FIL-001', stock: 25, minStock: 10 },
+  { itemId: 'ITM-HER-02', branchId: 'FIL-001', stock: 25, minStock: 5 },
+];
+
+/** Couriers de partida (datos de prueba): se cargan con `supabase/seed/logistica_inicial.sql`. */
+export const seedCouriers = (): Courier[] => [
+  { id: 'COUR-001', code: 'C-001', name: 'Olva Courier', address: 'Av. Argentina 123', reference: 'Frente al parque', phone: '01-123-4567', status: 'Activo', observations: 'Entrega en 24h' },
+  { id: 'COUR-002', code: 'C-002', name: 'Shalom', address: 'Av. Javier Prado 456', reference: 'Cerca al óvalo', phone: '01-987-6543', status: 'Activo', observations: 'Recojo en agencia' },
+];
+
+/** Métodos de envío de partida. El de nombre «Courier» pide courier y guía; el de «Viajero», quién lleva la carga (lo decide el nombre). */
+export const seedShippingMethods = (): ShippingMethod[] => [
+  { id: 'SM-001', name: 'Courier', status: 'Activo', observations: 'Envío por agencia externa' },
+  { id: 'SM-002', name: 'Viajero', status: 'Activo', observations: 'Envío con personal viajero' },
+  { id: 'SM-003', name: 'Recojo interno', status: 'Activo', observations: 'Recojo por logística interna' },
+  { id: 'SM-004', name: 'Otro', status: 'Activo', observations: 'Otros métodos' },
 ];
 
 export const seedLeadSources = (): LeadSource[] => [

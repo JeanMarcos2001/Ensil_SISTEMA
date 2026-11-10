@@ -16,8 +16,8 @@ export default function App() {
     <AuthProvider>
       <AuthGate>
         <AccessGate>
-          {(access, accountId, org, catalog, itemCatalog) => (
-            <DataProvider access={access} accountId={accountId} org={org} catalog={catalog} itemCatalog={itemCatalog}>
+          {(access, accountId, org, catalog, itemCatalog, logistics) => (
+            <DataProvider access={access} accountId={accountId} org={org} catalog={catalog} itemCatalog={itemCatalog} logistics={logistics}>
               <BrowserRouter>
                 <AppShell />
               </BrowserRouter>

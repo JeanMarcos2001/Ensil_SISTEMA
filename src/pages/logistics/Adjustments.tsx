@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Search, Filter, Plus, AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, Package, FileText, Info, Calendar, MapPin, User, Hash } from 'lucide-react';
 import { useData, Adjustment } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
+import { signedAdjustment } from '../../utils/inventory';
 
 export function Adjustments() {
   const { adjustments, stockItems, items, stockLocations, addAdjustment, can } = useData();
@@ -27,7 +28,10 @@ export function Adjustments() {
   const [filterType, setFilterType] = useState('');
   const [filterDate, setFilterDate] = useState('');
 
-  const handleSaveAdjustment = () => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveAdjustment = async () => {
+    if (saving) return;
     if (!selectedStockId || qty === 0 || !reason) {
       setFormError('Por favor complete los campos obligatorios (Artículo, Cantidad y Motivo)');
       return;
@@ -36,24 +40,18 @@ export function Adjustments() {
     const stock = stockItems.find(s => s.id === selectedStockId);
     if (!stock) return;
 
-    const item = items.find(i => i.id === stock.itemId);
-    const branch = stockLocations.find(b => b.id === stock.branchId);
-
     // El signo lo define el tipo de operación; en Regularización administrativa se respeta el signo ingresado.
-    const signedQty = type === 'Ajuste Positivo' || type === 'Devolución'
-      ? Math.abs(qty)
-      : type === 'Ajuste Negativo' || type === 'Merma'
-        ? -Math.abs(qty)
-        : qty;
+    const signedQty = signedAdjustment(type as Adjustment['type'], qty);
 
-    const result = addAdjustment({
-      branch: branch?.name || 'Desconocida',
-      material: item?.name || 'Artículo desconocido',
+    // La base de datos guarda el ajuste, mueve el stock y deja el kardex, todo o nada
+    setSaving(true);
+    const result = await addAdjustment({
       type: type as Adjustment['type'],
       qty: signedQty,
       reason,
       observation
     }, selectedStockId);
+    setSaving(false);
 
     if (!result.ok) {
       setFormError(result.error || 'No se pudo registrar el ajuste.');
@@ -264,7 +262,7 @@ export function Adjustments() {
               setIsNewAdjustmentOpen(false);
               setFormError(null);
             }}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSaveAdjustment}>Guardar movimiento</Button>
+            <Button variant="primary" onClick={handleSaveAdjustment} disabled={saving}>{saving ? 'Guardando…' : 'Guardar movimiento'}</Button>
           </div>
         }
       >

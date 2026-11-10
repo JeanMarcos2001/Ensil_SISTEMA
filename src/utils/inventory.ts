@@ -150,6 +150,42 @@ export function stockEntryError(input: { branchId: string; itemId: string; qty: 
   return null;
 }
 
+/** Los tipos de ajuste de stock. */
+export type AdjustmentType = 'Ajuste Positivo' | 'Ajuste Negativo' | 'Merma' | 'Regularización Administrativa' | 'Devolución';
+
+/**
+ * El signo lo define el tipo de operación: un ajuste positivo o una devolución suman; un ajuste negativo o una merma descuentan; solo la
+ * regularización administrativa respeta el signo que se escribió. La cantidad que llega puede venir con cualquier signo.
+ */
+export function signedAdjustment(type: AdjustmentType, qty: number): number {
+  if (type === 'Ajuste Positivo' || type === 'Devolución') return Math.abs(qty);
+  if (type === 'Ajuste Negativo' || type === 'Merma') return -Math.abs(qty);
+  return qty;
+}
+
+/** Un ajuste pide ubicación y artículo, una cantidad entera distinta de 0 con el signo de su tipo y el motivo. */
+export function adjustmentError(input: { locationId: string; itemId: string; type: AdjustmentType; qty: number; reason: string }): string | null {
+  if (!input.locationId || !input.itemId) return 'No se encontró el registro de stock.';
+  if (!Number.isInteger(input.qty) || input.qty === 0) return 'La cantidad debe ser un número entero distinto de 0.';
+  if ((input.type === 'Ajuste Positivo' || input.type === 'Devolución') && input.qty < 0) return 'Un ajuste positivo o una devolución suma unidades: la cantidad debe ser mayor a 0.';
+  if ((input.type === 'Ajuste Negativo' || input.type === 'Merma') && input.qty > 0) return 'Un ajuste negativo o una merma descuenta unidades: la cantidad debe ser menor a 0.';
+  if (!input.reason.trim()) return 'Indique el motivo del ajuste.';
+  return null;
+}
+
+/** El stock mínimo es un entero de 0 en adelante. */
+export function minStockError(minStock: number): string | null {
+  return Number.isInteger(minStock) && minStock >= 0 ? null : 'El stock mínimo debe ser un número entero de 0 en adelante.';
+}
+
+/** ¿Se puede armar o abrir este paquete? Debe ser un paquete con composición; para abrirlo, además, permitirlo. */
+export function packageError(item: Pick<Item, 'isPackage' | 'composition' | 'allowUnpacking'> | undefined, action: 'pack' | 'unpack'): string | null {
+  if (!item || !item.isPackage || !item.composition) return 'El artículo no es un paquete con composición.';
+  if (item.composition.length === 0) return 'El paquete no tiene composición definida.';
+  if (action === 'unpack' && !item.allowUnpacking) return 'Este paquete no permite desempaquetado.';
+  return null;
+}
+
 /** Una venta de artículo en caja: cantidad entera, stock suficiente y, si se cobra en soles, el tipo de cambio. */
 export function itemSaleError(input: { qty: number; available: number; currency: 'PEN' | 'USD'; exchangeRate?: number }): string | null {
   if (!Number.isInteger(input.qty) || input.qty < 1) return 'La cantidad debe ser un número entero mayor a 0.';

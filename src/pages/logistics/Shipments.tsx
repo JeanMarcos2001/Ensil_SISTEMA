@@ -38,6 +38,7 @@ export function Shipments() {
   const [successShipmentId, setSuccessShipmentId] = useState('');
   const [successShipmentStatus, setSuccessShipmentStatus] = useState<string>('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Confirmation Dialog State
   const [confirmConfig, setConfirmConfig] = useState<{
@@ -58,6 +59,14 @@ export function Shipments() {
 
   const openConfirm = (config: Omit<typeof confirmConfig, 'isOpen'>) => {
     setConfirmConfig({ ...config, isOpen: true });
+  };
+
+  /** Espera la respuesta de la base de datos; si rechazó la operación, muestra el motivo. */
+  const runOperation = async (operation: Promise<{ ok: boolean; error?: string }>, title: string) => {
+    const result = await operation;
+    if (!result.ok) {
+      openConfirm({ title, description: result.error ?? 'No se pudo completar la operación.', variant: 'danger', confirmLabel: 'Entendido', onConfirm: () => {} });
+    }
   };
 
 
@@ -224,7 +233,8 @@ export function Shipments() {
     }
   };
 
-  const handleSaveShipment = (status: 'Borrador' | 'En tránsito') => {
+  const handleSaveShipment = async (status: 'Borrador' | 'En tránsito') => {
+    if (saving) return;
 
     // Flatten items for the shipment record
     const flatItems: ShipmentItem[] = [];
@@ -271,9 +281,12 @@ export function Shipments() {
     const shipmentToSave = { ...newShipment, id: newShipmentId, status: status };
     
     // Regla de stock: al despachar el stock sale del origen (una sola vez); el destino suma al recepcionar.
-    const result = selectedShipment
+    // La base de datos asigna el código (ENV-AAAA-NNN), mueve el stock y deja el kardex, todo o nada
+    setSaving(true);
+    const result = await (selectedShipment
       ? updateShipment(newShipmentId, shipmentToSave)
-      : addShipment(shipmentToSave);
+      : addShipment(shipmentToSave));
+    setSaving(false);
     if (!result.ok) {
       setIsSummaryOpen(false);
       setIsNewShipmentOpen(true);
@@ -286,7 +299,7 @@ export function Shipments() {
     resetForm();
     
     if (status === 'En tránsito' || status === 'Borrador') {
-      setSuccessShipmentId(newShipmentId);
+      setSuccessShipmentId(selectedShipment ? newShipmentId : (result as { id?: string }).id ?? newShipmentId);
       setSuccessShipmentStatus(status);
       setShowSuccessModal(true);
     }
@@ -346,7 +359,7 @@ export function Shipments() {
       description,
       confirmLabel: 'Aceptar',
       cancelLabel: 'Cancelar',
-      onConfirm: () => updateShipment(shipment.id, { manualEnable: true }),
+      onConfirm: () => runOperation(updateShipment(shipment.id, { manualEnable: true }), 'No se pudo habilitar la recepción manual'),
       variant: 'primary'
     });
   };
@@ -610,7 +623,7 @@ export function Shipments() {
                                 title: 'Eliminar borrador',
                                 description: 'Eliminarás todo tu avance en el formulario. ¿Deseas continuar?',
                                 confirmLabel: 'Aceptar',
-                                onConfirm: () => deleteShipment(shipment.id),
+                                onConfirm: () => runOperation(deleteShipment(shipment.id), 'No se pudo eliminar el borrador'),
                                 variant: 'danger'
                               });
                             }}
@@ -622,7 +635,7 @@ export function Shipments() {
                                 title: 'Cancelar Envío',
                                 description: '¿Estás seguro de que deseas cancelar este envío?',
                                 confirmLabel: 'Cancelar Envío',
-                                onConfirm: () => updateShipmentStatus(shipment.id, 'Cancelado'),
+                                onConfirm: () => runOperation(updateShipmentStatus(shipment.id, 'Cancelado'), 'No se pudo cancelar el envío'),
                                 variant: 'danger'
                               });
                             }, danger: true }
@@ -694,7 +707,7 @@ export function Shipments() {
             )}
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => setIsNewShipmentOpen(false)}>Cancelar</Button>
-              {canSaveDraft && <Button variant="secondary" onClick={() => handleSaveShipment('Borrador')}>Guardar Borrador</Button>}
+              {canSaveDraft && <Button variant="secondary" onClick={() => handleSaveShipment('Borrador')} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Borrador'}</Button>}
               {can('log-envios:dispatch') && <Button variant="primary" onClick={handleOpenSummary}>Siguiente</Button>}
             </div>
           </div>
@@ -913,7 +926,7 @@ export function Shipments() {
             ))}
             <div className="flex justify-end gap-3">
               <Button variant="ghost" onClick={() => { setIsSummaryOpen(false); setIsNewShipmentOpen(true); }}>Volver a editar</Button>
-              <Button variant="primary" onClick={handleConfirmProperly} disabled={!can('log-envios:dispatch') || dispatchAvailability?.available === false}>
+              <Button variant="primary" onClick={handleConfirmProperly} disabled={saving || !can('log-envios:dispatch') || dispatchAvailability?.available === false}>
                 {selectedShipment?.status === 'Borrador' ? 'Finalizar Despacho' : 'Confirmar Envío'}
               </Button>
             </div>

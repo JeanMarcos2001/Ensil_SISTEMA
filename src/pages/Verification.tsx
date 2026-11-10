@@ -53,6 +53,7 @@ export function Verification() {
   const [paymentWarning, setPaymentWarning] = useState<string | null>(null);
   // Confirmación previa: la entrega descuenta stock, así que no basta con un botón de guardar
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
+  const [saving, setSaving] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
 
   // Matrículas cuya primera asesoría espera la verificación (por número de matrícula)
@@ -130,16 +131,18 @@ export function Verification() {
   };
 
   /** Confirmada la entrega: descuenta el stock de la sede y deja la matrícula verificada. */
-  const applyVerification = () => {
-    if (!selectedEnrollment || !verification || !verifierStaff || !confirm) return;
-    // La acción comprueba el stock de todas las líneas y descuenta solo si alcanza para todas
-    const result = updateEnrollmentVerification(selectedEnrollment.id, {
+  const applyVerification = async () => {
+    if (!selectedEnrollment || !verification || !verifierStaff || !confirm || saving) return;
+    // La base comprueba el stock de todas las líneas y descuenta solo si alcanza para todas (todo o nada)
+    setSaving(true);
+    const result = await updateEnrollmentVerification(selectedEnrollment.id, {
       status: verification.status,
       items: verification.deliveredIds,
       observation,
       date: verificationDate,
       verifier: `${verifierStaff.names} ${verifierStaff.lastNameP} ${verifierStaff.lastNameM}`.trim(),
     }, confirm.deductions.map(d => ({ itemId: d.itemId, quantity: d.quantity })));
+    setSaving(false);
     if (!result.ok) {
       setConfirm(null);
       setFormError(result.error ?? 'No se pudo registrar la entrega de materiales.');
@@ -678,7 +681,7 @@ export function Verification() {
         footer={
           <div className="flex justify-end gap-3 w-full">
             <Button variant="ghost" onClick={() => setConfirm(null)}>Volver a revisar</Button>
-            <Button variant="primary" disabled={!acknowledged} onClick={applyVerification}>Confirmar y descontar stock</Button>
+            <Button variant="primary" disabled={!acknowledged || saving} onClick={applyVerification}>{saving ? 'Guardando…' : 'Confirmar y descontar stock'}</Button>
           </div>
         }
       >

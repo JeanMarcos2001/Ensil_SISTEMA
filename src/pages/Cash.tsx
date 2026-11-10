@@ -116,6 +116,7 @@ export function Cash() {
   const [saleCurrency, setSaleCurrency] = useState<'USD' | 'PEN'>('USD');
   const [saleTC, setSaleTC] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [savingSale, setSavingSale] = useState(false);
 
   // Egreso manual
   const [exp, setExp] = useState<ExpenseInput>(() => emptyExpense(todayLocalISO()));
@@ -146,14 +147,17 @@ export function Cash() {
   const unitPrice = selectedItem ? getCurrentPrice(itemPrices, selectedItem.id, selectedBranchId || 'all')?.amount ?? 0 : 0;
   const totalAmount = unitPrice * saleQty;
 
-  const handleSaveSale = () => {
+  const handleSaveSale = async () => {
+    if (savingSale) return;
     setFormError(null);
     if (!selectedBranchId || !selectedItemId || saleQty <= 0) {
       setFormError('Por favor complete todos los campos obligatorios.');
       return;
     }
-    // Las reglas (precio vigente, stock, tipo de cambio, caja cerrada) y el descuento de stock + el ingreso viven en la acción
-    const sale = registerItemSale({
+    // Las reglas (precio vigente, stock, tipo de cambio, caja cerrada) y el descuento de stock + el ingreso viven en la acción;
+    // el stock lo mueve la base de datos, así que se espera su respuesta antes de seguir
+    setSavingSale(true);
+    const sale = await registerItemSale({
       branchId: selectedBranchId,
       itemId: selectedItemId,
       qty: saleQty,
@@ -164,6 +168,7 @@ export function Cash() {
       receiptType,
       receiptNumber,
     });
+    setSavingSale(false);
     if (!sale.ok) {
       setFormError(sale.error ?? 'No se pudo registrar la venta.');
       return;
@@ -495,9 +500,9 @@ export function Cash() {
         reasons={CASH_REVERSAL_REASONS}
         reasonLabel="Motivo de la reversa"
         blocked={reverseCheck && !reverseCheck.allowed ? reverseCheck.reason : null}
-        onSubmit={({ reason, detail: why }) => {
+        onSubmit={async ({ reason, detail: why }) => {
           if (!toReverse) return;
-          const r = reverseCashMovement(toReverse.id, { reason, detail: why });
+          const r = await reverseCashMovement(toReverse.id, { reason, detail: why });
           return r.ok ? null : r.error ?? 'No se pudo reversar el movimiento.';
         }}
       >
@@ -527,7 +532,7 @@ export function Cash() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsSaleOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSaveSale}>Confirmar Venta</Button>
+            <Button variant="primary" onClick={handleSaveSale} disabled={savingSale}>{savingSale ? 'Guardando…' : 'Confirmar Venta'}</Button>
           </div>
         }
       >

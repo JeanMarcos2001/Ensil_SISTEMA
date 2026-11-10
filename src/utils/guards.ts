@@ -110,8 +110,8 @@ export const THROWS_ON_DENIAL: ReadonlySet<string> = new Set([
   'addCashMovement', 'addGuardian', 'addMonthlySchedule', 'addSchedule', 'addStudent', 'addTracking',
   // no devuelven nada
   'markNotificationAsRead', 'setCapacityConfig',
-  'deleteMonthlySchedule', 'deleteShipment',
-  'updateGuardian', 'updateMinStock', 'updateMonthlySchedule', 'updateStudent', 'updateTracking',
+  'deleteMonthlySchedule',
+  'updateGuardian', 'updateMonthlySchedule', 'updateStudent', 'updateTracking',
 ]);
 
 /**

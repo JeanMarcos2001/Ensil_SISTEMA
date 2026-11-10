@@ -61,9 +61,17 @@ export function Shipping() {
     setIsCourierFormOpen(true);
   };
 
-  const handleSaveCourier = () => {
+  /** Cambia el estado de un courier o un método: la base puede rechazarlo, y entonces se muestra el motivo. */
+  const toggleStatus = async (operation: Promise<{ ok: boolean; error?: string }>) => {
+    const result = await operation;
+    if (!result.ok) {
+      openConfirm({ title: 'No se pudo cambiar el estado', description: result.error ?? 'No se pudo completar la operación.', variant: 'danger', confirmLabel: 'Entendido', onConfirm: () => {} });
+    }
+  };
+
+  const handleSaveCourier = async () => {
     const { id: _id, ...data } = courierFormData as Courier;
-    const result = selectedCourier ? updateCourier(selectedCourier.id, data) : addCourier(data as Omit<Courier, 'id'>);
+    const result = await (selectedCourier ? updateCourier(selectedCourier.id, data) : addCourier(data as Omit<Courier, 'id'>));
     if (!result.ok) {
       openConfirm({
         title: 'Error de validación',
@@ -88,9 +96,9 @@ export function Shipping() {
     setIsMethodFormOpen(true);
   };
 
-  const handleSaveMethod = () => {
+  const handleSaveMethod = async () => {
     const { id: _id, ...data } = methodFormData as ShippingMethod;
-    const result = selectedMethod ? updateShippingMethod(selectedMethod.id, data) : addShippingMethod(data as Omit<ShippingMethod, 'id'>);
+    const result = await (selectedMethod ? updateShippingMethod(selectedMethod.id, data) : addShippingMethod(data as Omit<ShippingMethod, 'id'>));
     if (!result.ok) {
       openConfirm({
         title: 'Error de validación',
@@ -216,7 +224,7 @@ export function Shipping() {
                           { 
                             label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('cfg-couriers:edit'),
                             onClick: () => {
-                              updateCourier(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
+                              void toggleStatus(updateCourier(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }));
                             },
                             danger: row.status === 'Activo' 
                           },
@@ -266,7 +274,7 @@ export function Shipping() {
                           { 
                             label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('cfg-couriers:edit'),
                             onClick: () => {
-                              updateShippingMethod(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' });
+                              void toggleStatus(updateShippingMethod(row.id, { status: row.status === 'Activo' ? 'Inactivo' : 'Activo' }));
                             },
                             danger: row.status === 'Activo' 
                           },

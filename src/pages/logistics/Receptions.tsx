@@ -161,10 +161,14 @@ export function Receptions() {
     setReceptionItems(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleConfirmReception = () => {
-    if (!selectedDocument) return;
+  const [saving, setSaving] = useState(false);
 
-    const result = confirmReception({
+  const handleConfirmReception = async () => {
+    if (!selectedDocument || saving) return;
+
+    // La base suma lo recibido al stock del destino, anota las incidencias y deja el documento recibido, todo o nada
+    setSaving(true);
+    const result = await confirmReception({
       docId: selectedDocument.data.id,
       docType: selectedDocument.type,
       receivedItems: receptionItems.map(ri => ({
@@ -175,6 +179,7 @@ export function Receptions() {
       })),
       generalObservation
     });
+    setSaving(false);
     if (!result.ok) { setReceptionError(result.error ?? 'No se pudo confirmar la recepción.'); return; }
 
     setReceptionError(null);
@@ -526,7 +531,7 @@ export function Receptions() {
             <div className="pt-6 border-t border-border-soft flex justify-between items-center">
               <div className="flex items-center gap-2 text-xs text-text-muted">
                 <AlertCircle size={14} />
-                <span>Al confirmar, se actualizará el stock local y se generará el Kardex.</span>
+                <span>Al confirmar, se actualizará el stock y se generará el Kardex.</span>
               </div>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setIsReceptionOpen(false)}>Cancelar</Button>
@@ -534,9 +539,10 @@ export function Receptions() {
                   <Button
                     variant="primary"
                     onClick={handleConfirmReception}
+                    disabled={saving}
                     className="px-8"
                   >
-                    Confirmar recepción y cargar stock
+                    {saving ? 'Guardando…' : 'Confirmar recepción y cargar stock'}
                   </Button>
                 )}
               </div>
