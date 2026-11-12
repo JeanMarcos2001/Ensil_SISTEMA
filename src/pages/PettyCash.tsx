@@ -21,6 +21,7 @@ import {
   PETTY_METHODS,
   PETTY_REVERSAL_REASONS,
   emptyPettyInput,
+  ofBranch,
   pettyBalance,
   pettyBalanceAfterReversal,
   refillNeeded,
@@ -36,8 +37,17 @@ const money = (n: number) => `S/ ${n.toLocaleString('es-PE', { minimumFractionDi
 const when = (iso: string) => new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function PettyCash() {
-  const { pettyCashMovements, addPettyCashMovement, reversePettyCashMovement, pettyFund, updatePettyFund, cashClosures, can } = useData();
+  const { pettyCashMovements: allPetty, addPettyCashMovement, reversePettyCashMovement, pettyFundOf, updatePettyFund, cashClosures, can, branches, sessionScope, currentBranchId } = useData();
   const today = todayLocalISO();
+  // **Cada sede tiene su caja chica**: la que se ve es la de la sede que se está viendo; en la vista global (o en el almacén) se elige la sede aquí
+  const ownBranches = branches.filter(b => b.status === 'Activo' && (sessionScope.allBranches || sessionScope.branchIds.includes(b.id)));
+  const viewing = ownBranches.some(b => b.id === currentBranchId) ? currentBranchId : '';
+  const [pickedBranch, setPickedBranch] = useState('');
+  const branchId = viewing || (ownBranches.some(b => b.id === pickedBranch) ? pickedBranch : ownBranches[0]?.id ?? '');
+  const branchName = ownBranches.find(b => b.id === branchId)?.name ?? '';
+  const pettyFund = pettyFundOf(branchId);
+  const pettyCashMovements = useMemo(() => ofBranch(allPetty, branchId), [allPetty, branchId]);
+  const [saving, setSaving] = useState(false);
   const [isNewMovementOpen, setIsNewMovementOpen] = useState(false);
   const [form, setForm] = useState<PettyInput>(emptyPettyInput('Egreso', today));
   const [submitted, setSubmitted] = useState(false);
@@ -54,7 +64,7 @@ export function PettyCash() {
   const [fundOpen, setFundOpen] = useState(false);
   const [fundForm, setFundForm] = useState({ assigned: '', maxExpense: '' });
   const [fundError, setFundError] = useState<string | null>(null);
-  const lastClosed = closedUntil(cashClosures, 'caja-chica', 'PEN');
+  const lastClosed = closedUntil(cashClosures, 'caja-chica', 'PEN', branchId);
   const toRefill = refillNeeded(pettyFund, pettyCashMovements);
 
   const balance = pettyBalance(pettyCashMovements);
@@ -90,8 +100,11 @@ export function PettyCash() {
     setFundError(null);
     setFundOpen(true);
   };
-  const saveFund = () => {
-    const r = updatePettyFund(fundForm);
+  const saveFund = async () => {
+    if (saving) return;
+    setSaving(true);
+    const r = await updatePettyFund(branchId, fundForm);
+    setSaving(false);
     if (!r.ok) { setFundError(r.error ?? 'No se pudo guardar el fondo.'); return; }
     setFundOpen(false);
   };
@@ -118,10 +131,13 @@ export function PettyCash() {
   const cls = (k: keyof PettyInput) => `${inputCls} ${err(k) ? errorCls : ''}`;
   const errorCount = Object.keys(errors).length;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     setSubmitted(true);
     if (errorCount > 0) return;
-    const r = addPettyCashMovement(form);
+    setSaving(true);
+    const r = await addPettyCashMovement(branchId, form);
+    setSaving(false);
     if (!r.ok) { setServerError(r.error ?? 'No se pudo guardar el movimiento.'); return; }
     setIsNewMovementOpen(false);
   };
@@ -129,8 +145,8 @@ export function PettyCash() {
   const handleExport = () => {
     downloadCsv(
       csvFileName('Caja chica', today),
-      ['Código', 'Fecha', 'Tipo', 'Categoría', 'Concepto', 'Monto (S/)', 'Medio', 'Comprobante / referencia', 'Evidencia', 'Usuario', 'Estado'],
-      filteredMovements.map(m => [m.id, localDateOf(m.date), m.kind, m.category, m.concept, m.amount, m.method, m.reference ?? '', m.evidence ?? '', m.user, m.status])
+      ['Código', 'Sede', 'Fecha', 'Tipo', 'Categoría', 'Concepto', 'Monto (S/)', 'Medio', 'Comprobante / referencia', 'Evidencia', 'Usuario', 'Estado'],
+      filteredMovements.map(m => [m.id, branchName, localDateOf(m.date), m.kind, m.category, m.concept, m.amount, m.method, m.reference ?? '', m.evidence ?? '', m.user, m.status])
     );
   };
 
@@ -149,10 +165,20 @@ export function PettyCash() {
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
         <div>
-          <h2 className="text-2xl font-semibold text-text-primary mb-1">Caja Chica</h2>
-          <p className="text-sm text-text-secondary">Control de gastos e ingresos menores de la operación diaria</p>
+          <h2 className="text-2xl font-semibold text-text-primary mb-1">Caja Chica{branchName ? ` · ${branchName}` : ''}</h2>
+          <p className="text-sm text-text-secondary">Control de gastos e ingresos menores de la operación diaria. Cada sede tiene su propio fondo.</p>
         </div>
         <div className="flex items-center gap-3">
+          {!viewing && ownBranches.length > 1 && (
+            <select
+              className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
+              value={branchId}
+              onChange={e => setPickedBranch(e.target.value)}
+              aria-label="Sede de la caja chica"
+            >
+              {ownBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
           <Button variant="secondary" className="hidden sm:flex items-center gap-2" onClick={handleExport} disabled={filteredMovements.length === 0}>
             <Download size={16} />
             Exportar
@@ -162,7 +188,7 @@ export function PettyCash() {
               Solicitar reposición ({money(toRefill)})
             </Button>
           )}
-          {can('op-caja-chica:reg_movement') && (
+          {can('op-caja-chica:reg_movement') && !!branchId && (
             <>
               <Button variant="secondary" className="flex items-center gap-2" onClick={() => handleOpenMovement('Ingreso')}>
                 <ArrowUpRight size={16} className="text-success-text" />
@@ -344,7 +370,7 @@ export function PettyCash() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setIsNewMovementOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={handleSave}>Guardar movimiento</Button>
+            <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar movimiento'}</Button>
           </div>
         }
       >
@@ -396,7 +422,7 @@ export function PettyCash() {
         </div>
       </Modal>
 
-      <CloseCashModal isOpen={closeOpen} onClose={() => setCloseOpen(false)} scope="caja-chica" currency="PEN" />
+      <CloseCashModal isOpen={closeOpen} onClose={() => setCloseOpen(false)} scope="caja-chica" currency="PEN" branchId={branchId} />
 
       <Modal
         isOpen={fundOpen}
@@ -406,7 +432,7 @@ export function PettyCash() {
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setFundOpen(false)}>Cancelar</Button>
-            <Button variant="primary" onClick={saveFund}>Guardar</Button>
+            <Button variant="primary" onClick={saveFund} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
           </div>
         }
       >
@@ -471,9 +497,9 @@ export function PettyCash() {
         reasons={PETTY_REVERSAL_REASONS}
         reasonLabel="Motivo de la reversa"
         blocked={toReverse && reverseProblems.length > 0 ? reverseProblems[0] : null}
-        onSubmit={({ reason, detail: why }) => {
+        onSubmit={async ({ reason, detail: why }) => {
           if (!toReverse) return;
-          const r = reversePettyCashMovement(toReverse.id, { reason, detail: why });
+          const r = await reversePettyCashMovement(toReverse.id, { reason, detail: why });
           return r.ok ? null : r.error ?? 'No se pudo reversar el movimiento.';
         }}
       >

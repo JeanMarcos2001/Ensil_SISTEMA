@@ -344,7 +344,10 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   f('log-stock', 'Stock', 'mod-logistica', [
     { action: 'view', label: 'Ver el stock', kind: 'ver', menu: menu('logistica', 'Stock'), reads: ['stock', 'item', 'branch'] },
     { action: 'edit_min', label: 'Definir el stock mínimo', kind: 'editar', requires: ['view'], writes: ['stock'], actions: ['updateMinStock'] },
-    { action: 'pack', label: 'Armar y abrir paquetes', kind: 'operar', requires: ['view'], reads: ['item'], writes: ['stock', 'kardex'], actions: ['packPackage', 'unpackPackage'] },
+    { action: 'pack', label: 'Armar kits (empaquetar)', kind: 'operar', requires: ['view'], reads: ['item'], writes: ['stock', 'kardex'], actions: ['packPackage'],
+      note: 'Descuenta cada artículo suelto y suma una unidad al stock del kit.' },
+    { action: 'unpack', label: 'Desarmar kits (desempaquetar)', kind: 'operar', requires: ['view'], sensitive: 'control', reads: ['item'], writes: ['stock', 'kardex'], actions: ['unpackPackage'],
+      note: 'Siempre pide el motivo y queda registrado en el kardex. Resta un kit y suma cada uno de sus artículos al stock suelto de la sede.' },
     {
       action: 'entry', label: 'Registrar un ingreso de stock (compra o reposición)', kind: 'crear', requires: ['view'], sensitive: 'control', reads: ['item'],
       writes: ['stock', 'kardex'], actions: ['registerStockEntry'], note: 'Pide el documento que lo respalda y queda en el kardex.',
@@ -607,6 +610,7 @@ export const NON_CAPABILITY_ACTIONS: Record<string, string> = {
   attendanceBlockOf: 'Consulta (bloqueo de asistencia).',
   pendingFirstSessions: 'Consulta (primeras asesorías pendientes).',
   payrollLinesOf: 'Consulta (líneas de una planilla).',
+  pettyFundOf: 'Consulta (el fondo de la caja chica de una sede; sin fila valen los de partida).',
   documentContextOf: 'Consulta (datos para armar un documento).',
   setIsEnrollmentWizardOpen: 'Estado de la interfaz (abrir el asistente de matrícula).',
   reloadOrgDirectory: 'Consulta (vuelve a leer las empresas y filiales de la base de datos).',

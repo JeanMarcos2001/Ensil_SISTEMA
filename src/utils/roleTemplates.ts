@@ -60,7 +60,7 @@ const PSICOPEDAGOGIA: string[] = [
 const ALMACEN: string[] = [
   'dash-resumen:view', 'msg-mensajeria:view', 'sis-avisos:view', 'org-alcance:all_branches',
   'log-catalogo:view', 'log-catalogo:create', 'log-catalogo:edit',
-  'log-stock:view', 'log-stock:edit_min', 'log-stock:pack', 'log-stock:entry',
+  'log-stock:view', 'log-stock:edit_min', 'log-stock:pack', 'log-stock:unpack', 'log-stock:entry',
   'log-envios:view', 'log-envios:create', 'log-envios:edit', 'log-envios:dispatch',
   'log-transfer:view', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive',
   'log-kardex:view', 'log-ajustes:view', 'log-ajustes:create',

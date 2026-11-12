@@ -176,7 +176,7 @@ export function errorPlazas(
 // ------------------------------------------------------------------------------------------------------------------ La persona y sus lugares
 
 /** Las funciones que MUEVEN el almacén (despachar, ingresar compras, empacar, ajustar): lo que `warehouseOperationError` exige a quien lo opera. */
-export const FUNCIONES_QUE_MUEVEN_ALMACEN: readonly string[] = ['log-envios:dispatch', 'log-stock:entry', 'log-stock:pack', 'log-ajustes:create', 'log-transfer:dispatch'];
+export const FUNCIONES_QUE_MUEVEN_ALMACEN: readonly string[] = ['log-envios:dispatch', 'log-stock:entry', 'log-stock:pack', 'log-stock:unpack', 'log-ajustes:create', 'log-transfer:dispatch'];
 export const rolMueveAlmacen = (funciones: string[]): boolean => funciones.some(f => FUNCIONES_QUE_MUEVEN_ALMACEN.includes(f));
 
 /** Asignaciones activas que dan acceso al sistema (las marcadas «sin acceso», como limpieza, no cuentan). */

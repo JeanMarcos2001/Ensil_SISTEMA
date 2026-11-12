@@ -111,15 +111,15 @@ export const seedPromotions = (): Promotion[] => [
 export const seedItems = (): Item[] => [
   {
     id: 'ITM-LIB-K1', name: 'Libro Kids Nivel 1', type: 'Libro', cost: 45, status: 'Activo', description: 'Libro de nivel 1 para programa Kids', unit: 'Unidad',
-    isSold: true, isDeliveredOnEnrollment: true, isPackage: false, allowUnpacking: false, bookType: 'Individual', bindingType: 'Encolado',
+    isDeliveredOnEnrollment: true, isPackage: false, bookType: 'Individual', bindingType: 'Encolado',
   },
   {
     id: 'ITM-MAT-01', name: 'Material Lógico Matemático', type: 'Material educativo', cost: 20, status: 'Activo', description: 'Material para desarrollo lógico', unit: 'Unidad',
-    isSold: false, isDeliveredOnEnrollment: true, isPackage: false, allowUnpacking: false, sessions: 12, gymnasticsPerSession: 2, trainingsPerSession: 3, trainingMode: 'General',
+    isDeliveredOnEnrollment: true, isPackage: false, sessions: 12, gymnasticsPerSession: 2, trainingsPerSession: 3, trainingMode: 'General',
   },
   {
-    id: 'ITM-KIT-BIENV', name: 'Kit Bienvenida (Mochila + Útiles)', type: 'Paquete / kit logístico', cost: 80, status: 'Activo', description: 'Kit entregado al matricular', unit: 'Kit',
-    isSold: false, isDeliveredOnEnrollment: true, isPackage: true, allowUnpacking: true,
+    id: 'ITM-KIT-BIENV', name: 'Kit Bienvenida (Mochila + Útiles)', type: 'Kit', cost: 80, status: 'Activo', description: 'Kit entregado al matricular', unit: 'Kit',
+    isDeliveredOnEnrollment: true, isPackage: true,
     composition: [
       { itemId: 'ITM-HER-01', name: 'Mochila Institucional', quantity: 1 },
       { itemId: 'ITM-HER-02', name: 'Cartuchera', quantity: 1 },
@@ -127,15 +127,18 @@ export const seedItems = (): Item[] => [
   },
   {
     id: 'ITM-HER-01', name: 'Mochila Institucional', type: 'Herramienta / adicional', cost: 25, status: 'Activo', description: 'Mochila con logo ENSIL', unit: 'Unidad',
-    isSold: true, isDeliveredOnEnrollment: true, isPackage: false, allowUnpacking: false,
+    isDeliveredOnEnrollment: true, isPackage: false,
   },
   {
     id: 'ITM-HER-02', name: 'Cartuchera', type: 'Herramienta / adicional', cost: 5, status: 'Activo', description: 'Cartuchera básica', unit: 'Unidad',
-    isSold: true, isDeliveredOnEnrollment: true, isPackage: false, allowUnpacking: false,
+    isDeliveredOnEnrollment: true, isPackage: false,
   },
 ];
 
-/** Precios generales de los artículos que se venden (USD), vigentes desde el 2026-01-01. */
+/**
+ * Precios de referencia generales (USD), vigentes desde el 2026-01-01. Todo artículo debe llevar el suyo; el material lógico matemático y el kit de
+ * bienvenida de partida no lo tienen todavía (el sistema los marca «Sin precio de referencia» hasta completarlo: no se inventan precios).
+ */
 export const seedItemPrices = (): ItemPrice[] => [
   { id: 'PRC-001', itemId: 'ITM-LIB-K1', branchId: 'all', amount: 60, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },
   { id: 'PRC-002', itemId: 'ITM-HER-01', branchId: 'all', amount: 45, validFrom: '2026-01-01', createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'Sistema' },

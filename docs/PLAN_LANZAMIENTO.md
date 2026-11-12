@@ -18,7 +18,7 @@ Documento de trabajo del **2026-11-06**. Reúne **todo lo que falta** para usar 
 - Reglas del acceso: una cuenta nace de una persona de Personal; el rol real se elige solo en Usuarios y se filtra por el lugar de trabajo; el Superusuario es solo para cuentas técnicas; alcance por sede en Personal y Asignaciones.
 - Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía); el catálogo comercial de prueba (migración 0010): 4 programas, 4 niveles, 5 tipos de pago, 8 tarifarios, 2 promociones y 5 orígenes de leads; los artículos de prueba (migración 0011): 5 artículos, 3 precios y 3 recetas; el stock, el kardex, los envíos y las transferencias (migraciones 0012 y 0013) con el stock de partida; y los titulares y alumnos de prueba (migración 0014): 5 titulares y 5 alumnos.
 
-**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): matrículas, planes y cuotas, pagos, caja y caja chica, notas de crédito, cobranza, asesorías y actividades de Psicopedagogía, verificación de materiales, solicitudes, cierres, auditoría y avisos.
+**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): cobranza (política y recordatorios), solicitudes, asesorías y actividades de Psicopedagogía, auditoría y avisos. (Matrículas, planes y cuotas, pagos, caja, cierres de caja, caja chica y notas de crédito ya están en la base o en camino: ver el Lote 8 y el Lote 9A.)
 
 > **Consecuencia:** el sistema **no puede usarse todavía con datos reales de alumnos ni dinero**. Eso es el centro de este plan (Fase 3). Todo lo demás lo rodea.
 
@@ -172,7 +172,7 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 ### 6.5 Matrícula, plan, pagos y caja *(el corazón: aquí está el dinero)*
 
 - ☑ 🤖 Matrículas, planes y cuotas, pagos y reversas, caja (ingreso, egreso, depósito, venta y reversa), notas de crédito, grupos promocionales, refinanciación, mora, caída, reactivación, cambio de programa, traslado, contrato y ficha, extensión y entrega de materiales (2026-11-10, migración 0015; aplicada a la base real el 2026-11-10; **falta subir el código**): el cliente calcula con las reglas puras y la base guarda y vigila con una llamada atómica por acción (función del registro, tablas permitidas, sede, invariantes del dinero y stock en la misma operación); los pagos, la caja y las notas solo se agregan; se ve por sede (también alumnos y titulares). *(XL)*
-- ☐ 🤖 Lo que de este bloque sigue en memoria: caja chica, cierres y reaperturas de caja, política de cobranza y recordatorios, solicitudes con su historial, registro de correcciones y la plantilla del contrato. *(L)*
+- ☐ 🤖 Lo que de este bloque sigue en memoria: solicitudes con su historial y registro de correcciones (**9B**), política de cobranza, recordatorios y la plantilla del contrato (**9C**). ✅ Cierres y reaperturas de caja y caja chica, **por sede**, ya en el código (**9A**, migración 0017; falta que el usuario la pegue y probarla en el navegador). Plan: `docs/PLAN_LOTE_9_CIERRES_SOLICITUDES_Y_COBRANZA.md`. *(L)*
 - ☐ 🤖 **Pruebas de «dinero cuadra»:** que la suma de pagos, cuotas, caja y cierres coincida siempre. *(Lo de pagos, cuotas y caja ya lo vigila la base en cada operación —cuota = monto − cobrado, plan = suma de cuotas abiertas, partes = monto—; falta cuadrar con los cierres, que siguen en memoria.)* *(M)*
 
 ### 6.6 Contratos y planilla  *(Lote 3)*
@@ -183,10 +183,11 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.7 Psicopedagogía y verificación
 
-- ☐ 🤖 Asesorías y programación mensual, actividades especiales, seguimiento, capacidad, verificación de materiales **antes de la primera asesoría**. Que **los responsables de entrevistas y asesorías salgan de Personal** (hoy leen el personal de ejemplo). *(XL)*
+- ☐ 🤖 Asesorías y programación mensual, actividades especiales, seguimiento, capacidad, verificación de materiales **antes de la primera asesoría**. **Requisito de la verificación (2026-11-11), ya aplicado en la pantalla actual:** el kit es la primera opción; sin stock del kit se muestran los artículos sueltos («Buscar por componentes») y se permite una entrega parcial (verificación Incompleta); falta el botón «Avisar a Logística» (§6.8) y, cuando la agenda pase a la base, revisar la verificación completa (ver `docs/PENDIENTES_SISTEMA.md`, tandas 42 y 43). Que **los responsables de entrevistas y asesorías salgan de Personal** (hoy leen el personal de ejemplo). *(XL)*
 
 ### 6.8 Solicitudes, avisos y cierre del bloque
 
+- ☐ 🤖 **Aviso «Sin stock para verificar» a Logística** (botón «Avisar a Logística» en la verificación de materiales cuando no hay stock de nada; llega a quien tenga la función de logística central; lleva sede, matrícula, artículos que faltan y fecha de la primera asesoría; pedido del usuario el 2026-11-11, se construye junto con la mensajería).
 - ☐ 🤖 Solicitudes (caída, reactivación, cambio, traslado), avisos y alertas por regla, y el alcance por sede en **todas** las pantallas (hoy solo Stock, Kardex, Envíos, Transferencias, Recepciones, el asistente de matrícula y el Dashboard la respetan). *(L)*
 - ☐ 🤖 **Retirar el código y los datos de ejemplo** una vez que todo esté en la base. *(M)*
 

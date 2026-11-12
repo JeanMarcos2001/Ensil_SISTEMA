@@ -15,8 +15,15 @@ export interface CashReportContext {
   pettyCashMovements: PettyCashMovement[];
   cashClosures: CashClosure[];
   branches: { id: string; name: string }[];
+  /** El fondo de la caja chica cuando se mira UNA sede (o el de partida si no hay otro). */
   fund: PettyFund;
+  /** El fondo de cada sede (cada sede tiene el suyo): sin él, `fund` vale para todo. */
+  fundOf?: (branchId: string) => PettyFund;
 }
+
+/** El fondo de varias sedes juntas: lo asignado se suma y el tope es el mayor. */
+export const combinedFund = (branchIds: string[], fundOf: (branchId: string) => PettyFund): PettyFund =>
+  branchIds.reduce<PettyFund>((acc, id) => ({ assigned: round2(acc.assigned + fundOf(id).assigned), maxExpense: Math.max(acc.maxExpense, fundOf(id).maxExpense) }), { assigned: 0, maxExpense: 0 });
 
 export interface CashFilters {
   range: DateRange;
@@ -27,7 +34,7 @@ export interface CashFilters {
 export interface Amount { name: string; count: number; amount: number }
 export interface DayFlow { date: string; income: number; expense: number }
 
-export interface ClosureLine { id: string; date: string; expected: number; counted: number; difference: number; status: CashClosure['status']; closedBy: string }
+export interface ClosureLine { id: string; /** La sede de la caja cerrada (vacía = caja general). */ branchId?: string; date: string; expected: number; counted: number; difference: number; status: CashClosure['status']; closedBy: string }
 
 export interface CashReport {
   /** Ingresos y egresos operativos del período (sin los depósitos al banco ni las devoluciones). */
@@ -59,7 +66,7 @@ function amounts(list: CashMovement[], key: (m: CashMovement) => string): Amount
   return [...map.values()].sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
 }
 
-const closureLine = (c: CashClosure): ClosureLine => ({ id: c.id, date: c.date, expected: c.expected, counted: c.counted, difference: c.difference, status: c.status, closedBy: c.closedBy });
+const closureLine = (c: CashClosure): ClosureLine => ({ id: c.id, branchId: c.branchId, date: c.date, expected: c.expected, counted: c.counted, difference: c.difference, status: c.status, closedBy: c.closedBy });
 
 export function cashReport(ctx: CashReportContext, f: CashFilters): CashReport {
   const mine = ctx.cashMovements.filter(m => m.currency === f.currency && (!f.branchId || m.branchId === f.branchId));
@@ -90,7 +97,7 @@ export function cashReport(ctx: CashReportContext, f: CashFilters): CashReport {
     branches.set(name, cur);
   }
 
-  const closures = ctx.cashClosures.filter(c => c.scope === 'caja' && c.currency === f.currency && inRange(c.date, f.range)).map(closureLine).sort((a, b) => b.date.localeCompare(a.date));
+  const closures = ctx.cashClosures.filter(c => c.scope === 'caja' && c.currency === f.currency && (!f.branchId || c.branchId === f.branchId) && inRange(c.date, f.range)).map(closureLine).sort((a, b) => b.date.localeCompare(a.date));
   const totalIncome = sum(income, m => m.amount);
   const totalExpense = sum(operative, m => m.amount);
   return {
@@ -125,8 +132,17 @@ export interface PettyReport {
   rows: PettyCashMovement[];
 }
 
-export function pettyReport(ctx: Pick<CashReportContext, 'pettyCashMovements' | 'cashClosures' | 'fund'>, range: DateRange): PettyReport {
-  const all = ctx.pettyCashMovements;
+/**
+ * El reporte de la caja chica: de UNA sede si se indica (`branchId`) o de todas las que se ven (el saldo, el fondo y lo que falta reponer se suman por sede:
+ * lo que sobra en una no cubre lo que falta en otra).
+ */
+export function pettyReport(ctx: Pick<CashReportContext, 'pettyCashMovements' | 'cashClosures' | 'fund' | 'fundOf'>, range: DateRange, branchId = ''): PettyReport {
+  const all = branchId ? ctx.pettyCashMovements.filter(m => m.branchId === branchId) : ctx.pettyCashMovements;
+  const ids = [...new Set(all.map(m => m.branchId))];
+  const fund = ctx.fundOf ? (branchId ? ctx.fundOf(branchId) : combinedFund(ids, ctx.fundOf)) : ctx.fund;
+  const refill = ctx.fundOf && !branchId
+    ? round2(ids.reduce((acc, id) => acc + refillNeeded(ctx.fundOf!(id), all.filter(m => m.branchId === id)), 0))
+    : refillNeeded(fund, all);
   const period = all.filter(m => m.status === 'Aplicado' && inRange(dayOf(m.date), range));
   const expenses = period.filter(m => m.kind === 'Egreso');
   const cats = new Map<string, { name: string; count: number; amount: number }>();
@@ -139,11 +155,11 @@ export function pettyReport(ctx: Pick<CashReportContext, 'pettyCashMovements' | 
     income: sum(period.filter(m => m.kind === 'Ingreso'), m => m.amount),
     expense: sum(expenses, m => m.amount),
     balance: pettyBalance(all),
-    fund: ctx.fund,
-    refill: refillNeeded(ctx.fund, all),
+    fund,
+    refill,
     byCategory: [...cats.values()].sort((a, b) => b.amount - a.amount),
     reversed: { count: reversed.length, amount: sum(reversed, m => m.amount) },
-    closures: ctx.cashClosures.filter(c => c.scope === 'caja-chica' && inRange(c.date, range)).map(closureLine).sort((a, b) => b.date.localeCompare(a.date)),
+    closures: ctx.cashClosures.filter(c => c.scope === 'caja-chica' && (!branchId || c.branchId === branchId) && inRange(c.date, range)).map(closureLine).sort((a, b) => b.date.localeCompare(a.date)),
     rows: [...period].sort((a, b) => b.date.localeCompare(a.date)),
   };
 }

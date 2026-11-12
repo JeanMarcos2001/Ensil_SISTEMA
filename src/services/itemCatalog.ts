@@ -7,7 +7,7 @@
  * guardado y quien llama (el gancho `useItemCatalog`) lo aplica a su lista.
  */
 import type { Branch, Item, ItemPrice, Level, Program, Recipe } from '../context/DataContext';
-import { priceError, validateItem, type PriceInput } from '../utils/inventory';
+import { nextSku, priceError, validateItem, type ItemDraft, type PriceInput } from '../utils/inventory';
 import { nextSequentialId } from '../utils/ids';
 import { duplicateRecipe as copyRecipe, recipeStatusError, validateRecipe } from '../utils/recipes';
 import type { OpResult, RepoResult } from './orgDirectory';
@@ -44,12 +44,12 @@ export async function loadItemCatalog(repo: ItemCatalogRepository): Promise<OpRe
 }
 
 /**
- * Crea artículos (uno o una carga masiva) y los precios generales de los que se venden: todo o nada. `prices` son los precios generales
- * (USD) por artículo; rigen desde `today`.
+ * Crea artículos (uno o una carga masiva) y su precio de referencia general: todo o nada. **Todo artículo lleva precio** (es el que se cobra
+ * si hay que venderlo o reponerlo). `prices` son los precios generales (USD) por artículo; rigen desde `today`.
  */
 export async function createItems(
   repo: ItemCatalogRepository, ctx: ItemCatalogContext, newItems: Item[], prices: { itemId: string; amount: number }[], today: string,
-): Promise<OpResult<{ items: Item[]; prices: ItemPrice[] }>> {
+): Promise<OpResult<{ items: Item[]; prices: ItemPrice[] }> & { idConflict?: boolean }> {
   if (newItems.length === 0) return fail('No hay artículos para guardar.');
   const accepted: Item[] = [];
   for (const item of newItems) {
@@ -58,10 +58,36 @@ export async function createItems(
     accepted.push(item);
   }
   const badPrice = prices.find(p => !(p.amount > 0) || !accepted.some(i => i.id === p.itemId));
-  const unpriced = accepted.some(i => i.isSold && !prices.some(p => p.itemId === i.id));
-  if (badPrice || unpriced) return fail('Indique el precio general de venta (USD) para un artículo que se vende.');
+  const unpriced = accepted.some(i => !prices.some(p => p.itemId === i.id));
+  if (badPrice || unpriced) return fail('Indique el precio de referencia (USD) de cada artículo: es el precio con el que se vende si hace falta.');
   const res = await repo.createItems(accepted, prices.map(p => ({ itemId: p.itemId, amount: Math.round(p.amount * 100) / 100, validFrom: today })));
-  return res.ok && res.data ? { ok: true, value: res.data } : fail(res.error ?? 'No se pudo guardar el artículo.');
+  return res.ok && res.data ? { ok: true, value: res.data } : { ...fail(res.error ?? 'No se pudo guardar el artículo.'), idConflict: res.idConflict };
+}
+
+/**
+ * Crea artículos SIN que nadie escriba su SKU: el sistema asigna a cada uno el siguiente de su tipo (ITM-LIB-004, ITM-MAT-002…) y su precio de
+ * referencia se enlaza solo con el SKU asignado. Todo o nada, como `createItems`. Si dos personas crean a la vez y el SKU ya lo tomó otra, se
+ * reintenta con el siguiente. Devuelve también los SKU asignados (en el mismo orden que los borradores).
+ */
+export async function createItemsAuto(
+  repo: ItemCatalogRepository, ctx: ItemCatalogContext, drafts: ItemDraft[], today: string,
+): Promise<OpResult<{ items: Item[]; prices: ItemPrice[]; ids: string[] }>> {
+  if (drafts.length === 0) return fail('No hay artículos para guardar.');
+  const taken = ctx.items.map(i => i.id);
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
+    const issued: string[] = [];
+    const items = drafts.map(d => {
+      const id = nextSku(d.item.type, [...taken, ...issued]);
+      issued.push(id);
+      return { ...d.item, id } as Item;
+    });
+    const prices = drafts.map((d, k) => ({ itemId: items[k]!.id, amount: d.price }));
+    const res = await createItems(repo, ctx, items, prices, today);
+    if (res.ok && res.value) return { ok: true, value: { ...res.value, ids: items.map(i => i.id) } };
+    if (!res.idConflict) return fail(res.error ?? 'No se pudo guardar el artículo.');
+    taken.push(...items.map(i => i.id));
+  }
+  return fail('No se pudo asignar un código (SKU) al artículo. Intente de nuevo.');
 }
 
 /** Edita un artículo (también activarlo o desactivarlo). El SKU no cambia. */

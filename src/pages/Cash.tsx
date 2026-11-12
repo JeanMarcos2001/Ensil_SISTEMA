@@ -9,6 +9,7 @@ import { Search, Download, Plus, ArrowUpRight, ArrowDownRight, Package, AlertCir
 import { useData } from '../context/DataContext';
 import { useTablePagination } from '../hooks/useTablePagination';
 import { getCurrentPrice } from '../utils/inventory';
+import { saleGroups, saleOption } from '../utils/saleCatalog';
 import { DateInput } from '../components/ui/DateInput';
 import { ClearFilters } from '../components/ui/ClearFilters';
 import { ReasonDialog } from '../components/ui/ReasonDialog';
@@ -58,7 +59,9 @@ export function Cash() {
   const totalOut = applied.filter(m => m.kind === 'Egreso').reduce((acc, m) => acc + m.amount, 0);
   // El saldo es el de toda la historia de la caja, no solo el del período
   const balance = cashBalance(cashMovements, currency);
-  const lastClosed = closedUntil(cashClosures, 'caja', currency);
+  // **Cada sede cierra su caja**: el estado es el de la sede que se ve; en la vista global no hay un solo estado (se cierra por sede)
+  const viewingBranch = branches.some(b => b.id === currentBranchId) ? currentBranchId : '';
+  const lastClosed = viewingBranch ? closedUntil(cashClosures, 'caja', currency, viewingBranch) : null;
   const movements = boxMovements.map(m => ({
     id: m.id,
     date: formatDate(m.date),
@@ -107,6 +110,9 @@ export function Cash() {
   // Sale state
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [selectedItemId, setSelectedItemId] = useState('');
+  // Buscador de la venta de artículos y si se abre el grupo plegado (material educativo)
+  const [saleQuery, setSaleQuery] = useState('');
+  const [showFolded, setShowFolded] = useState(false);
   const [saleQty, setSaleQty] = useState(1);
   const [customerName, setCustomerName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
@@ -136,7 +142,7 @@ export function Cash() {
     if (savingExpense) return;
     setExpSubmitted(true);
     if (Object.keys(expErrors).length > 0) return;
-    const closed = closedMessage(cashClosures, 'caja', exp.currency, exp.date);
+    const closed = closedMessage(cashClosures, 'caja', exp.currency, exp.date, exp.branchId || undefined);
     if (closed) { setExpError(closed); return; }
     setSavingExpense(true);
     const r = await addCashMovement(buildExpense(exp));
@@ -184,6 +190,8 @@ export function Cash() {
     // Close modal and reset
     setIsSaleOpen(false);
     setSelectedItemId('');
+    setSaleQuery('');
+    setShowFolded(false);
     setSaleQty(1);
     setCustomerName('');
     setReceiptNumber('');
@@ -191,7 +199,9 @@ export function Cash() {
     setFormError(null);
   };
 
-  const sellableItems = items.filter(i => i.isSold && i.status === 'Activo');
+  // La lista de venta: todo artículo activo, agrupado por tipo, con stock y precio de la sede; el material educativo plegado (la búsqueda lo encuentra)
+  const groups = saleGroups(items, stockItems, itemPrices, selectedBranchId, saleQuery, showFolded);
+  const selectedOption = selectedItem ? saleOption(selectedItem, stockItems, itemPrices, selectedBranchId) : undefined;
 
   const rowActions = (id: string) => {
     const m = cashMovements.find(x => x.id === id)!;
@@ -285,7 +295,7 @@ export function Cash() {
           <Card className="p-4 bg-surface-muted border-primary-accent/20">
             <div className="flex justify-between items-start">
               <span className="text-sm font-medium text-text-secondary">Estado</span>
-              <Badge variant={lastClosed ? 'neutral' : 'success'}>{lastClosed ? `Cerrada al ${lastClosed.split('-').reverse().join('/')}` : 'Abierta'}</Badge>
+              <Badge variant={!viewingBranch || lastClosed ? 'neutral' : 'success'}>{!viewingBranch ? 'Cierre por sede' : lastClosed ? `Cerrada al ${lastClosed.split('-').reverse().join('/')}` : 'Abierta'}</Badge>
             </div>
             <div className="mt-2 text-xs text-text-muted">
               Efectivo por depositar: {currency === 'PEN' ? 'S/' : '$'} {money(toDeposit)}
@@ -491,7 +501,7 @@ export function Cash() {
       </Modal>
 
       <DepositBatchModal isOpen={isLoteOpen} onClose={() => setIsLoteOpen(false)} currency={currency} />
-      <CloseCashModal isOpen={closeOpen} onClose={() => setCloseOpen(false)} scope="caja" currency={currency} />
+      <CloseCashModal isOpen={closeOpen} onClose={() => setCloseOpen(false)} scope="caja" currency={currency} branchId={viewingBranch || undefined} />
       <ReversePaymentModal paymentId={reversePaymentId} onClose={() => setReversePaymentId(null)} />
 
       <CashMovementModal movementId={detail?.id ?? null} focus={detail?.focus} onClose={() => setDetail(null)} />
@@ -583,17 +593,60 @@ export function Cash() {
             
             <div className="grid grid-cols-1 gap-4">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-text-secondary">Artículo Vendible *</label>
-                <select 
-                  className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm focus:border-primary-accent outline-none"
-                  value={selectedItemId}
-                  onChange={(e) => setSelectedItemId(e.target.value)}
-                >
-                  <option value="">Seleccionar artículo...</option>
-                  {sellableItems.map(i => (
-                    <option key={i.id} value={i.id}>{i.name} - {(() => { const pr = getCurrentPrice(itemPrices, i.id, selectedBranchId || 'all'); return pr ? `$ ${pr.amount.toFixed(2)}` : 'sin precio'; })()}</option>
+                <label className="text-sm font-medium text-text-secondary" htmlFor="sale-search">Artículo a vender *</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
+                  <input
+                    id="sale-search"
+                    type="text"
+                    value={saleQuery}
+                    onChange={(e) => setSaleQuery(e.target.value)}
+                    placeholder="Buscar por nombre o código (libro, kit, material…)"
+                    className="w-full h-10 bg-surface border border-border-soft rounded-xl pl-9 pr-3 text-sm focus:border-primary-accent outline-none"
+                  />
+                </div>
+                {selectedOption?.needsAssembly && (
+                  <div className="rounded-xl border border-warning-text/20 bg-warning-tint/40 p-3 text-sm text-warning-text flex items-start justify-between gap-3" role="status">
+                    <p>No hay kits armados de «{selectedOption.item.name}» en esta sede. Para venderlo hay que armarlo primero en Stock.</p>
+                    {can('log-stock:pack') && (
+                      <Button variant="secondary" className="shrink-0" onClick={() => { setIsSaleOpen(false); navigate('/logistica/stock'); }}>Ir a Stock</Button>
+                    )}
+                  </div>
+                )}
+                <div className="max-h-60 overflow-y-auto border border-border-soft rounded-xl divide-y divide-border-soft bg-surface" role="listbox" aria-label="Artículos">
+                  {groups.length === 0 && <p className="p-3 text-sm text-text-muted">No se encontró ningún artículo con ese nombre o código.</p>}
+                  {groups.map(g => (
+                    <div key={g.type}>
+                      <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-muted bg-surface-muted/60 flex items-center justify-between">
+                        <span>{g.title}</span>
+                        {g.folded
+                          ? <button type="button" onClick={() => setShowFolded(true)} className="normal-case tracking-normal text-primary-accent hover:underline">Ver {g.options.length}</button>
+                          : <span>{g.options.length}</span>}
+                      </div>
+                      {!g.folded && g.options.map(o => (
+                        <button
+                          key={o.item.id}
+                          type="button"
+                          role="option"
+                          aria-selected={selectedItemId === o.item.id}
+                          onClick={() => setSelectedItemId(o.item.id)}
+                          className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 text-sm hover:bg-surface-muted/60 ${selectedItemId === o.item.id ? 'bg-primary-accent/10' : ''} ${o.ready ? '' : 'opacity-60'}`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block font-medium text-text-primary truncate">{o.item.name}</span>
+                            <span className="block text-xs text-text-muted font-mono">{o.item.id}</span>
+                          </span>
+                          <span className="text-right shrink-0">
+                            <span className="block text-text-primary">{o.price !== undefined ? `$ ${o.price.toFixed(2)}` : '—'}</span>
+                            {/* Sin sede elegida no hay stock que mostrar: no se dice «Sin stock» */}
+                            <span className={`block text-xs ${!selectedBranchId || o.ready ? 'text-text-muted' : 'text-danger-text'}`}>{!selectedBranchId ? (o.price === undefined ? 'Sin precio de referencia' : 'Elija la sede') : (o.note ?? `Stock: ${o.stock}`)}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   ))}
-                </select>
+                </div>
+                {!selectedBranchId && <p className="text-xs text-text-muted">Elija primero la sede para ver el stock de cada artículo.</p>}
               </div>
 
               <div className="grid grid-cols-3 gap-4">

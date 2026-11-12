@@ -23,7 +23,9 @@ import {
   findShortage,
   initialModes,
   isLineDelivered,
+  noStockAtAll,
   pendingDeductions,
+  pendingNames,
   recipeForEnrollment,
   type Deduction,
   type DeliveryMode,
@@ -73,6 +75,9 @@ export function Verification() {
 
   // El estado Completo / Incompleto se calcula con lo que se marca
   const verification = activeRecipe ? computeVerification(activeRecipe, items, checkedItems, modes) : null;
+  // Lo que quedaría sin entregar con lo marcado, y si en la sede no hay stock de nada de lo que falta (ni del kit, ni de sus artículos sueltos)
+  const pending = activeRecipe ? pendingNames(activeRecipe, items, checkedItems, modes) : [];
+  const noStock = activeRecipe && selectedEnrollment ? noStockAtAll(activeRecipe, items, stockItems, selectedEnrollment.branchId || '', alreadyDelivered) : false;
 
   const setChecked = (id: string, value: boolean) => setCheckedItems(prev => ({ ...prev, [id]: value }));
 
@@ -184,7 +189,8 @@ export function Verification() {
     delivered.forEach(id => { initialChecked[id] = true; });
     setCheckedItems(initialChecked);
     setAlreadyDelivered(delivered);
-    setModes(recipe ? initialModes(recipe, items, delivered) : {});
+    // Sin stock del kit en la sede, la lista de sus artículos sueltos se abre sola (es la única salida); nada se marca solo
+    setModes(recipe ? initialModes(recipe, items, delivered, { stock: stockItems, branchId: enrollment.branchId || '' }) : {});
     setObservation(enrollment.verificationObservation || '');
     // La verificación guarda solo la fecha (los registros antiguos traían fecha y hora)
     setVerificationDate(enrollment.verificationDate ? enrollment.verificationDate.slice(0, 10) : todayLocalISO());
@@ -508,6 +514,16 @@ export function Verification() {
                     <span className="text-xs text-text-muted">Pide confirmación y descuenta stock</span>
                   </div>
 
+                  {noStock && (
+                    <div className="rounded-xl border border-warning-text/20 bg-warning-tint/50 p-4 text-sm text-warning-text flex gap-3 items-start" role="status">
+                      <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">No hay stock en {branchName} de ningún artículo de esta receta.</p>
+                        <p className="mt-1 text-xs">Ni del kit ni de sus artículos sueltos. Por ahora no se puede entregar nada: pida a Logística que envíe stock a la sede. Si la primera asesoría está cerca, reprográmela en Programación.</p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="border border-border-soft rounded-xl overflow-hidden">
                     <table className="w-full text-sm text-left">
                       <thead className="text-xs text-text-secondary uppercase bg-surface-muted/50">
@@ -541,11 +557,13 @@ export function Verification() {
                                       {item?.name}
                                       <span className="ml-2 text-[10px] uppercase bg-primary-accent/10 px-1.5 py-0.5 rounded">Por componentes</span>
                                     </div>
-                                    {canSwitch && (
+                                    {canSwitch && kitStock >= line.quantity ? (
                                       <button type="button" className="text-xs text-primary-accent hover:underline mt-1" onClick={() => switchMode(line.itemId, 'kit')}>
                                         Volver a entregar el kit completo
                                       </button>
-                                    )}
+                                    ) : (!kitLocked && kitStock < line.quantity && (
+                                      <p className="text-xs text-text-muted mt-1">No hay kits armados en esta sede (stock {kitStock}): marque los artículos sueltos que se entregan.</p>
+                                    ))}
                                   </td>
                                   <td className="px-4 py-3 text-center font-medium">{line.quantity}</td>
                                 </tr>
@@ -616,7 +634,7 @@ export function Verification() {
                                             : 'border-border-soft text-text-secondary hover:border-primary-accent hover:text-primary-accent'
                                         }`}
                                       >
-                                        <Layers size={12} /> Entregar por componentes
+                                        <Layers size={12} /> Buscar por componentes
                                       </button>
                                       {suggestSplit && (
                                         <span className="text-xs text-primary-accent">Hay stock de algunos componentes por separado.</span>
@@ -654,6 +672,7 @@ export function Verification() {
                       {verification?.complete ? 'Completa' : 'Incompleta'}
                     </Badge>
                     <p className="text-xs text-text-muted mt-1">{verification?.delivered ?? 0} de {verification?.total ?? 0} artículos</p>
+                    {pending.length > 0 && <p className="text-xs text-warning-text mt-1 max-w-xs">Quedaría pendiente: {pending.join(', ')}</p>}
                   </div>
                 </div>
 

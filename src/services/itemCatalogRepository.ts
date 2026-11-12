@@ -8,14 +8,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Item, ItemPrice, Recipe } from '../context/DataContext';
 import type { PriceInput } from '../utils/inventory';
 import {
-  isRecipeIdConflict, itemFromRow, itemToRow, itemsErrorMessage, priceFromRow, recipeFromRow, recipeToRow, withComponentNames,
+  isItemIdConflict, isRecipeIdConflict, itemFromRow, itemToRow, itemsErrorMessage, priceFromRow, recipeFromRow, recipeToRow, withComponentNames,
   type ArticuloRow, type PrecioRow, type RecetaRow,
 } from '../utils/itemsDb';
 import type { RepoResult } from './orgDirectory';
 import type { ItemCatalogData, ItemCatalogRepository } from './itemCatalog';
 
 const failure = <T>(error: { code?: string; message?: string; details?: string } | null): RepoResult<T> =>
-  ({ ok: false, error: itemsErrorMessage(error), idConflict: isRecipeIdConflict(error) });
+  ({ ok: false, error: itemsErrorMessage(error), idConflict: isRecipeIdConflict(error) || isItemIdConflict(error) });
 
 /** Cuando una actualización no toca ninguna fila, la política de seguridad la ocultó (o ya no existe). */
 const NOT_TOUCHED = 'No se pudo completar: el registro ya no existe o su cuenta no tiene permiso para cambiarlo.';

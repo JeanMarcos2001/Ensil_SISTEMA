@@ -2,7 +2,7 @@
  * Reglas del Catálogo de artículos, precios de venta vigentes y disponibilidad para entrega.
  * Funciones puras (sin estado). El Catálogo de Logística es la ÚNICA fuente de artículos.
  */
-import type { Item, ItemPrice, StockItem } from '../context/DataContext';
+import type { Item, ItemPrice, ItemType, StockItem } from '../context/DataContext';
 import { todayLocalISO } from './schedule';
 
 export const todayISO = (): string => todayLocalISO();
@@ -63,32 +63,82 @@ export interface ItemValidationInput {
 /** El SKU de un artículo: letras, números, punto, guion y guion bajo; hasta 40 caracteres (la base de datos lo exige igual). */
 export const SKU_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
 
+/** Un artículo por crear: SIN SKU (lo asigna el sistema al guardar) y con su precio de referencia general (USD), obligatorio en todo artículo. */
+export interface ItemDraft { item: Omit<Item, 'id'>; price: number }
+
+/** Unidades de medida permitidas (lista corta: el texto libre hacía que «Unidad», «unidad» y «Und.» salieran distintos). */
+export const ITEM_UNITS = ['Unidad', 'Juego', 'Kit', 'Caja', 'Paquete', 'Par'] as const;
+export type ItemUnit = (typeof ITEM_UNITS)[number];
+/** La unidad que se propone al elegir el tipo: un kit propone «Kit»; el resto, «Unidad». */
+export const defaultUnitFor = (type: ItemType): ItemUnit => (type === 'Kit' ? 'Kit' : 'Unidad');
+
+/** Prefijo del SKU que el sistema asigna a cada tipo de artículo (ITM-LIB-001, ITM-MAT-001, ITM-HER-001, ITM-KIT-001). */
+export const SKU_PREFIX: Record<ItemType, string> = {
+  'Material educativo': 'ITM-MAT',
+  'Herramienta / adicional': 'ITM-HER',
+  'Libro': 'ITM-LIB',
+  'Kit': 'ITM-KIT',
+};
+
+/**
+ * El siguiente SKU libre de un tipo: el mayor número ya usado con su prefijo, más uno (de tres cifras). Los SKU que no siguen el formato
+ * (ITM-LIB-K1, ITM-KIT-BIENV…) no cuentan para la numeración, pero tampoco se pisan. Nadie escribe un SKU: lo asigna el sistema.
+ */
+export function nextSku(type: ItemType, existingIds: string[]): string {
+  const prefix = SKU_PREFIX[type];
+  const re = new RegExp(`^${prefix}-(\\d+)$`, 'i');
+  let max = 0;
+  for (const id of existingIds) {
+    const m = re.exec(id.trim());
+    if (m) max = Math.max(max, parseInt(m[1]!, 10));
+  }
+  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+}
+
+/** El nombre sin tildes, mayúsculas ni espacios de más: «Libro  Kids» y «libro kids» son el mismo. */
+export const normalizeName = (s: string): string => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
 /** Valida un artículo del catálogo. Devuelve el mensaje de error o `null`. */
 export function validateItem({ item, allItems, editingId }: ItemValidationInput): string | null {
   if (!item.id?.trim()) return 'El código SKU es obligatorio.';
   if (!SKU_PATTERN.test(item.id.trim())) return 'El SKU solo admite letras, números, punto, guion y guion bajo (máximo 40 caracteres).';
   if (!item.name?.trim()) return 'El nombre del artículo es obligatorio.';
   if (allItems.some(i => i.id.toLowerCase() === item.id!.trim().toLowerCase() && i.id !== editingId)) return 'El código SKU ya existe en el sistema.';
+  // Como el SKU ya no lo escribe nadie, lo que evita crear dos veces lo mismo (p. ej. subir dos veces el mismo archivo) es el nombre. Al editar solo se
+  // comprueba si el nombre cambió (un catálogo que ya tuviera dos iguales no impide desactivar uno de ellos).
+  const original = editingId ? allItems.find(i => i.id === editingId) : undefined;
+  if (item.type && (!original || normalizeName(original.name) !== normalizeName(item.name))) {
+    const same = allItems.find(i => i.id !== editingId && i.type === item.type && normalizeName(i.name) === normalizeName(item.name));
+    if (same) return `Ya existe un artículo de este tipo con ese nombre (${same.id}). Use otro nombre o edite el que ya existe.`;
+  }
   if (item.cost !== undefined && !(item.cost >= 0)) return 'El costo no puede ser negativo.';
 
-  if (item.type === 'Libro' && !item.bindingType) return 'Seleccione el tipo de libro (Anillado o Encolado).';
+  if (item.unit !== undefined && !(ITEM_UNITS as readonly string[]).includes(item.unit)) return `La unidad de medida debe ser una de estas: ${ITEM_UNITS.join(', ')}.`;
+  if (item.type && item.isPackage !== undefined && (item.type === 'Kit') !== item.isPackage) return 'Solo un artículo de tipo Kit puede ser un kit.';
+  if (item.type === 'Material educativo' && item.isDeliveredOnEnrollment === false) return 'El material educativo siempre se entrega con la matrícula.';
+
+  if (item.type === 'Libro' && !item.bindingType) return 'Seleccione el encuadernado del libro (Anillado o Encolado).';
 
   // Material con entrenamientos variables: la tabla debe traer una fila por sesión
   if (item.type === 'Material educativo' && item.trainingMode === 'Variable' && (item.sessions ?? 0) > 0 && (item.variableTrainings ?? []).length !== item.sessions) {
     return 'Configure la tabla de sesiones: indique los entrenamientos de cada sesión del material.';
   }
 
-  if (item.type === 'Paquete / kit logístico') {
+  // Un kit se arma con sus artículos: la composición es obligatoria (es la «receta» para armarlo) y no hay kits dentro de kits
+  if (item.type === 'Kit') {
     const composition = item.composition ?? [];
-    if (item.allowUnpacking && composition.length === 0) {
-      return 'Un paquete que permite desempaquetado debe definir su composición (artículos y cantidades).';
-    }
+    if (composition.length === 0) return 'Un kit debe definir su composición (los artículos y cantidades con los que se arma).';
     if (composition.some(c => !c.itemId || !(c.quantity >= 1))) {
-      return 'Cada componente del paquete debe tener un artículo y una cantidad mayor a 0.';
+      return 'Cada componente del kit debe tener un artículo y una cantidad mayor a 0.';
     }
-    if (composition.some(c => c.itemId === item.id)) return 'Un paquete no puede contenerse a sí mismo.';
+    if (composition.some(c => c.itemId === item.id)) return 'Un kit no puede contenerse a sí mismo.';
     if (new Set(composition.map(c => c.itemId)).size !== composition.length) {
       return 'La composición tiene artículos repetidos.';
+    }
+    for (const c of composition) {
+      const part = allItems.find(i => i.id === c.itemId);
+      if (!part) return 'Un componente del kit no existe en el catálogo de artículos.';
+      if (part.type === 'Kit') return `Un kit no puede contener otro kit («${part.name}»). Use sus artículos sueltos.`;
     }
   }
   return null;
@@ -178,12 +228,39 @@ export function minStockError(minStock: number): string | null {
   return Number.isInteger(minStock) && minStock >= 0 ? null : 'El stock mínimo debe ser un número entero de 0 en adelante.';
 }
 
-/** ¿Se puede armar o abrir este paquete? Debe ser un paquete con composición; para abrirlo, además, permitirlo. */
-export function packageError(item: Pick<Item, 'isPackage' | 'composition' | 'allowUnpacking'> | undefined, action: 'pack' | 'unpack'): string | null {
-  if (!item || !item.isPackage || !item.composition) return 'El artículo no es un paquete con composición.';
-  if (item.composition.length === 0) return 'El paquete no tiene composición definida.';
-  if (action === 'unpack' && !item.allowUnpacking) return 'Este paquete no permite desempaquetado.';
+/** ¿Se puede armar o desarmar este kit? Debe ser un kit con composición (todo kit se puede desarmar en Stock, con motivo). */
+export function packageError(item: Pick<Item, 'isPackage' | 'composition'> | undefined): string | null {
+  if (!item || !item.isPackage || !item.composition) return 'El artículo no es un kit con composición.';
+  if (item.composition.length === 0) return 'El kit no tiene composición definida.';
   return null;
+}
+
+/** Desarmar un kit siempre queda registrado: el motivo es obligatorio (queda en el kardex junto a quién y cuándo). */
+export const UNPACK_REASON_MAX = 300;
+export function unpackReasonError(reason: string): string | null {
+  const r = (reason ?? '').trim();
+  if (!r) return 'Indique el motivo del desempaquetado.';
+  if (r.length > UNPACK_REASON_MAX) return `El motivo no puede pasar de ${UNPACK_REASON_MAX} caracteres.`;
+  return null;
+}
+
+/** ¿Tiene el artículo su precio de referencia general vigente? Todo artículo debe tenerlo (los de partida sin precio se marcan hasta completarlo). */
+export const hasReferencePrice = (prices: ItemPrice[], itemId: string, date: string = todayISO()): boolean =>
+  getCurrentPrice(prices, itemId, 'all', date) !== undefined;
+
+/**
+ * Precio sugerido de un kit: la suma de los precios vigentes de sus artículos por sus cantidades (se puede cambiar).
+ * `undefined` si no hay composición o a algún artículo le falta el precio.
+ */
+export function suggestedKitPrice(composition: { itemId: string; quantity: number }[], prices: ItemPrice[], date: string = todayISO()): number | undefined {
+  if (composition.length === 0) return undefined;
+  let total = 0;
+  for (const c of composition) {
+    const price = getCurrentPrice(prices, c.itemId, 'all', date)?.amount;
+    if (price === undefined) return undefined;
+    total += price * c.quantity;
+  }
+  return Math.round(total * 100) / 100;
 }
 
 /** Una venta de artículo en caja: cantidad entera, stock suficiente y, si se cobra en soles, el tipo de cambio. */
@@ -192,4 +269,23 @@ export function itemSaleError(input: { qty: number; available: number; currency:
   if (input.available < input.qty) return 'No hay stock suficiente para realizar la venta.';
   if (input.currency === 'PEN' && !((input.exchangeRate ?? 0) > 0)) return 'Indique el tipo de cambio (TC) para cobrar en soles.';
   return null;
+}
+
+/** Lo que implica lo marcado en el formulario de un artículo, en palabras (el «resumen en vivo»). `price` es el precio de referencia general (USD). */
+export function itemSummaryLines(item: Pick<Item, 'type' | 'isDeliveredOnEnrollment'>, price: number | undefined): string[] {
+  const lines: string[] = [];
+  lines.push(
+    item.isDeliveredOnEnrollment
+      ? 'Se podrá elegir en las recetas de matrícula: la verificación lo entrega y descuenta su stock.'
+      : 'No irá en recetas de matrícula: solo se venderá.'
+  );
+  lines.push(
+    price !== undefined && price > 0
+      ? `Se podrá vender en Caja a USD ${price.toFixed(2)} (precio de referencia general).`
+      : 'Falta el precio de referencia: sin él no se puede vender.'
+  );
+  if (item.type === 'Kit') {
+    lines.push('Se arma en Stock con sus artículos (descuenta cada uno y suma una unidad al stock del kit) y se puede desarmar en Stock, siempre con motivo.');
+  }
+  return lines;
 }

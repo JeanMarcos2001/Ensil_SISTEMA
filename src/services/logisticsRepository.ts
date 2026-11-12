@@ -110,7 +110,7 @@ export function createSupabaseLogisticsRepository(client: SupabaseClient): Logis
       p_ubicacion: i.locationId, p_articulo: i.itemId, p_tipo: i.type, p_cantidad: i.qty, p_motivo: i.reason, p_observacion: i.observation ?? null,
     }),
     pack: (locationId, itemId) => rpc('empaquetar_articulo', { p_ubicacion: locationId, p_articulo: itemId }),
-    unpack: (locationId, itemId) => rpc('desempaquetar_articulo', { p_ubicacion: locationId, p_articulo: itemId }),
+    unpack: (locationId, itemId, reason) => rpc('desempaquetar_articulo', { p_ubicacion: locationId, p_articulo: itemId, p_motivo: reason }),
     setMinStock: (locationId, itemId, minStock) => rpc('definir_stock_minimo', { p_ubicacion: locationId, p_articulo: itemId, p_minimo: minStock }),
     sell: i => rpc('vender_articulo', { p_sede: i.branchId, p_articulo: i.itemId, p_cantidad: i.qty, p_documento: i.doc, p_observacion: i.observation }),
     deliver: i => rpc('entregar_materiales', {

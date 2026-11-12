@@ -2,13 +2,13 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Branch, Item, ItemPrice, Level, Program, Recipe } from '../context/DataContext';
 import { supabase } from '../lib/supabase';
 import {
-  createItems, duplicateRecipe, editItem, loadItemCatalog, registerPrice, saveRecipe, setRecipeStatus,
+  createItemsAuto, duplicateRecipe, editItem, loadItemCatalog, registerPrice, saveRecipe, setRecipeStatus,
   type ItemCatalogContext, type ItemCatalogData,
 } from '../services/itemCatalog';
 import { createSupabaseItemCatalogRepository, sortItems, sortRecipes } from '../services/itemCatalogRepository';
 import type { OpResult } from '../services/orgDirectory';
 import { withComponentNames } from '../utils/itemsDb';
-import type { PriceInput } from '../utils/inventory';
+import type { ItemDraft, PriceInput } from '../utils/inventory';
 import { todayLocalISO } from '../utils/schedule';
 
 /** Lo que las reglas necesitan saber del catálogo comercial y de las sedes para comprobar las referencias. */
@@ -44,10 +44,11 @@ export function useItemCatalog(initial: ItemCatalogData, refs: ItemCatalogRefs) 
     return { ok: true };
   }, [repo]);
 
-  const addItems = useCallback(async (newItems: Item[], newPrices: { itemId: string; amount: number }[] = []): Promise<OpResult> => {
-    const res = await createItems(repo, context(), newItems, newPrices, todayLocalISO());
+  /** Crea artículos sin SKU: el sistema asigna el de cada uno y lo devuelve en `ids` (en el orden de los borradores). */
+  const addItems = useCallback(async (drafts: ItemDraft[]): Promise<OpResult & { ids?: string[] }> => {
+    const res = await createItemsAuto(repo, context(), drafts, todayLocalISO());
     if (res.ok && res.value) { setRawItems(res.value.items); setPrices(res.value.prices); }
-    return { ok: res.ok, error: res.error };
+    return { ok: res.ok, error: res.error, ...(res.value ? { ids: res.value.ids } : {}) };
   }, [repo]);
 
   const updateItem = useCallback(async (id: string, item: Item): Promise<OpResult> => {

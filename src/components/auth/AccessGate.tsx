@@ -12,6 +12,8 @@ import { loadPeople, type PeopleData } from '../../services/people';
 import { loadMoney } from '../../services/money';
 import { createSupabaseMoneyRepository } from '../../services/moneyRepository';
 import type { MoneyRows } from '../../utils/moneyDb';
+import { loadCashBoxes, type CashBoxesData } from '../../services/cashBoxes';
+import { createSupabaseCashBoxesRepository } from '../../services/cashBoxesRepository';
 import { createSupabasePeopleRepository } from '../../services/peopleRepository';
 import { createSupabaseLogisticsRepository } from '../../services/logisticsRepository';
 import { createSupabaseItemCatalogRepository } from '../../services/itemCatalogRepository';
@@ -30,7 +32,7 @@ const screen = 'min-h-screen flex items-center justify-center bg-app-bg px-4 tex
  * menú, los permisos, la sede que se ve, la matrícula y la verificación de materiales dependen de ellos, así que no se puede mostrar nada hasta tenerlos. Entrega también el id de la cuenta con la que se ingresó.
  * Con un error de conexión se ofrece reintentar.
  */
-export function AccessGate({ children }: { children: (access: AccessData, accountId: string, org: OrgDirectoryData, catalog: CatalogData, itemCatalog: ItemCatalogData, logistics: LogisticsData, people: PeopleData, money: MoneyRows) => ReactNode }) {
+export function AccessGate({ children }: { children: (access: AccessData, accountId: string, org: OrgDirectoryData, catalog: CatalogData, itemCatalog: ItemCatalogData, logistics: LogisticsData, people: PeopleData, money: MoneyRows, cashBoxes: CashBoxesData) => ReactNode }) {
   const { account } = useAuth();
   const rolesRepo = useMemo(() => createSupabaseRolesRepository(supabase), []);
   const accountsRepo = useMemo(() => createSupabaseAccountsRepository(supabase), []);
@@ -40,12 +42,13 @@ export function AccessGate({ children }: { children: (access: AccessData, accoun
   const logisticsRepo = useMemo(() => createSupabaseLogisticsRepository(supabase), []);
   const peopleRepo = useMemo(() => createSupabasePeopleRepository(supabase), []);
   const moneyRepo = useMemo(() => createSupabaseMoneyRepository(supabase), []);
-  const [loaded, setLoaded] = useState<{ access: AccessData; org: OrgDirectoryData; catalog: CatalogData; items: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows } | null>(null);
+  const cashBoxesRepo = useMemo(() => createSupabaseCashBoxesRepository(supabase), []);
+  const [loaded, setLoaded] = useState<{ access: AccessData; org: OrgDirectoryData; catalog: CatalogData; items: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData } | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setError('');
-    const [res, org, catalog, items, logistics, people, money] = await Promise.all([loadAccess(rolesRepo, accountsRepo), loadOrgDirectory(orgRepo), loadCatalog(catalogRepo), loadItemCatalog(itemRepo), loadLogistics(logisticsRepo), loadPeople(peopleRepo), loadMoney(moneyRepo)]);
+    const [res, org, catalog, items, logistics, people, money, cashBoxes] = await Promise.all([loadAccess(rolesRepo, accountsRepo), loadOrgDirectory(orgRepo), loadCatalog(catalogRepo), loadItemCatalog(itemRepo), loadLogistics(logisticsRepo), loadPeople(peopleRepo), loadMoney(moneyRepo), loadCashBoxes(cashBoxesRepo)]);
     if (!res.ok || !res.value) { setError(res.error ?? 'No se pudieron cargar los roles y las cuentas.'); return; }
     if (!org.ok || !org.value) { setError(org.error ?? 'No se pudieron cargar las empresas, sedes y almacenes.'); return; }
     if (!catalog.ok || !catalog.value) { setError(catalog.error ?? 'No se pudo cargar el catálogo comercial.'); return; }
@@ -53,13 +56,14 @@ export function AccessGate({ children }: { children: (access: AccessData, accoun
     if (!logistics.ok || !logistics.value) { setError(logistics.error ?? 'No se pudo cargar Logística (stock, kardex, envíos y transferencias).'); return; }
     if (!people.ok || !people.value) { setError(people.error ?? 'No se pudieron cargar los titulares y los alumnos.'); return; }
     if (!money.ok || !money.value) { setError(money.error ?? 'No se pudieron cargar las matrículas, los pagos y la caja.'); return; }
+    if (!cashBoxes.ok || !cashBoxes.value) { setError(cashBoxes.error ?? 'No se pudieron cargar los cierres de caja y la caja chica.'); return; }
     if (account && !res.value.users.some(u => u.id === account.id)) { setError('No se encontró su cuenta entre las que el sistema puede mostrar: su rol puede haber cambiado. Vuelva a ingresar.'); return; }
-    setLoaded({ access: res.value, org: org.value, catalog: catalog.value, items: items.value, logistics: logistics.value, people: people.value, money: money.value });
-  }, [rolesRepo, accountsRepo, orgRepo, catalogRepo, itemRepo, logisticsRepo, peopleRepo, moneyRepo, account]);
+    setLoaded({ access: res.value, org: org.value, catalog: catalog.value, items: items.value, logistics: logistics.value, people: people.value, money: money.value, cashBoxes: cashBoxes.value });
+  }, [rolesRepo, accountsRepo, orgRepo, catalogRepo, itemRepo, logisticsRepo, peopleRepo, moneyRepo, cashBoxesRepo, account]);
 
   useEffect(() => { void load(); }, [load]);
 
-  if (loaded && account) return <>{children(loaded.access, account.id, loaded.org, loaded.catalog, loaded.items, loaded.logistics, loaded.people, loaded.money)}</>;
+  if (loaded && account) return <>{children(loaded.access, account.id, loaded.org, loaded.catalog, loaded.items, loaded.logistics, loaded.people, loaded.money, loaded.cashBoxes)}</>;
   if (error) {
     return (
       <div className={screen}>

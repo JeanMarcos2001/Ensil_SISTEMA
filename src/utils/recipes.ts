@@ -54,6 +54,8 @@ export function validateRecipe(recipe: Recipe, recipes: Recipe[], items: Item[],
   if (lines.some(l => !l.itemId)) errors.push('Seleccione el artículo en todas las filas.');
   if (new Set(lines.map(l => l.itemId)).size !== lines.length) errors.push('Hay artículos repetidos en la receta.');
   if (lines.some(l => !(l.quantity >= 1))) errors.push('Las cantidades deben ser mayores a 0.');
+  const kitClash = kitOverlapError(lines, items);
+  if (kitClash) errors.push(kitClash);
   const selectable = getRecipeSelectableItems(items, previous?.items.map(l => l.itemId) ?? []);
   if (lines.some(l => l.itemId && !selectable.some(i => i.id === l.itemId))) errors.push('Hay artículos inactivos o no habilitados para matrícula en la receta.');
   if (!recipe.startDate) errors.push('La fecha de inicio es obligatoria.');
@@ -62,6 +64,24 @@ export function validateRecipe(recipe: Recipe, recipes: Recipe[], items: Item[],
   const clash = overlappingRecipe(recipe, recipes);
   if (clash) errors.push(`Ya existe una receta activa ("${clash.name}") que se solapa en programa, nivel, sede y período.`);
   return errors;
+}
+
+/**
+ * Un kit y uno de sus propios artículos en la misma receta se entregarían dos veces. Devuelve el aviso o `null`.
+ * (Un kit junto a otros artículos sueltos que no están dentro de él sí se permite.)
+ */
+export function kitOverlapError(lines: { itemId: string }[], items: Pick<Item, 'id' | 'name' | 'type' | 'composition'>[]): string | null {
+  const inRecipe = new Set(lines.map(l => l.itemId));
+  for (const line of lines) {
+    const kit = items.find(i => i.id === line.itemId);
+    if (!kit || kit.type !== 'Kit') continue;
+    const part = (kit.composition ?? []).find(c => inRecipe.has(c.itemId));
+    if (part) {
+      const partName = items.find(i => i.id === part.itemId)?.name ?? part.itemId;
+      return `La receta incluye el kit «${kit.name}» y también uno de sus artículos («${partName}»): se entregaría dos veces. Quite uno de los dos.`;
+    }
+  }
+  return null;
 }
 
 /** Copia de una receta: nace inactiva (si no, chocaría con la original) y con su propio id. */

@@ -27,8 +27,10 @@ import { sessionResponsibleUnavailable, unavailableOn } from '../utils/staffAvai
 import { applyCashReversal, buildDeposit, cashReversalCheck, validateCashReversal, validateDeposit, type DepositInput } from '../utils/cash';
 import { PERM, SUPERUSER, can as canDo, type AuthorityContext } from '../utils/authority';
 import { allowedNoteModes, buildCreditNote, validateNoteChoice, type NoteMode } from '../utils/creditNotes';
-import { buildClosure, closedMessage, expectedAt, validateClosure, validateReopen, type ClosureInput } from '../utils/cashClosure';
-import { DEFAULT_FUND, validateFund, type PettyFund } from '../utils/pettyCash';
+import { closedMessage, type ClosureInput } from '../utils/cashClosure';
+import type { PettyFund } from '../utils/pettyCash';
+import { fundOf, type CashBoxesData } from '../services/cashBoxes';
+import { useCashBoxes } from '../hooks/useCashBoxes';
 import {
   applyProgramChangeToPlan, applyReactivationToPlan, previewProgramChange, previewReactivation, previewTransfer, programChangeProblems, reactivationProblems, responsiblesByBranch, transferProblems,
   validateProgramChangeRequest, validateReactivationRequest, validateTransferRequest, type ChangeContext, type ProgramChangeInput, type ReactivationInput, type TransferInput,
@@ -46,7 +48,7 @@ import { recomputePlan } from '../utils/planState';
 import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
 import { seedUsers } from '../data/seedCatalog';
 import { syncCatalogLabels, syncStudentName } from '../utils/identity';
-import { buildPettyMovement, validatePettyInput, validatePettyReversal, type PettyInput } from '../utils/pettyCash';
+import type { PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 import { availability, buildHolders, type Availability } from '../utils/capabilities';
 import { availabilityForViewer, denialMessage, guardActions, unmetClause, userChangeNeeds } from '../utils/guards';
@@ -57,6 +59,7 @@ import { useLogistics } from '../hooks/useLogistics';
 import type { LogisticsData } from '../services/logistics';
 import { usePeople } from '../hooks/usePeople';
 import { useMoney } from '../hooks/useMoney';
+import type { ItemDraft } from '../utils/inventory';
 import type { MoneyAction, MoneyRows, MoneyState, StockOp } from '../utils/moneyDb';
 import type { PeopleData } from '../services/people';
 import { planEnrollmentPeople, withCreatedPeople } from '../utils/enrollmentPeople';
@@ -307,6 +310,8 @@ export interface CashClosure {
   id: string;
   scope: 'caja' | 'caja-chica';
   currency: 'PEN' | 'USD';
+  /** La sede cuya caja se cerró (cada sede cierra la suya). Vacía = caja general, sin sede (solo la cierra quien alcanza todas las sedes). */
+  branchId?: string;
   /** Último día cubierto (YYYY-MM-DD). */
   date: string;
   /** Saldo que decía el sistema a esa fecha. */
@@ -501,6 +506,8 @@ export interface CashMovement {
 /** Movimiento de la caja chica (fondo fijo en soles para gastos menores). */
 export interface PettyCashMovement {
   id: string;
+  /** La sede de cuya caja chica es el movimiento (un fondo por sede). */
+  branchId: string;
   date: string; // ISO datetime
   kind: 'Ingreso' | 'Egreso';
   category: string;
@@ -515,7 +522,7 @@ export interface PettyCashMovement {
   reversal?: { at: string; by: string; reason: string; detail: string };
 }
 
-export type ItemType = 'Material educativo' | 'Herramienta / adicional' | 'Libro' | 'Paquete / kit logístico';
+export type ItemType = 'Material educativo' | 'Herramienta / adicional' | 'Libro' | 'Kit';
 
 export interface Item {
   id: string;
@@ -525,13 +532,12 @@ export interface Item {
   description: string;
   unit: string;
   cost: number;
-  isSold: boolean;
   /** @deprecated El precio de venta vive en `ItemPrice` (general o por sede, con vigencia e historial). */
   salePrice?: number;
-  /** Habilita el artículo para ser elegido dentro de una Receta de matrícula. NO lo entrega automáticamente a todo alumno. */
+  /** Habilita el artículo para ser elegido dentro de una Receta de matrícula. NO lo entrega automáticamente a todo alumno. El material educativo siempre es «sí». */
   isDeliveredOnEnrollment: boolean;
+  /** Se deriva del tipo: solo un artículo de tipo Kit es un kit (se arma y se desarma en Stock). */
   isPackage: boolean;
-  allowUnpacking: boolean;
 
   // Material educativo
   sessions?: number;
@@ -545,7 +551,7 @@ export interface Item {
   /** Obligatorio para libros. Anillado: normalmente material de programa. Encolado: puede ser vendible. */
   bindingType?: 'Anillado' | 'Encolado';
 
-  // Paquete
+  // Kit: los artículos con los que se arma (obligatoria; sin kits dentro de kits)
   composition?: { itemId: string; name: string; quantity: number }[];
 }
 
@@ -1323,7 +1329,8 @@ interface DataContextType {
   payments: Payment[];
   items: Item[];
   /** Crea artículos (uno o una carga masiva); un artículo que se vende nace con su precio general (`prices`). Todo o nada. */
-  addItems: (items: Item[], prices?: { itemId: string; amount: number }[]) => Promise<StockResult>;
+  /** Crea artículos SIN que nadie escriba el SKU: el sistema asigna el de cada uno y lo devuelve en `ids` (el precio general de los que se venden va en cada borrador). */
+  addItems: (drafts: ItemDraft[]) => Promise<StockResult & { ids?: string[] }>;
   /** Edita un artículo (también activarlo o desactivarlo). */
   updateItem: (id: string, item: Item) => Promise<StockResult>;
   stockItems: StockItem[];
@@ -1334,8 +1341,9 @@ interface DataContextType {
   /** Lleva ingresos en efectivo al banco: un egreso «Depósito bancario» y los ingresos quedan depositados. */
   createDepositBatch: (input: DepositInput) => Promise<StockResult & { code?: string }>;
   pettyCashMovements: PettyCashMovement[];
-  addPettyCashMovement: (input: PettyInput) => StockResult;
-  reversePettyCashMovement: (id: string, input: { reason: string; detail: string }) => StockResult;
+  /** Un ingreso o gasto de la caja chica de una sede (cada sede tiene su fondo): se guarda en la base. */
+  addPettyCashMovement: (branchId: string, input: PettyInput) => Promise<StockResult>;
+  reversePettyCashMovement: (id: string, input: { reason: string; detail: string }) => Promise<StockResult>;
   promotionGroups: PromotionGroup[];
   itemPrices: ItemPrice[];
   addItemPrice: (price: { itemId: string; branchId: string; amount: number; validFrom: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -1453,7 +1461,8 @@ interface DataContextType {
   /** La copia nace inactiva (si no, chocaría con la original). */
   duplicateRecipe: (id: string) => Promise<StockResult & { id?: string }>;
   setRecipeStatus: (id: string, status: Recipe['status']) => Promise<StockResult>;
-  unpackPackage: (stockId: string) => Promise<StockResult>;
+  /** Desarma una unidad del kit; el motivo es obligatorio y queda en el kardex. */
+  unpackPackage: (stockId: string, reason: string) => Promise<StockResult>;
   packPackage: (stockId: string) => Promise<StockResult>;
   /** Vende un artículo en caja: descuenta el stock de la sede y registra el ingreso en una sola operación. */
   registerItemSale: (input: ItemSaleInput) => Promise<StockResult>;
@@ -1489,12 +1498,13 @@ interface DataContextType {
   /** Reversa un pago: queda anulado, repone la cuota, ajusta caja y libera su comprobante. */
   reversePayment: (paymentId: string, input: ReversalInput) => Promise<StockResult>;
   cashClosures: CashClosure[];
-  /** Hace el arqueo y cierra una caja hasta una fecha (Caja PEN, Caja USD o Caja chica). */
-  closeCash: (input: ClosureInput) => StockResult;
+  /** Hace el arqueo y cierra una caja hasta una fecha. **Cada sede cierra la suya** (Caja PEN, Caja USD y Caja chica de esa sede); la base calcula el saldo esperado. */
+  closeCash: (input: ClosureInput) => Promise<StockResult>;
   /** Reabre el último cierre de una caja (con motivo y permiso). */
-  reopenCash: (closureId: string, reason: string) => StockResult;
-  /** Fondo fijo y tope por gasto de la caja chica. */
-  pettyFund: PettyFund;
+  reopenCash: (closureId: string, reason: string) => Promise<StockResult>;
+  /** Fondo fijo y tope por gasto de la caja chica de cada sede (por id de sede; una sede sin fila usa los de partida: `pettyFundOf`). */
+  pettyFunds: Record<string, PettyFund>;
+  pettyFundOf: (branchId: string) => PettyFund;
   collectionPolicy: CollectionPolicy;
   /** Guarda la política de cobranza (días de gracia, mora y días de recordatorio). */
   updateCollectionPolicy: (input: { graceDays: string; moraMonthlyRatePct: string; remindBefore: string; remindAfter: string }) => StockResult;
@@ -1521,7 +1531,7 @@ interface DataContextType {
   requestTransfer: (enrollmentId: string, input: TransferInput) => StockResult;
   /** Aprueba (aplica los efectos) o rechaza una solicitud de reactivación, cambio de programa o traslado. */
   resolveChangeRequest: (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string) => Promise<StockResult>;
-  updatePettyFund: (fund: { assigned: string; maxExpense: string }) => StockResult;
+  updatePettyFund: (branchId: string, fund: { assigned: string; maxExpense: string }) => Promise<StockResult>;
   creditNotes: CreditNote[];
   /** ¿El usuario actual tiene el permiso `funcionalidad:acción`? (el Superusuario puede todo) */
   can: (permission: string) => boolean;
@@ -1605,7 +1615,7 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
  * los titulares y los alumnos, y `money` = las matrículas con su plan, cuotas, pagos, caja, notas de crédito y grupos promocionales (todo de la base);
  * `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
@@ -1614,22 +1624,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const people = usePeople(peopleData);
   const { guardians, students } = people;
   // Matrículas, planes, cuotas, pagos, caja, notas de crédito y grupos promocionales: de la base de datos (`useMoney`, más abajo).
-  const [cashClosures, setCashClosures] = useState<CashClosure[]>([]);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
   const [collectionPolicy, setCollectionPolicy] = useState<CollectionPolicy>(DEFAULT_POLICY);
   const [reminderLogs, setReminderLogs] = useState<ReminderLog[]>([]);
   const [contractTemplate, setContractTemplate] = useState<ContractTemplate>(DEFAULT_CONTRACT_TEMPLATE);
-  const [pettyFund, setPettyFund] = useState<PettyFund>(DEFAULT_FUND);
-
-  // Caja chica: fondo fijo en soles. Semilla: los tres movimientos de ejemplo que mostraba la pantalla.
-  const [pettyCashMovements, setPettyCashMovements] = useState<PettyCashMovement[]>(() => {
-    const at = (back: number, hh: string) => new Date(`${addDaysISO(todayLocalISO(), -back)}T${hh}:00`).toISOString();
-    return [
-      { id: 'CCH-003', date: at(0, '11:30'), kind: 'Egreso', category: 'Movilidad', concept: 'Taxi a notaría', amount: 25, method: 'Efectivo', user: 'Ana G.', status: 'Aplicado' },
-      { id: 'CCH-002', date: at(1, '15:20'), kind: 'Egreso', category: 'Útiles de oficina', concept: 'Compra de papel bond', amount: 120, method: 'Efectivo', reference: 'Boleta B001-0456', user: 'Carlos R.', status: 'Aplicado' },
-      { id: 'CCH-001', date: at(3, '09:00'), kind: 'Ingreso', category: 'Reposición de fondo', concept: 'Reposición de fondo fijo', amount: 1000, method: 'Efectivo', user: 'Admin', status: 'Aplicado' },
-    ];
-  });
+  // Los cierres de caja y la caja chica (movimientos y fondo de cada sede): de la base de datos (`useCashBoxes`, más abajo, junto a la caja).
 
   /** Guarda lo que una acción cambió en el dinero (todo o nada, con la función del registro de esa acción) y devuelve `{ ok, error }`. */
   const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<StockResult> => {
@@ -1992,6 +1991,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // cargan con `supabase/seed/matriculas_de_ejemplo.sql`, con los mismos códigos, porque la agenda y las solicitudes de ejemplo en memoria los nombran).
   const money = useMoney(moneyData, { students, programs, levels, branches, staff, leadSources, paymentTypes, tariffs }, () => log.refreshStock());
   const { enrollments, plans, payments, cashMovements, creditNotes, promotionGroups } = money;
+  // Cierres de caja y caja chica: cada sede cierra la suya y tiene su fondo; la base calcula el saldo esperado y bloquea los días cerrados.
+  const cashBoxes = useCashBoxes(cashBoxesData, cashMovements);
+  const { closures: cashClosures, pettyMovements: pettyCashMovements, pettyFunds } = cashBoxes;
 
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
@@ -2020,7 +2022,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   };
 
   const addItemPrice: DataContextType['addItemPrice'] = price => itemCat.addItemPrice(price);
-  const addItems: DataContextType['addItems'] = (newItems, prices = []) => itemCat.addItems(newItems, prices);
+  const addItems: DataContextType['addItems'] = drafts => itemCat.addItems(drafts);
   const updateItem: DataContextType['updateItem'] = (id, item) => itemCat.updateItem(id, item);
 
   const addCourier: DataContextType['addCourier'] = async courier => log.addCourier(courier);
@@ -2035,12 +2037,12 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const notSold = locationSaleError(input.branchId);
     if (notSold) return { ok: false, error: notSold };
     const item = items.find(i => i.id === input.itemId);
-    if (!item || !item.isSold || item.status !== 'Activo') return { ok: false, error: 'El artículo no está habilitado para la venta.' };
+    if (!item || item.status !== 'Activo') return { ok: false, error: 'El artículo no está habilitado para la venta.' };
     const unitPrice = getCurrentPrice(itemPrices, input.itemId, input.branchId)?.amount ?? 0;
     if (!(unitPrice > 0)) return { ok: false, error: 'El artículo no tiene un precio de venta vigente. Configúrelo en Logística → Catálogo de artículos.' };
     const invalid = itemSaleError({ qty: input.qty, available: availableStock(log.stockItems, input.branchId, input.itemId), currency: input.currency, exchangeRate: input.exchangeRate });
     if (invalid) return { ok: false, error: invalid };
-    const closed = closedMessage(cashClosures, 'caja', input.currency, todayLocalISO());
+    const closed = closedMessage(cashClosures, 'caja', input.currency, todayLocalISO(), input.branchId);
     if (closed) return { ok: false, error: closed };
     const totalUsd = Math.round(unitPrice * input.qty * 100) / 100;
     const sale: CashMovement = {
@@ -2134,11 +2136,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const updateTransfer: DataContextType['updateTransfer'] = async (transferId, updatedData) => log.updateTransfer(transferId, updatedData);
 
-  const unpackPackage: DataContextType['unpackPackage'] = async stockId => {
+  const unpackPackage: DataContextType['unpackPackage'] = async (stockId, reason) => {
     const stock = log.stockItems.find(s => s.id === stockId);
     const denied = stock ? warehouseProblem(stock.branchId) : null;
     if (denied) return { ok: false, error: denied };
-    return log.unpackPackage(stockId);
+    return log.unpackPackage(stockId, reason);
   };
 
   const packPackage: DataContextType['packPackage'] = async stockId => {
@@ -2606,7 +2608,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const movement = cashMovements.find(m => m.id === id);
     if (!movement) return { ok: false, error: 'No se encontró el movimiento.' };
     if (!can(PERM.reverseCash)) return { ok: false, error: 'Su rol no puede reversar movimientos de caja.' };
-    const closed = closedMessage(cashClosures, 'caja', movement.currency, localDateOf(movement.date));
+    const closed = closedMessage(cashClosures, 'caja', movement.currency, localDateOf(movement.date), movement.branchId);
     if (closed) return { ok: false, error: closed };
     const problems = validateCashReversal(movement, input.reason, input.detail, cashMovements);
     if (problems.length > 0) return { ok: false, error: problems[0] };
@@ -2623,13 +2625,13 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const createDepositBatch: DataContextType['createDepositBatch'] = async input => {
     if (!can(PERM.deposit)) return { ok: false, error: 'Su rol no puede crear lotes de depósito.' };
-    const closed = closedMessage(cashClosures, 'caja', input.currency, input.date);
-    if (closed) return { ok: false, error: closed };
     const problems = validateDeposit(input, cashMovements, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDeposit(input, cashMovements, currentUser.name, new Date(`${input.date}T12:00:00`).toISOString());
     // El egreso del lote es de la sede de los ingresos que se depositan (si vienen de varias sedes, es de caja general)
     const sedes = Array.from(new Set(built.selected.map(m => m.branchId ?? '')));
+    const closed = closedMessage(cashClosures, 'caja', input.currency, input.date, sedes.length === 1 && sedes[0] ? sedes[0] : undefined);
+    if (closed) return { ok: false, error: closed };
     const created: CashMovement = {
       ...built.egress, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name, status: 'Aplicado',
       ...(sedes.length === 1 && sedes[0] ? { branchId: sedes[0] } : {}),
@@ -2641,67 +2643,40 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return saved.ok ? { ok: true, code: built.code } : saved;
   };
 
-  // ---- Caja chica
-  const addPettyCashMovement = (input: PettyInput): StockResult => {
-    const errors = validatePettyInput(input, pettyCashMovements, todayLocalISO(), pettyFund);
-    const first = Object.values(errors)[0];
-    if (first) return { ok: false, error: first };
-    const closed = closedMessage(cashClosures, 'caja-chica', 'PEN', input.date);
-    if (closed) return { ok: false, error: closed };
-    const created: PettyCashMovement = {
-      ...buildPettyMovement(input),
-      id: nextSequentialId('CCH', pettyCashMovements.map(m => m.id)),
-      user: currentUser.name,
-      status: 'Aplicado',
-    };
-    setPettyCashMovements(prev => [created, ...prev]);
-    return { ok: true };
-  };
+  // ---- Caja chica y cierres de caja (en la base: las reglas y el orden «validar → guardar» están en `services/cashBoxes.ts`; la base vuelve a comprobar todo)
+  const asResult = (r: { ok: boolean; error?: string }): StockResult => (r.ok ? { ok: true } : { ok: false, error: r.error });
 
-  const reversePettyCashMovement = (id: string, input: { reason: string; detail: string }): StockResult => {
-    const movement = pettyCashMovements.find(m => m.id === id);
-    if (!movement) return { ok: false, error: 'No se encontró el movimiento.' };
+  const addPettyCashMovement: DataContextType['addPettyCashMovement'] = async (branchId, input) => asResult(await cashBoxes.addPetty(branchId, input));
+
+  const reversePettyCashMovement: DataContextType['reversePettyCashMovement'] = async (id, input) => {
     if (!can(PERM.reversePetty)) return { ok: false, error: 'Su rol no puede reversar movimientos de la caja chica.' };
-    const closed = closedMessage(cashClosures, 'caja-chica', 'PEN', localDateOf(movement.date));
-    if (closed) return { ok: false, error: closed };
-    const problems = validatePettyReversal(movement, input.reason, input.detail, pettyCashMovements);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setPettyCashMovements(prev => prev.map(m => (m.id === id
-      ? { ...m, status: 'Reversado' as const, reversal: { at: new Date().toISOString(), by: currentUser.name, reason: input.reason, detail: input.detail.trim() } }
-      : m)));
-    return { ok: true };
+    return asResult(await cashBoxes.reversePetty(id, input));
   };
 
-  // ---- Cierre y reapertura de caja, fondo de la caja chica
-  const closeCash = (input: ClosureInput): StockResult => {
+  const closeCash: DataContextType['closeCash'] = async input => {
     if (!can(input.scope === 'caja' ? PERM.closeCash : PERM.closePetty)) return { ok: false, error: 'Su rol no puede cerrar esta caja.' };
-    const expected = expectedAt(input.scope, input.currency, input.date, cashMovements, pettyCashMovements);
-    const problems = validateClosure(input, cashClosures, expected, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const built = buildClosure(input, expected, currentUser.name, new Date().toISOString());
-    setCashClosures(prev => [{ ...built, id: nextSequentialId('CIE', prev.map(c => c.id)) }, ...prev]);
-    return { ok: true };
+    return asResult(await cashBoxes.close(input));
   };
 
-  const reopenCash = (closureId: string, reason: string): StockResult => {
+  const reopenCash: DataContextType['reopenCash'] = async (closureId, reason) => {
     const closure = cashClosures.find(c => c.id === closureId);
     if (!closure) return { ok: false, error: 'No se encontró el cierre.' };
     if (!can(closure.scope === 'caja' ? PERM.reopenCash : PERM.reopenPetty)) return { ok: false, error: 'Su rol no puede reabrir esta caja.' };
-    const problems = validateReopen(closure, cashClosures, reason);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setCashClosures(prev => prev.map(c => (c.id === closureId ? { ...c, status: 'Reabierta' as const, reopenedAt: new Date().toISOString(), reopenedBy: currentUser.name, reopenReason: reason.trim() } : c)));
-    notify('cash_reopened', { title: 'Caja reabierta', message: `${currentUser.name} reabrió el cierre ${closure.id} (${closure.scope === 'caja' ? `Caja ${closure.currency}` : 'Caja chica'} al ${closure.date}): ${reason.trim()}`, type: 'warning' });
+    const res = await cashBoxes.reopen(closureId, reason);
+    if (!res.ok) return asResult(res);
+    const branchName = closure.branchId ? branches.find(b => b.id === closure.branchId)?.name : undefined;
+    notify('cash_reopened', {
+      title: 'Caja reabierta', type: 'warning', scope: { subjectBranchId: closure.branchId },
+      message: `${currentUser.name} reabrió el cierre ${closure.id} (${closure.scope === 'caja' ? `Caja ${closure.currency}` : 'Caja chica'}${branchName ? ` de ${branchName}` : ''} al ${closure.date}): ${reason.trim()}`,
+    });
     return { ok: true };
   };
 
-  const updatePettyFund = (fund: { assigned: string; maxExpense: string }): StockResult => {
+  const updatePettyFund: DataContextType['updatePettyFund'] = async (branchId, fund) => {
     if (!can(PERM.configPetty)) return { ok: false, error: 'Su rol no puede configurar el fondo de la caja chica.' };
-    const errors = validateFund(fund);
-    const first = errors.assigned ?? errors.maxExpense;
-    if (first) return { ok: false, error: first };
-    setPettyFund({ assigned: Number(fund.assigned), maxExpense: Number(fund.maxExpense) });
-    return { ok: true };
+    return asResult(await cashBoxes.saveFund(branchId, fund));
   };
+  const pettyFundOf: DataContextType['pettyFundOf'] = branchId => fundOf(pettyFunds, branchId);
 
   // ---- Cambios de matrícula: reactivación, cambio de programa/nivel y traslado de sede
   const changeContext = (omit?: string): ChangeContext => ({
@@ -3377,7 +3352,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       cashClosures,
       closeCash,
       reopenCash,
-      pettyFund,
+      pettyFunds,
+      pettyFundOf,
       updatePettyFund,
       creditNotes,
       can,

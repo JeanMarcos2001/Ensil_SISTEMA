@@ -1,5 +1,6 @@
 /**
- * Caja chica (funciones puras): fondo fijo en soles para gastos menores.
+ * Caja chica (funciones puras): fondo fijo en soles para gastos menores. **Cada sede tiene su fondo**: estas funciones reciben los movimientos de UNA sede
+ * (`ofBranch` los separa) y el fondo de esa sede.
  *
  * El saldo es lo aplicado (ingresos − egresos); un egreso no puede dejarlo en negativo y un ingreso solo se reversa si el
  * saldo que queda alcanza para cubrir lo que ya se gastó. Un movimiento reversado no se borra: queda marcado con quién, cuándo
@@ -45,6 +46,9 @@ export type PettyErrors = Partial<Record<keyof PettyInput, string>>;
 export const emptyPettyInput = (kind: PettyKind, date: string): PettyInput => ({
   kind, date, category: '', concept: '', amount: '', method: 'Efectivo', reference: '', evidence: '', observations: '',
 });
+
+/** Los movimientos de la caja chica de una sede. */
+export const ofBranch = (movements: PettyCashMovement[], branchId: string): PettyCashMovement[] => movements.filter(m => m.branchId === branchId);
 
 export const pettyBalance = (movements: PettyCashMovement[]): number =>
   round2(movements.filter(m => m.status === 'Aplicado').reduce((a, m) => a + (m.kind === 'Ingreso' ? m.amount : -m.amount), 0));
@@ -94,8 +98,9 @@ export function validatePettyInput(i: PettyInput, movements: PettyCashMovement[]
   return e;
 }
 
-export function buildPettyMovement(i: PettyInput): Omit<PettyCashMovement, 'id' | 'user' | 'status'> {
+export function buildPettyMovement(i: PettyInput, branchId: string): Omit<PettyCashMovement, 'id' | 'user' | 'status'> {
   return {
+    branchId,
     date: new Date(`${i.date}T12:00:00`).toISOString(),
     kind: i.kind,
     category: i.category,

@@ -11,7 +11,7 @@
  */
 import type { Courier, Item, ReceptionIncident, Shipment, ShippingMethod, StockItem, Transfer } from '../context/DataContext';
 import {
-  adjustmentError, minStockError, packageError, stockEntryError, type AdjustmentType,
+  adjustmentError, minStockError, packageError, stockEntryError, unpackReasonError, type AdjustmentType,
 } from '../utils/inventory';
 import { locationSaleError, shipmentRouteError, transferRouteError, type StockLocation } from '../utils/logisticsRoutes';
 import {
@@ -39,7 +39,8 @@ export interface LogisticsRepository {
   registerEntry(i: { locationId: string; itemId: string; qty: number; doc: string; reason?: string }): Promise<RepoResult<null>>;
   registerAdjustment(i: { locationId: string; itemId: string; type: AdjustmentType; qty: number; reason: string; observation?: string }): Promise<RepoResult<string>>;
   pack(locationId: string, itemId: string): Promise<RepoResult<null>>;
-  unpack(locationId: string, itemId: string): Promise<RepoResult<null>>;
+  /** Desarma una unidad del kit. El motivo es obligatorio: queda en el kardex junto a quién y cuándo. */
+  unpack(locationId: string, itemId: string, reason: string): Promise<RepoResult<null>>;
   setMinStock(locationId: string, itemId: string, minStock: number): Promise<RepoResult<null>>;
   sell(i: { branchId: string; itemId: string; qty: number; doc: string; observation: string }): Promise<RepoResult<null>>;
   deliver(i: { branchId: string; enrollmentId: string; student: string; lines: { itemId: string; quantity: number }[] }): Promise<RepoResult<null>>;
@@ -62,7 +63,7 @@ export interface LogisticsRepository {
 
 /** Con qué se comprueban las reglas: lo último que se vio del stock, de los documentos y de los catálogos. */
 export interface LogisticsContext {
-  items: Pick<Item, 'id' | 'name' | 'isPackage' | 'allowUnpacking' | 'composition'>[];
+  items: Pick<Item, 'id' | 'name' | 'isPackage' | 'composition'>[];
   locations: StockLocation[];
   stock: StockItem[];
   shipments: Shipment[];
@@ -119,17 +120,21 @@ function packShortage(ctx: LogisticsContext, locationId: string, item: Pick<Item
   return null;
 }
 
-export async function packItem(repo: LogisticsRepository, ctx: LogisticsContext, stockId: string, action: 'pack' | 'unpack'): Promise<LogisticsResult> {
+/** Arma o desarma un kit. Desarmar pide siempre su motivo (`reason`): es lo que deja registrado por qué se abrió el kit. */
+export async function packItem(repo: LogisticsRepository, ctx: LogisticsContext, stockId: string, action: 'pack' | 'unpack', reason = ''): Promise<LogisticsResult> {
   const stock = ctx.stock.find(s => s.id === stockId);
   if (!stock) return fail('No se encontró el registro de stock.');
   const item = ctx.items.find(i => i.id === stock.itemId);
-  const invalid = packageError(item, action);
+  const invalid = packageError(item);
   if (invalid) return fail(invalid);
   if (action === 'pack') {
     const shortage = packShortage(ctx, stock.branchId, item!);
     if (shortage) return fail(shortage);
+  } else {
+    const noReason = unpackReasonError(reason);
+    if (noReason) return fail(noReason);
   }
-  const res = action === 'pack' ? await repo.pack(stock.branchId, stock.itemId) : await repo.unpack(stock.branchId, stock.itemId);
+  const res = action === 'pack' ? await repo.pack(stock.branchId, stock.itemId) : await repo.unpack(stock.branchId, stock.itemId, reason.trim());
   return res.ok ? done('ledger') : fail(res.error ?? (action === 'pack' ? 'No se pudo empaquetar.' : 'No se pudo desempaquetar.'));
 }
 

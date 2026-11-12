@@ -10,7 +10,7 @@ import { useTablePagination } from '../../hooks/useTablePagination';
 import { useActionError } from '../../hooks/useActionError';
 import { useData, Item, ItemType } from '../../context/DataContext';
 import { ItemPricesModal } from './ItemPricesModal';
-import { getCurrentPrice, validateItem } from '../../utils/inventory';
+import { ITEM_UNITS, defaultUnitFor, getCurrentPrice, hasReferencePrice, itemSummaryLines, nextSku, suggestedKitPrice, validateItem } from '../../utils/inventory';
 import { BULK_HEADERS, BULK_TEMPLATE_ROWS, MAX_BYTES, buildBookBatch, parseCsv, type BulkResult } from '../../utils/itemImport';
 import { downloadCsv } from '../../utils/exportCsv';
 
@@ -31,11 +31,13 @@ export function ItemCatalog() {
   // Carga masiva: archivo leído y su validación (se guarda todo o nada)
   const [bulk, setBulk] = useState<{ fileName: string; result: BulkResult } | null>(null);
   const [showSessionTable, setShowSessionTable] = useState(false);
+  // Aviso de lo que se acaba de crear (con el SKU que asignó el sistema)
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [isSoldFilter, setIsSoldFilter] = useState('');
+  const [priceFilter, setPriceFilter] = useState('');
   const [isDeliveredFilter, setIsDeliveredFilter] = useState('');
   const [isPackageFilter, setIsPackageFilter] = useState('');
 
@@ -43,10 +45,9 @@ export function ItemCatalog() {
   const [formData, setFormData] = useState<Partial<Item>>({
     status: 'Activo',
     type: 'Material educativo',
-    isSold: false,
-    isDeliveredOnEnrollment: false,
+    unit: 'Unidad',
+    isDeliveredOnEnrollment: true,
     isPackage: false,
-    allowUnpacking: false,
     trainingMode: 'General',
     composition: [],
     variableTrainings: []
@@ -56,11 +57,11 @@ export function ItemCatalog() {
     const matchesSearch = m.name.toLowerCase().includes(searchTerm.toLowerCase()) || m.id.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = typeFilter ? m.type === typeFilter : true;
     const matchesStatus = statusFilter ? m.status === statusFilter : true;
-    const matchesSold = isSoldFilter ? (isSoldFilter === 'true' ? m.isSold : !m.isSold) : true;
+    const matchesPrice = priceFilter === 'missing' ? !hasReferencePrice(itemPrices, m.id) : true;
     const matchesDelivered = isDeliveredFilter ? (isDeliveredFilter === 'true' ? m.isDeliveredOnEnrollment : !m.isDeliveredOnEnrollment) : true;
     const matchesPackage = isPackageFilter ? (isPackageFilter === 'true' ? m.isPackage : !m.isPackage) : true;
     
-    return matchesSearch && matchesType && matchesStatus && matchesSold && matchesDelivered && matchesPackage;
+    return matchesSearch && matchesType && matchesStatus && matchesPrice && matchesDelivered && matchesPackage;
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -68,7 +69,7 @@ export function ItemCatalog() {
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, typeFilter, statusFilter, isSoldFilter, isDeliveredFilter, isPackageFilter]);
+  }, [searchTerm, typeFilter, statusFilter, priceFilter, isDeliveredFilter, isPackageFilter]);
 
   const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -98,16 +99,14 @@ export function ItemCatalog() {
 
   const handleOpenForm = (item?: Item) => {
     if (item) {
-      setFormData({ ...item });
+      setFormData({ ...item, ...(item.type === 'Material educativo' ? { isDeliveredOnEnrollment: true } : {}) });
       setWizardStep(2);
       setIsBulkUpload(false);
     } else {
       setFormData({
         status: 'Activo',
-        isSold: false,
         isDeliveredOnEnrollment: false,
         isPackage: false,
-        allowUnpacking: false,
         trainingMode: 'General',
         composition: [],
         variableTrainings: []
@@ -122,17 +121,22 @@ export function ItemCatalog() {
     setCompItemId('');
     setCompQty(1);
     setFormError(null);
+    setNotice(null);
     setIsFormOpen(true);
   };
 
   const handleTypeSelect = (type: ItemType) => {
-    setFormData({ 
-      ...formData, 
+    // Valores de partida por tipo: el material educativo, el libro y el kit se entregan con la matrícula (se puede cambiar, menos en el material)
+    setFormData({
+      ...formData,
       type,
-      isSold: type === 'Libro' || type === 'Herramienta / adicional' ? false : false,
-      isPackage: type === 'Paquete / kit logístico',
-      isDeliveredOnEnrollment: type === 'Material educativo' ? true : false
+      unit: defaultUnitFor(type),
+      isPackage: type === 'Kit',
+      isDeliveredOnEnrollment: type !== 'Herramienta / adicional',
+      composition: [],
     });
+    // El precio escrito para otro tipo (si se volvió atrás) no se arrastra al nuevo artículo
+    setInitialPrice('');
     setWizardStep(2);
   };
 
@@ -141,39 +145,50 @@ export function ItemCatalog() {
     if (isBulkUpload) {
       if (!bulk) { setFormError('Elija el archivo CSV con los libros.'); return; }
       if (bulk.result.errors.length > 0) { setFormError('El archivo tiene errores: corríjalos y vuelva a cargarlo. No se guardó ningún libro.'); return; }
-      if (bulk.result.items.length === 0) { setFormError('El archivo no tiene libros para guardar.'); return; }
+      if (bulk.result.drafts.length === 0) { setFormError('El archivo no tiene libros para guardar.'); return; }
       setSaving(true);
-      const saved = await addItems(bulk.result.items, bulk.result.prices.map(pr => ({ itemId: pr.itemId, amount: pr.amount })));
+      const saved = await addItems(bulk.result.drafts);
       setSaving(false);
       if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el lote.'); return; }
       setIsFormOpen(false);
       setFormError(null);
       setBulk(null);
+      setNotice(`Se crearon ${saved.ids?.length ?? bulk.result.drafts.length} libro(s)${saved.ids && saved.ids.length > 0 ? `: del ${saved.ids[0]} al ${saved.ids[saved.ids.length - 1]}` : ''}.`);
       return;
     }
 
-    const validationError = validateItem({ item: formData, allItems: items, editingId: selectedItem?.id });
+    // Un artículo nuevo todavía no tiene SKU (lo asigna el sistema al guardar): se valida con el que le tocaría ahora
+    const provisionalSku = nextSku((formData.type ?? 'Material educativo') as ItemType, items.map(i => i.id));
+    const validationError = validateItem({ item: selectedItem ? formData : { ...formData, id: provisionalSku }, allItems: items, editingId: selectedItem?.id });
     if (validationError) {
       setFormError(validationError);
       return;
     }
 
     const priceValue = parseFloat(initialPrice);
-    if (!selectedItem && formData.isSold && !(priceValue > 0)) {
-      setFormError('Indique el precio general de venta (USD) para un artículo que se vende.');
+    if (!selectedItem && !(priceValue > 0)) {
+      setFormError('Indique el precio de referencia (USD) del artículo: es el precio con el que se vende si hace falta.');
       return;
     }
 
     // El precio vive en `itemPrices` (con vigencia e historial), no dentro del artículo.
     const { salePrice: _legacyPrice, ...itemData } = formData as Item;
     setSaving(true);
-    const saved = await (selectedItem
-      ? updateItem(selectedItem.id, { ...itemData } as Item)
-      : addItems([{ ...itemData } as Item], formData.isSold ? [{ itemId: formData.id!, amount: priceValue }] : []));
+    let createdSku: string | undefined;
+    let saved: { ok: boolean; error?: string };
+    if (selectedItem) {
+      saved = await updateItem(selectedItem.id, { ...itemData } as Item);
+    } else {
+      const { id: _noSku, ...withoutSku } = itemData;
+      const created = await addItems([{ item: withoutSku, price: priceValue }]);
+      createdSku = created.ids?.[0];
+      saved = created;
+    }
     setSaving(false);
     if (!saved.ok) { setFormError(saved.error ?? 'No se pudo guardar el artículo.'); return; }
     setIsFormOpen(false);
     setFormError(null);
+    if (createdSku) setNotice(`Artículo creado con el código ${createdSku}.`);
   };
 
   const readBulkFile = (file: File | undefined) => {
@@ -197,9 +212,14 @@ export function ItemCatalog() {
       case 'Material educativo': return <Package size={16} />;
       case 'Libro': return <Book size={16} />;
       case 'Herramienta / adicional': return <Wrench size={16} />;
-      case 'Paquete / kit logístico': return <Layers size={16} />;
+      case 'Kit': return <Layers size={16} />;
     }
   };
+
+  // Precio de referencia general vigente del artículo que se edita, el que se está escribiendo (si se crea) y la suma sugerida de un kit
+  const referencePrice = selectedItem ? getCurrentPrice(itemPrices, selectedItem.id, 'all')?.amount : undefined;
+  const summaryPrice = selectedItem ? referencePrice : (parseFloat(initialPrice) > 0 ? parseFloat(initialPrice) : undefined);
+  const kitSuggestion = formData.type === 'Kit' ? suggestedKitPrice(formData.composition ?? [], itemPrices) : undefined;
 
   return (
     <div className="flex flex-col h-full">
@@ -207,7 +227,7 @@ export function ItemCatalog() {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Catálogo de artículos</h2>
-          <p className="text-sm text-text-secondary">Gestión maestra de artículos físicos, materiales, libros y paquetes</p>
+          <p className="text-sm text-text-secondary">Gestión maestra de artículos físicos, materiales, libros y kits</p>
         </div>
         <div className="flex items-center gap-3">
           {can('log-catalogo:create') && (
@@ -220,6 +240,12 @@ export function ItemCatalog() {
       </div>
 
       {actionError.error && <p className="mb-4 rounded-xl bg-danger-tint px-4 py-3 text-sm text-danger-text" role="alert">{actionError.error}</p>}
+      {notice && (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-xl bg-success-tint border border-success-text/20 px-4 py-3 text-sm text-success-text" role="status">
+          <p>{notice}</p>
+          <button type="button" className="shrink-0 font-medium hover:underline" onClick={() => setNotice(null)}>Cerrar</button>
+        </div>
+      )}
 
       {/* Main Content Card */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
@@ -246,7 +272,7 @@ export function ItemCatalog() {
                 <option value="Material educativo">Material educativo</option>
                 <option value="Herramienta / adicional">Herramienta / adicional</option>
                 <option value="Libro">Libro</option>
-                <option value="Paquete / kit logístico">Paquete / kit logístico</option>
+                <option value="Kit">Kit</option>
               </select>
               <select 
                 value={statusFilter}
@@ -257,21 +283,20 @@ export function ItemCatalog() {
                 <option value="Activo">Activo</option>
                 <option value="Inactivo">Inactivo</option>
               </select>
-              <select 
-                value={isSoldFilter}
-                onChange={(e) => setIsSoldFilter(e.target.value)}
-                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[120px]"
+              <select
+                value={priceFilter}
+                onChange={(e) => setPriceFilter(e.target.value)}
+                className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[150px]"
               >
-                <option value="">¿Se vende?</option>
-                <option value="true">Sí</option>
-                <option value="false">No</option>
+                <option value="">Precio de referencia</option>
+                <option value="missing">Sin precio de referencia</option>
               </select>
               <select 
                 value={isDeliveredFilter}
                 onChange={(e) => setIsDeliveredFilter(e.target.value)}
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[150px]"
               >
-                <option value="">¿Entrega mat.?</option>
+                <option value="">¿Con matrícula?</option>
                 <option value="true">Sí</option>
                 <option value="false">No</option>
               </select>
@@ -280,7 +305,7 @@ export function ItemCatalog() {
                 onChange={(e) => setIsPackageFilter(e.target.value)}
                 className="h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent min-w-[120px]"
               >
-                <option value="">¿Es paquete?</option>
+                <option value="">¿Es kit?</option>
                 <option value="true">Sí</option>
                 <option value="false">No</option>
               </select>
@@ -297,7 +322,7 @@ export function ItemCatalog() {
                 <th className="px-6 py-3 font-medium">Nombre</th>
                 <th className="px-6 py-3 font-medium">Tipo</th>
                 <th className="px-6 py-3 font-medium">Costo Ref.</th>
-                <th className="px-6 py-3 font-medium">Venta</th>
+                <th className="px-6 py-3 font-medium">Precio ref.</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
                 <th className="px-6 py-3 font-medium text-right">Acciones</th>
               </tr>
@@ -314,18 +339,19 @@ export function ItemCatalog() {
                       <div>
                         <span className="font-medium text-text-primary block">{row.name}</span>
                         <div className="flex gap-2 mt-1">
-                          {row.isPackage && <span className="text-[10px] bg-surface-muted px-1.5 py-0.5 rounded text-text-secondary font-medium">Paquete</span>}
+                          {row.isPackage && <span className="text-[10px] bg-surface-muted px-1.5 py-0.5 rounded text-text-secondary font-medium">Kit</span>}
                           {row.isDeliveredOnEnrollment && <span className="text-[10px] bg-surface-muted px-1.5 py-0.5 rounded text-text-secondary font-medium">Matrícula</span>}
                         </div>
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-text-secondary">{row.type === 'Paquete / kit logístico' ? 'Paquete logístico' : row.type}</td>
+                  <td className="px-6 py-3 text-text-secondary">{row.type}</td>
                   <td className="px-6 py-3 text-text-secondary">$ {row.cost.toFixed(2)}</td>
                   <td className="px-6 py-3 text-text-secondary">
-                    {row.isSold
-                      ? `Sí (${getCurrentPrice(itemPrices, row.id, 'all')?.amount !== undefined ? '$ ' + getCurrentPrice(itemPrices, row.id, 'all')!.amount.toFixed(2) : 'sin precio'})`
-                      : 'No'}
+                    {(() => {
+                      const ref = getCurrentPrice(itemPrices, row.id, 'all');
+                      return ref ? `$ ${ref.amount.toFixed(2)}` : <Badge variant="warning">Sin precio de referencia</Badge>;
+                    })()}
                   </td>
                   <td className="px-6 py-3">
                     <Badge variant={row.status === 'Activo' ? 'success' : 'neutral'}>{row.status}</Badge>
@@ -335,7 +361,7 @@ export function ItemCatalog() {
                       items={[
                         { label: 'Ver detalles', onClick: () => handleOpenDetail(row) },
                         { label: 'Editar artículo', hidden: !can('log-catalogo:edit'), onClick: () => handleOpenForm(row) },
-                        ...(row.isSold && can('log-catalogo:edit_price') ? [{ label: 'Configurar precios de venta', onClick: () => setPriceItem(row) }] : []),
+                        ...(can('log-catalogo:edit_price') ? [{ label: 'Configurar precios', onClick: () => setPriceItem(row) }] : []),
                         { 
                           label: row.status === 'Activo' ? 'Desactivar' : 'Activar', hidden: !can('log-catalogo:edit'),
                           onClick: () => openConfirm({
@@ -455,7 +481,7 @@ export function ItemCatalog() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-text-primary text-lg mb-1">Material educativo</h3>
-                  <p className="text-sm text-text-secondary">Material metodológico propio del programa. No se vende.</p>
+                  <p className="text-sm text-text-secondary">Material metodológico propio del programa. Siempre se entrega con la matrícula.</p>
                 </div>
               </button>
 
@@ -468,7 +494,7 @@ export function ItemCatalog() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-text-primary text-lg mb-1">Herramienta / adicional</h3>
-                  <p className="text-sm text-text-secondary">Implementos físicos de apoyo. Puede venderse o entregarse.</p>
+                  <p className="text-sm text-text-secondary">Implementos físicos de apoyo. Se entregan con la matrícula o se venden.</p>
                 </div>
               </button>
 
@@ -481,20 +507,20 @@ export function ItemCatalog() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-text-primary text-lg mb-1">Libro</h3>
-                  <p className="text-sm text-text-secondary">Libro individual, controlado en stock y normalmente vendible.</p>
+                  <p className="text-sm text-text-secondary">Libro individual, controlado en stock. Se entrega con la matrícula y se vende.</p>
                 </div>
               </button>
 
               <button 
-                onClick={() => handleTypeSelect('Paquete / kit logístico')}
+                onClick={() => handleTypeSelect('Kit')}
                 className="flex items-start gap-4 p-5 rounded-xl border-2 border-border-soft hover:border-primary-accent hover:bg-primary-accent/5 transition-all text-left group"
               >
                 <div className="w-12 h-12 rounded-xl bg-primary-accent/10 text-primary-accent flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
                   <Layers size={24} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-text-primary text-lg mb-1">Paquete logístico</h3>
-                  <p className="text-sm text-text-secondary">Unidad compuesta que agrupa artículos y puede moverse cerrada.</p>
+                  <h3 className="font-semibold text-text-primary text-lg mb-1">Kit</h3>
+                  <p className="text-sm text-text-secondary">Unidad armada con varios artículos. Se arma y se desarma en Stock; una matrícula lo recibe como una sola unidad.</p>
                 </div>
               </button>
             </div>
@@ -532,7 +558,7 @@ export function ItemCatalog() {
                 {bulk && (
                   <div className={`rounded-xl p-4 text-sm border ${bulk.result.errors.length > 0 ? 'bg-danger-tint/40 border-danger-text/20 text-danger-text' : 'bg-success-tint border-success-text/20 text-success-text'}`}>
                     {bulk.result.errors.length === 0 ? (
-                      <p className="font-medium">{bulk.result.items.length} libro(s) listos para guardar ({bulk.result.prices.length} con precio de venta).</p>
+                      <p className="font-medium">{bulk.result.drafts.length} libro(s) listos para guardar, todos con su precio de referencia.</p>
                     ) : (
                       <>
                         <p className="font-medium mb-2">{bulk.result.errors.length} error(es) en el archivo. No se guardará nada hasta corregirlos:</p>
@@ -548,15 +574,15 @@ export function ItemCatalog() {
                 <div className="bg-info-tint/30 border border-info-text/20 rounded-xl p-4 text-sm text-info-text">
                   <p className="font-medium mb-2">Columnas requeridas en el archivo:</p>
                   <ul className="list-disc list-inside space-y-1 opacity-80">
-                    <li>SKU (Único)</li>
-                    <li>Nombre del Libro</li>
+                    <li>Nombre del Libro (no puede repetirse)</li>
                     <li>Estado (Activo/Inactivo)</li>
-                    <li>Unidad de Medida</li>
+                    <li>Unidad de Medida (Unidad, Juego, Kit, Caja, Paquete o Par)</li>
                     <li>Costo Referencial</li>
-                    <li>Precio de Venta (USD; 0 si no se vende)</li>
+                    <li>Precio de referencia (USD; obligatorio, mayor a 0)</li>
                     <li>Descripción</li>
                     <li>Tipo de encuadernado (Anillado/Encolado)</li>
                   </ul>
+                  <p className="mt-3 opacity-80">El código SKU de cada libro lo asigna el sistema al guardar: no se escribe. Si su archivo trae una columna «SKU», se ignora. Los libros se guardan como «se entrega con la matrícula»; se puede cambiar después en el catálogo.</p>
                 </div>
               </div>
             ) : (
@@ -568,21 +594,23 @@ export function ItemCatalog() {
                       {getTypeIcon(formData.type as ItemType)}
                     </div>
                     <h3 className="text-lg font-medium text-text-primary">
-                      {formData.type === 'Paquete / kit logístico' ? 'Paquete logístico' : formData.type}
+                      {formData.type}
                     </h3>
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5 col-span-2">
-                      <label className="text-sm font-medium text-text-primary">Código SKU <span className="text-error">*</span></label>
-                      <input 
-                        type="text" 
-                        className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent font-mono uppercase" 
-                        placeholder="Ej. ART-001" 
-                        value={formData.id || ''}
-                        onChange={(e) => setFormData({...formData, id: e.target.value})}
-                      />
-                      <p className="text-xs text-text-muted">Debe ser único en el sistema</p>
+                      <label className="text-sm font-medium text-text-primary">Código SKU</label>
+                      {selectedItem ? (
+                        <>
+                          <p className="h-10 flex items-center bg-surface-muted border border-border-soft rounded-lg px-3 text-sm font-mono">{selectedItem.id}</p>
+                          <p className="text-xs text-text-muted">Lo asignó el sistema y no cambia.</p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-text-muted">
+                          El sistema lo asigna al guardar (por ejemplo, {nextSku((formData.type ?? 'Material educativo') as ItemType, items.map(i => i.id))}): no hace falta escribirlo.
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-1.5 col-span-2">
                       <label className="text-sm font-medium text-text-primary">Nombre del Artículo <span className="text-error">*</span></label>
@@ -610,29 +638,66 @@ export function ItemCatalog() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-sm font-medium text-text-primary">Unidad de Medida</label>
-                      <input 
-                        type="text" 
-                        className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent" 
-                        placeholder="Ej. Unidad, Kit" 
+                      <select
+                        className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
                         value={formData.unit || ''}
                         onChange={(e) => setFormData({...formData, unit: e.target.value})}
-                      />
+                      >
+                        {!(ITEM_UNITS as readonly string[]).includes(formData.unit ?? '') && <option value="">Seleccionar...</option>}
+                        {ITEM_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium text-text-primary">Costo Referencial (USD)</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
-                      <input 
-                        type="number" min="0" step="0.01" 
-                        className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent" 
-                        placeholder="0.00" 
-                        value={formData.cost || ''}
-                        onChange={(e) => setFormData({...formData, cost: parseFloat(e.target.value) || 0})}
-                      />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-primary">Costo Referencial (USD)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
+                        <input
+                          type="number" min="0" step="0.01"
+                          className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                          placeholder="0.00"
+                          value={formData.cost || ''}
+                          onChange={(e) => setFormData({...formData, cost: parseFloat(e.target.value) || 0})}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium text-text-primary">Precio de referencia (USD) {!selectedItem && <span className="text-error">*</span>}</label>
+                      {selectedItem ? (
+                        <>
+                          <p className="h-10 flex items-center bg-surface-muted border border-border-soft rounded-lg px-3 text-sm font-medium">
+                            {referencePrice !== undefined ? `$ ${referencePrice.toFixed(2)}` : <span className="text-warning-text">Sin precio de referencia</span>}
+                          </p>
+                          {can('log-catalogo:edit_price') && (
+                            <button type="button" className="text-xs text-primary-accent hover:underline" onClick={() => setPriceItem(selectedItem)}>Configurar precios</button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
+                            <input
+                              type="number" min="0" step="0.01"
+                              className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
+                              placeholder="0.00"
+                              value={initialPrice}
+                              onChange={(e) => setInitialPrice(e.target.value)}
+                            />
+                          </div>
+                          {formData.type === 'Kit' && kitSuggestion !== undefined && (
+                            <button type="button" className="text-xs text-primary-accent hover:underline text-left" onClick={() => setInitialPrice(kitSuggestion.toFixed(2))}>
+                              Usar $ {kitSuggestion.toFixed(2)} (suma de los precios de sus artículos)
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
+                  <p className="text-xs text-text-muted -mt-3">
+                    El precio de referencia es el precio con el que se vende en Caja si hace falta (por ejemplo, si un alumno extravía el artículo). Las excepciones por sede y las nuevas vigencias se configuran después, en «Configurar precios».
+                  </p>
 
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-text-primary">Descripción</label>
@@ -647,13 +712,13 @@ export function ItemCatalog() {
 
                 {/* Columna Derecha: Configuración y Especiales */}
                 <div className="space-y-6">
-                  <h3 className="text-lg font-medium text-text-primary border-b border-border-soft pb-2">Configuración Logística y Comercial</h3>
+                  <h3 className="text-lg font-medium text-text-primary border-b border-border-soft pb-2">Uso del artículo</h3>
                   
                   <div className="space-y-4">
-                    {/* Tipo de libro - solo para Libro */}
+                    {/* Encuadernado - solo para Libro (es solo información del libro) */}
                     {formData.type === 'Libro' && (
                       <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-text-primary">Tipo de libro <span className="text-error">*</span></label>
+                        <label className="text-sm font-medium text-text-primary">Encuadernado <span className="text-error">*</span></label>
                         <select
                           className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm focus:outline-none focus:border-primary-accent"
                           value={formData.bindingType || ''}
@@ -663,85 +728,33 @@ export function ItemCatalog() {
                           <option value="Anillado">Anillado</option>
                           <option value="Encolado">Encolado</option>
                         </select>
-                        <p className="text-xs text-text-muted">Anillado: normalmente material de programa. Encolado: puede venderse.</p>
+                        <p className="text-xs text-text-muted">Solo es información del libro: no cambia cómo se entrega ni cómo se vende.</p>
                       </div>
                     )}
 
-                    {/* Venta - Oculto para Material Educativo y Paquete */}
-                    {formData.type !== 'Material educativo' && formData.type !== 'Paquete / kit logístico' && (
-                      <>
-                        <label className="flex items-center gap-3 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
-                            checked={formData.isSold}
-                            onChange={(e) => setFormData({...formData, isSold: e.target.checked})}
-                          />
-                          <span className="text-sm font-medium text-text-primary">¿Se vende?</span>
-                        </label>
-
-                        {formData.isSold && (
-                          <div className="pl-7 space-y-1.5">
-                            {selectedItem ? (
-                              <>
-                                <p className="text-sm text-text-primary">
-                                  Precio vigente: <span className="font-semibold">{(() => {
-                                    const cur = getCurrentPrice(itemPrices, selectedItem.id, 'all');
-                                    return cur ? `$ ${cur.amount.toFixed(2)}` : 'sin precio';
-                                  })()}</span>
-                                </p>
-                                {can('log-catalogo:edit_price') && (
-                                  <Button type="button" variant="secondary" className="text-xs h-8" onClick={() => setPriceItem(selectedItem)}>
-                                    Configurar precios de venta
-                                  </Button>
-                                )}
-                              </>
-                            ) : (
-                              <>
-                                <label className="text-sm font-medium text-text-primary">Precio general de venta (USD) <span className="text-error">*</span></label>
-                                <div className="relative w-1/2">
-                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm">$</span>
-                                  <input
-                                    type="number" min="0" step="0.01"
-                                    className="w-full h-10 bg-surface border border-border-soft rounded-lg pl-8 pr-3 text-sm focus:outline-none focus:border-primary-accent"
-                                    placeholder="0.00"
-                                    value={initialPrice}
-                                    onChange={(e) => setInitialPrice(e.target.value)}
-                                  />
-                                </div>
-                                <p className="text-xs text-text-muted">Excepciones por sede y nuevas vigencias se configuran después, desde «Configurar precios de venta».</p>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
-
                     <label className="flex items-center gap-3 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent" 
-                        checked={formData.isDeliveredOnEnrollment}
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent"
+                        checked={formData.type === 'Material educativo' ? true : !!formData.isDeliveredOnEnrollment}
+                        disabled={formData.type === 'Material educativo'}
                         onChange={(e) => setFormData({...formData, isDeliveredOnEnrollment: e.target.checked})}
                       />
-                      <span className="text-sm font-medium text-text-primary">¿Se entrega por matrícula?</span>
+                      <span className="text-sm font-medium text-text-primary">¿Se entrega con la matrícula?</span>
                     </label>
                     <p className="text-xs text-text-muted pl-7 -mt-2">
-                      Habilita el artículo para elegirlo en una Receta. No se entrega automáticamente a todos los alumnos.
+                      {formData.type === 'Material educativo'
+                        ? 'El material educativo siempre se entrega con la matrícula.'
+                        : 'Si es «sí», se podrá elegir en las recetas de matrícula; la verificación lo entrega y descuenta su stock. No se entrega solo a todos los alumnos.'}
                     </p>
 
-                    {/* Desempaquetado - Solo para Paquete */}
-                    {formData.type === 'Paquete / kit logístico' && (
-                      <label className="flex items-center gap-3 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          className="w-4 h-4 text-primary-accent border-border-soft rounded focus:ring-primary-accent" 
-                          checked={formData.allowUnpacking}
-                          onChange={(e) => setFormData({...formData, allowUnpacking: e.target.checked})}
-                        />
-                        <span className="text-sm font-medium text-text-primary">¿Permite desempaquetado?</span>
-                      </label>
-                    )}
+                    <div className="rounded-xl border border-border-soft bg-surface-muted/40 p-4 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Resumen</p>
+                      <ul className="list-disc list-inside space-y-1 text-sm text-text-secondary">
+                        {itemSummaryLines({ type: (formData.type ?? 'Material educativo') as ItemType, isDeliveredOnEnrollment: formData.type === 'Material educativo' ? true : !!formData.isDeliveredOnEnrollment }, summaryPrice)
+                          .map((line, i) => <li key={i}>{line}</li>)}
+                      </ul>
+                    </div>
                   </div>
 
                   {/* Campos Especiales por Tipo */}
@@ -833,14 +846,12 @@ export function ItemCatalog() {
                     </div>
                   )}
 
-                  {formData.type === 'Paquete / kit logístico' && (
+                  {formData.type === 'Kit' && (
                     <div className="mt-6 space-y-4">
                       <div className="border-b border-border-soft pb-2">
-                        <h3 className="text-lg font-medium text-text-primary">Composición del Paquete</h3>
+                        <h3 className="text-lg font-medium text-text-primary">Composición del kit</h3>
                         <p className="text-xs text-text-muted mt-1">
-                          {formData.allowUnpacking
-                            ? 'Obligatoria: define qué artículos se obtienen al desempaquetar.'
-                            : 'Opcional / informativa: el paquete se controla como UNA unidad de stock.'}
+                          Obligatoria: son los artículos con los que se arma el kit. Armar un kit descuenta cada artículo de su stock suelto y suma una unidad al stock del kit. No puede haber kits dentro de un kit.
                         </p>
                       </div>
                       <div className="flex items-end gap-2">
@@ -853,7 +864,7 @@ export function ItemCatalog() {
                           >
                             <option value="">Seleccionar artículo...</option>
                             {items
-                              .filter(i => i.id !== formData.id && i.status === 'Activo' && !(formData.composition ?? []).some(c => c.itemId === i.id))
+                              .filter(i => i.id !== formData.id && i.status === 'Activo' && i.type !== 'Kit' && !(formData.composition ?? []).some(c => c.itemId === i.id))
                               .map(i => <option key={i.id} value={i.id}>{i.name} ({i.id})</option>)}
                           </select>
                         </div>
@@ -909,7 +920,7 @@ export function ItemCatalog() {
                           ))}
                         </div>
                       ) : (
-                        <p className="text-sm text-text-secondary italic">No hay artículos en este paquete.</p>
+                        <p className="text-sm text-text-secondary italic">Agregue los artículos con los que se arma este kit.</p>
                       )}
                     </div>
                   )}
@@ -944,7 +955,7 @@ export function ItemCatalog() {
                 <p className="text-sm text-text-secondary font-mono mt-1">{selectedItem.id}</p>
                 <div className="flex gap-2 mt-2">
                   <Badge variant={selectedItem.status === 'Activo' ? 'success' : 'neutral'}>{selectedItem.status}</Badge>
-                  <Badge variant="primary">{selectedItem.type === 'Paquete / kit logístico' ? 'Paquete logístico' : selectedItem.type}</Badge>
+                  <Badge variant="primary">{selectedItem.type}</Badge>
                 </div>
               </div>
             </div>
@@ -959,11 +970,11 @@ export function ItemCatalog() {
                 <p className="text-sm font-medium text-text-primary">$ {selectedItem.cost.toFixed(2)}</p>
               </div>
               <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
-                <p className="text-xs text-text-secondary mb-1">¿Se vende?</p>
-                <p className="text-sm font-medium text-text-primary">{selectedItem.isSold ? `Sí (${getCurrentPrice(itemPrices, selectedItem.id, 'all') ? '$ ' + getCurrentPrice(itemPrices, selectedItem.id, 'all')!.amount.toFixed(2) : 'sin precio'})` : 'No'}</p>
+                <p className="text-xs text-text-secondary mb-1">Precio de referencia</p>
+                <p className="text-sm font-medium text-text-primary">{getCurrentPrice(itemPrices, selectedItem.id, 'all') ? '$ ' + getCurrentPrice(itemPrices, selectedItem.id, 'all')!.amount.toFixed(2) : <span className="text-warning-text">Sin precio de referencia</span>}</p>
               </div>
               <div className="bg-surface-muted p-3 rounded-xl border border-border-soft">
-                <p className="text-xs text-text-secondary mb-1">Entrega Matrícula</p>
+                <p className="text-xs text-text-secondary mb-1">Se entrega con la matrícula</p>
                 <p className="text-sm font-medium text-text-primary">{selectedItem.isDeliveredOnEnrollment ? 'Sí' : 'No'}</p>
               </div>
             </div>
@@ -1008,8 +1019,8 @@ export function ItemCatalog() {
             {selectedItem.isPackage && selectedItem.composition && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-text-primary">Composición del Paquete</h4>
-                  <span className="text-xs text-text-secondary">Permite desempaquetado: {selectedItem.allowUnpacking ? 'Sí' : 'No'}</span>
+                  <h4 className="text-sm font-medium text-text-primary">Composición del kit</h4>
+                  <span className="text-xs text-text-secondary">Se arma y se desarma en Stock (el desarme pide motivo)</span>
                 </div>
                 <div className="border border-border-soft rounded-xl overflow-hidden">
                   <table className="w-full text-sm text-left">

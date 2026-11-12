@@ -74,10 +74,13 @@ check('Un ajuste válido no tiene error', adj() === null);
 check('Un ajuste pide el registro de stock, una cantidad entera distinta de 0, el signo de su tipo y el motivo',
   !!adj({ locationId: '' }) && !!adj({ qty: 0 }) && !!adj({ qty: 1.5 }) && !!adj({ qty: 3 }) && !!adj({ type: 'Ajuste Positivo', qty: -3 }) && !!adj({ reason: '  ' }) && adj({ type: 'Regularización Administrativa', qty: 3 }) === null);
 check('El stock mínimo es un entero de 0 en adelante', minStockError(0) === null && minStockError(12) === null && !!minStockError(-1) && !!minStockError(2.5));
-check('Solo un paquete con composición se arma; para abrirlo debe permitirlo',
-  packageError(itemOf('ITM-KIT-BIENV'), 'pack') === null && packageError(itemOf('ITM-KIT-BIENV'), 'unpack') === null
-  && !!packageError(itemOf('ITM-LIB-K1'), 'pack') && !!packageError(undefined, 'pack')
-  && !!packageError({ ...itemOf('ITM-KIT-BIENV'), allowUnpacking: false }, 'unpack') && !!packageError({ ...itemOf('ITM-KIT-BIENV'), composition: [] }, 'pack'));
+check('Solo un kit con composición se arma o se desarma (ya no hay casilla «permite desempaquetado»: todo kit se puede desarmar, con motivo)',
+  packageError(itemOf('ITM-KIT-BIENV')) === null && !!packageError(itemOf('ITM-LIB-K1')) && !!packageError(undefined)
+  && !!packageError({ ...itemOf('ITM-KIT-BIENV'), composition: [] }));
+const stockPage = read('src/pages/logistics/Stock.tsx');
+check('La pantalla de Stock separa «Armar kits» de «Desarmar kits» y al desarmar pide el motivo (obligatorio) antes de llamar a la base',
+  /can\('log-stock:pack'\)/.test(stockPage) && /can\('log-stock:unpack'\)/.test(stockPage) && !/allowUnpacking/.test(stockPage) && /unpackReasonError\(unpackReason\)/.test(stockPage)
+  && /unpackPackage\(selectedStock\.id, unpackReason\.trim\(\)\)/.test(stockPage) && /Motivo del desempaquetado \*/.test(stockPage));
 check('Un ingreso de stock sigue pidiendo sede, artículo, cantidad entera y documento', stockEntryError({ branchId: 'ALM-001', itemId: 'ITM-LIB-K1', qty: 5, doc: 'F-1' }) === null
   && !!stockEntryError({ branchId: '', itemId: 'x', qty: 5, doc: 'F' }) && !!stockEntryError({ branchId: 'a', itemId: 'x', qty: 0, doc: 'F' }) && !!stockEntryError({ branchId: 'a', itemId: 'x', qty: 5, doc: ' ' }));
 
@@ -271,11 +274,16 @@ reset();
 const sinComponentes = stock.map(s => (s.branchId === 'ALM-001' && s.itemId === 'ITM-HER-02' ? { ...s, stock: 0 } : s));
 r = await packItem(repo, ctx({ stock: [...sinComponentes, kitAlm] }), 'STK-900', 'pack');
 check('Sin componentes suficientes no se empaqueta (con el componente y lo que falta) y no llega a la base', !r.ok && /Cartuchera/.test(r.error ?? '') && /disponible 0, requerido 1/.test(r.error ?? '') && calls.length === 0);
+reset();
 r = await packItem(repo, ctx({ stock: [...stock, kitAlm] }), 'STK-900', 'unpack');
-check('Abrir un paquete que lo permite llega a la base', r.ok && names2() === 'unpack');
+check('Desarmar un kit SIN motivo no llega a la base', !r.ok && /motivo/.test(r.error ?? '') && calls.length === 0);
+r = await packItem(repo, ctx({ stock: [...stock, kitAlm] }), 'STK-900', 'unpack', '   ');
+check('Un motivo en blanco tampoco', !r.ok && /motivo/.test(r.error ?? '') && calls.length === 0);
+r = await packItem(repo, ctx({ stock: [...stock, kitAlm] }), 'STK-900', 'unpack', ' Un alumno necesita solo la cartuchera ');
+check('Desarmar un kit con su motivo llega a la base (lugar, artículo y motivo sin espacios de más)', r.ok && names2() === 'unpack' && JSON.stringify(calls[0].args) === JSON.stringify(['ALM-001', 'ITM-KIT-BIENV', 'Un alumno necesita solo la cartuchera']));
 reset();
 r = await packItem(repo, ctx(), libAlm.id, 'pack');
-check('Un artículo que no es paquete no se empaqueta', !r.ok && /no es un paquete/.test(r.error ?? '') && calls.length === 0);
+check('Un artículo que no es kit no se empaqueta', !r.ok && /no es un kit/.test(r.error ?? '') && calls.length === 0);
 r = await setMinStock(repo, ctx(), libAlm.id, -1);
 check('Un mínimo negativo no llega a la base', !r.ok && calls.length === 0);
 r = await setMinStock(repo, ctx(), libAlm.id, 120);
@@ -452,7 +460,7 @@ check('Las acciones que mueven stock o guardan Logística son asíncronas y devu
 }), asyncActions.filter(a => !new RegExp(`\\n  ${a}: [\\s\\S]*?Promise<StockResult`).test(iface)).join());
 const gate = read('src/components/auth/AccessGate.tsx');
 check('Logística se lee de la base al iniciar sesión (antes de montar el sistema), junto con roles, cuentas, sedes, catálogo y artículos',
-  /loadLogistics\(logisticsRepo\)/.test(gate) && /loaded\.items, loaded\.logistics, loaded\.people, loaded\.money\)/.test(gate) && /logistics=\{logistics\}/.test(read('src/App.tsx')));
+  /loadLogistics\(logisticsRepo\)/.test(gate) && /loaded\.items, loaded\.logistics, loaded\.people, loaded\.money, loaded\.cashBoxes\)/.test(gate) && /logistics=\{logistics\}/.test(read('src/App.tsx')));
 const hook = read('src/hooks/useLogistics.ts');
 check('Después de cada operación se vuelve a leer lo que cambió (se muestra lo que de verdad quedó guardado) y el kardex solo pide lo nuevo',
   /settle/.test(hook) && /refreshLedger/.test(hook) && /kardexId: kardexRef\.current\[0\]\?\.id/.test(hook) && /kardexView\(kardexLines, names\)/.test(hook));

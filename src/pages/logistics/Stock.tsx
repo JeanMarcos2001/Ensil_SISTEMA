@@ -12,7 +12,7 @@ import { todayLocalISO } from '../../utils/schedule';
 import { useTablePagination } from '../../hooks/useTablePagination';
 import { useData } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
-import { signedAdjustment } from '../../utils/inventory';
+import { signedAdjustment, unpackReasonError, UNPACK_REASON_MAX } from '../../utils/inventory';
 
 export function Stock() {
   const { stockItems, items, stockLocations, unpackPackage, packPackage, registerStockEntry, addAdjustment, updateMinStock, currentBranchId, can } = useData();
@@ -22,6 +22,9 @@ export function Stock() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isNewEntryOpen, setIsNewEntryOpen] = useState(false);
   const [isUnpackOpen, setIsUnpackOpen] = useState(false);
+  // Desarmar un kit siempre queda registrado: el motivo es obligatorio
+  const [unpackReason, setUnpackReason] = useState('');
+  const [unpackError, setUnpackError] = useState<string | null>(null);
   const [isPackOpen, setIsPackOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isEditMinStockOpen, setIsEditMinStockOpen] = useState(false);
@@ -53,6 +56,8 @@ export function Stock() {
 
   const handleOpenUnpack = (stock: any) => {
     setSelectedStock(stock);
+    setUnpackReason('');
+    setUnpackError(null);
     setIsUnpackOpen(true);
   };
 
@@ -262,10 +267,10 @@ export function Stock() {
                           { label: 'Ajustar stock', hidden: !can('log-ajustes:create'), onClick: () => handleOpenAdjust(row) },
                           { label: 'Transferir', hidden: !can('log-transfer:req_transfer'), onClick: () => { window.location.href = '/logistics/transfers'; } },
                           ...(item?.isPackage && can('log-stock:pack') ? [
-                            { label: 'Empaquetar', onClick: () => handleOpenPack(row) }
+                            { label: 'Empaquetar kit', onClick: () => handleOpenPack(row) }
                           ] : []),
-                          ...(item?.isPackage && item?.allowUnpacking && can('log-stock:pack') ? [
-                            { label: 'Desempaquetar', onClick: () => handleOpenUnpack(row) }
+                          ...(item?.isPackage && can('log-stock:unpack') ? [
+                            { label: 'Desempaquetar kit', onClick: () => handleOpenUnpack(row) }
                           ] : []),
                           { label: 'Ver en Kardex', hidden: !can('log-kardex:view'), onClick: () => { window.location.href = '/logistics/kardex'; } },
                         ]} 
@@ -609,8 +614,11 @@ export function Stock() {
             <Button variant="ghost" onClick={() => setIsUnpackOpen(false)}>Cancelar</Button>
             <Button variant="primary" disabled={busy} onClick={async () => {
               if (selectedStock && !busy) {
+                const noReason = unpackReasonError(unpackReason);
+                if (noReason) { setUnpackError(noReason); return; }
+                setUnpackError(null);
                 setBusy(true);
-                const res = await unpackPackage(selectedStock.id);
+                const res = await unpackPackage(selectedStock.id, unpackReason.trim());
                 setBusy(false);
                 setActionError(res.ok ? null : res.error || 'No se pudo desempaquetar.');
                 setIsUnpackOpen(false);
@@ -624,10 +632,10 @@ export function Stock() {
           return (
             <div className="space-y-4">
               <p className="text-sm text-text-secondary">
-                ¿Está seguro que desea desempaquetar una unidad de <strong>{item?.name}</strong>?
+                ¿Está seguro que desea desempaquetar una unidad del kit <strong>{item?.name}</strong>?
               </p>
               <div className="bg-warning-tint/30 border border-warning-text/20 rounded-xl p-3 text-xs text-warning-text">
-                Esta acción restará 1 unidad del paquete y sumará sus componentes al stock individual de esta sede.
+                Esta acción restará 1 unidad del kit y sumará sus artículos al stock individual de esta sede. Queda registrada en el kardex, con su motivo, quién y cuándo.
               </div>
               <div className="space-y-2">
                 <span className="text-xs font-semibold text-text-muted uppercase">Componentes a ingresar:</span>
@@ -639,6 +647,18 @@ export function Stock() {
                     </li>
                   ))}
                 </ul>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-text-secondary" htmlFor="unpack-reason">Motivo del desempaquetado *</label>
+                <textarea
+                  id="unpack-reason"
+                  maxLength={UNPACK_REASON_MAX}
+                  value={unpackReason}
+                  onChange={(e) => { setUnpackReason(e.target.value); if (unpackError) setUnpackError(null); }}
+                  className="w-full h-20 bg-surface border border-border-soft rounded-xl p-3 text-sm focus:border-primary-accent outline-none resize-none"
+                  placeholder="Ej. Un alumno necesita solo la cartuchera y no hay unidades sueltas"
+                />
+                {unpackError && <p className="text-xs text-danger-text" role="alert">{unpackError}</p>}
               </div>
             </div>
           );
@@ -671,10 +691,10 @@ export function Stock() {
           return (
             <div className="space-y-4">
               <p className="text-sm text-text-secondary">
-                ¿Está seguro que desea empaquetar una unidad de <strong>{item?.name}</strong>?
+                ¿Está seguro que desea empaquetar una unidad del kit <strong>{item?.name}</strong>?
               </p>
               <div className="bg-info-tint/30 border border-info-text/20 rounded-xl p-3 text-xs text-info-text">
-                Esta acción restará los componentes necesarios del stock individual y sumará 1 unidad al paquete en esta sede.
+                Esta acción restará los artículos necesarios del stock individual y sumará 1 unidad al kit en esta sede.
               </div>
               <div className="space-y-2">
                 <span className="text-xs font-semibold text-text-muted uppercase">Componentes a descontar:</span>

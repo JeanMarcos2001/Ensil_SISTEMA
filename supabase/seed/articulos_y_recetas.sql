@@ -9,15 +9,15 @@
 
 begin;
 
-insert into public.articulos (id, nombre, estado, tipo, descripcion, unidad, costo, se_vende, se_entrega_en_matricula, es_paquete, permite_desempaquetar, sesiones, gimnasia_por_sesion, entrenamientos_por_sesion, modo_entrenamiento, entrenamientos_variables, tipo_libro, encuadernado, composicion) values
-  ('ITM-LIB-K1', 'Libro Kids Nivel 1', 'Activo', 'Libro', 'Libro de nivel 1 para programa Kids', 'Unidad', 45, true, true, false, false, null, null, null, null, null, 'Individual', 'Encolado', null),
-  ('ITM-MAT-01', 'Material Lógico Matemático', 'Activo', 'Material educativo', 'Material para desarrollo lógico', 'Unidad', 20, false, true, false, false, 12, 2, 3, 'General', null, null, null, null),
-  ('ITM-HER-01', 'Mochila Institucional', 'Activo', 'Herramienta / adicional', 'Mochila con logo ENSIL', 'Unidad', 25, true, true, false, false, null, null, null, null, null, null, null, null),
-  ('ITM-HER-02', 'Cartuchera', 'Activo', 'Herramienta / adicional', 'Cartuchera básica', 'Unidad', 5, true, true, false, false, null, null, null, null, null, null, null, null)
+insert into public.articulos (id, nombre, estado, tipo, descripcion, unidad, costo, se_entrega_en_matricula, es_paquete, sesiones, gimnasia_por_sesion, entrenamientos_por_sesion, modo_entrenamiento, entrenamientos_variables, tipo_libro, encuadernado, composicion) values
+  ('ITM-LIB-K1', 'Libro Kids Nivel 1', 'Activo', 'Libro', 'Libro de nivel 1 para programa Kids', 'Unidad', 45, true, false, null, null, null, null, null, 'Individual', 'Encolado', null),
+  ('ITM-MAT-01', 'Material Lógico Matemático', 'Activo', 'Material educativo', 'Material para desarrollo lógico', 'Unidad', 20, true, false, 12, 2, 3, 'General', null, null, null, null),
+  ('ITM-HER-01', 'Mochila Institucional', 'Activo', 'Herramienta / adicional', 'Mochila con logo ENSIL', 'Unidad', 25, true, false, null, null, null, null, null, null, null, null),
+  ('ITM-HER-02', 'Cartuchera', 'Activo', 'Herramienta / adicional', 'Cartuchera básica', 'Unidad', 5, true, false, null, null, null, null, null, null, null, null)
 on conflict do nothing;
 
-insert into public.articulos (id, nombre, estado, tipo, descripcion, unidad, costo, se_vende, se_entrega_en_matricula, es_paquete, permite_desempaquetar, sesiones, gimnasia_por_sesion, entrenamientos_por_sesion, modo_entrenamiento, entrenamientos_variables, tipo_libro, encuadernado, composicion) values
-  ('ITM-KIT-BIENV', 'Kit Bienvenida (Mochila + Útiles)', 'Activo', 'Paquete / kit logístico', 'Kit entregado al matricular', 'Kit', 80, false, true, true, true, null, null, null, null, null, null, null, '[{"articulo_id":"ITM-HER-01","cantidad":1},{"articulo_id":"ITM-HER-02","cantidad":1}]'::jsonb)
+insert into public.articulos (id, nombre, estado, tipo, descripcion, unidad, costo, se_entrega_en_matricula, es_paquete, sesiones, gimnasia_por_sesion, entrenamientos_por_sesion, modo_entrenamiento, entrenamientos_variables, tipo_libro, encuadernado, composicion) values
+  ('ITM-KIT-BIENV', 'Kit Bienvenida (Mochila + Útiles)', 'Activo', 'Kit', 'Kit entregado al matricular', 'Kit', 80, true, true, null, null, null, null, null, null, null, '[{"articulo_id":"ITM-HER-01","cantidad":1},{"articulo_id":"ITM-HER-02","cantidad":1}]'::jsonb)
 on conflict do nothing;
 
 insert into public.articulo_precios (id, articulo_id, sede_id, monto, vigente_desde, vigente_hasta, creado_por) values

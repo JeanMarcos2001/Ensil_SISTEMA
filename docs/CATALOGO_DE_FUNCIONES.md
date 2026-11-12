@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**53 funcionalidades · 187 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
+**53 funcionalidades · 188 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -118,7 +118,8 @@ Cómo leerlo:
 |---|---|---|---|---|---|
 | **Ver el stock** · menú «Stock»<br><code>log-stock:view</code> | ver | — | — | Stock, Artículo, Filial → — | — |
 | **Definir el stock mínimo**<br><code>log-stock:edit_min</code> | editar | Ver el stock | — | — → Stock | — |
-| **Armar y abrir paquetes**<br><code>log-stock:pack</code> | operar | Ver el stock | — | Artículo → Stock, Kardex | — |
+| **Armar kits (empaquetar)**<br><code>log-stock:pack</code> | operar | Ver el stock | — | Artículo → Stock, Kardex | — |
+| **Desarmar kits (desempaquetar)** 🛡 control<br><code>log-stock:unpack</code> | operar | Ver el stock | — | Artículo → Stock, Kardex | — |
 | **Registrar un ingreso de stock (compra o reposición)** 🛡 control<br><code>log-stock:entry</code> | crear | Ver el stock | — | Artículo → Stock, Kardex | — |
 
 ### Envíos `log-envios`

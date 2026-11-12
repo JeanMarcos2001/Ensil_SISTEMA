@@ -106,7 +106,7 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
   const entry = useCallback(async (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }) => settle(await registerStockEntry(repo, input)), [repo, settle]);
   const adjust = useCallback(async (input: AdjustmentInput, stockId: string) => settle(await registerAdjustment(repo, context(), { stockId, ...input })), [repo, settle]);
   const pack = useCallback(async (stockId: string) => settle(await packItem(repo, context(), stockId, 'pack')), [repo, settle]);
-  const unpack = useCallback(async (stockId: string) => settle(await packItem(repo, context(), stockId, 'unpack')), [repo, settle]);
+  const unpack = useCallback(async (stockId: string, reason: string) => settle(await packItem(repo, context(), stockId, 'unpack', reason)), [repo, settle]);
   const minStock = useCallback(async (stockId: string, value: number) => settle(await setMinStock(repo, context(), stockId, value)), [repo, settle]);
   const sell = useCallback(async (input: { branchId: string; itemId: string; qty: number; doc: string; observation: string }) => settle(await sellFromStock(repo, input)), [repo, settle]);
   const deliver = useCallback(async (input: { branchId: string; enrollmentId: string; student: string; lines: { itemId: string; quantity: number }[] }) => settle(await deliverFromStock(repo, input)), [repo, settle]);

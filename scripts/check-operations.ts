@@ -151,7 +151,7 @@ check('Un ingreso depositado no se reversa; reversar el lote lo libera', (() => 
 })());
 
 // ================================================================ Caja chica
-const pm = (id: string, over: Partial<PettyCashMovement> = {}): PettyCashMovement => ({ id, date: '2026-10-20T17:00:00.000Z', kind: 'Ingreso', category: 'Reposición de fondo', concept: 'Reposición', amount: 1000, method: 'Efectivo', user: 'Admin', status: 'Aplicado', ...over });
+const pm = (id: string, over: Partial<PettyCashMovement> = {}): PettyCashMovement => ({ id, branchId: 'FIL-002', date: '2026-10-20T17:00:00.000Z', kind: 'Ingreso', category: 'Reposición de fondo', concept: 'Reposición', amount: 1000, method: 'Efectivo', user: 'Admin', status: 'Aplicado', ...over });
 const petty = [pm('CCH-1'), pm('CCH-2', { kind: 'Egreso', category: 'Movilidad', concept: 'Taxi', amount: 25 }), pm('CCH-3', { kind: 'Egreso', category: 'Limpieza', concept: 'Jabón', amount: 120, date: '2026-09-28T17:00:00.000Z' }), pm('CCH-4', { kind: 'Egreso', amount: 50, status: 'Reversado' })];
 check('Saldo de caja chica: solo lo aplicado', pettyBalance(petty) === 855);
 check('Totales del mes actual', (() => { const t = pettyMonthTotals(petty, TODAY); return t.income === 1000 && t.expense === 25; })());
@@ -217,14 +217,31 @@ check('Si queda otra vencida, sigue atrasado', (() => {
 check('CSV: comas, comillas y punto y coma', parseCsv('a,b\r\n"x, y",2\r\n').length === 2 && parseCsv('a;b\nx;"y;z"').pop()?.[1] === 'y;z' && parseCsv('﻿a,b\n1,2')[0][0] === 'a');
 const header = BULK_HEADERS.join(',');
 const rowsOf = (body: string) => parseCsv(`${header}\n${body}`);
-check('Lote válido: libros, precios y vendible', (() => {
-  const r = buildBookBatch(rowsOf('lib-1,Libro Uno,Activo,Unidad,40,60,Desc,Encolado\nLIB-2,Libro Dos,,,10,0,,Anillado'), [{ id: 'X' }]);
-  return r.errors.length === 0 && r.items.length === 2 && r.items[0].id === 'LIB-1' && r.items[0].isSold && !r.items[1].isSold && r.items[1].unit === 'Unidad' && r.prices.length === 1 && r.prices[0].amount === 60;
+check('Lote válido: libros sin SKU (lo asigna el sistema), cada uno con su precio de referencia y entregable con la matrícula', (() => {
+  const r = buildBookBatch(rowsOf('Libro Uno,Activo,Unidad,40,60,Desc,Encolado\nLibro Dos,,,10,55.5,,Anillado'), [{ name: 'Otro libro', type: 'Libro' }]);
+  return r.errors.length === 0 && r.drafts.length === 2 && !('id' in r.drafts[0].item) && r.drafts[0].item.name === 'Libro Uno' && r.drafts[0].price === 60
+    && r.drafts[1].price === 55.5 && r.drafts[1].item.unit === 'Unidad' && r.drafts.every(d => d.item.isDeliveredOnEnrollment && !d.item.isPackage);
+})());
+check('El precio de referencia es obligatorio en cada fila (vacío, cero o texto → error con su línea)', (() => {
+  const r = buildBookBatch(rowsOf('Libro A,Activo,Unidad,40,,Desc,Encolado\nLibro B,Activo,Unidad,40,0,,Anillado\nLibro C,Activo,Unidad,40,abc,,Anillado'), []);
+  return r.drafts.length === 0 && r.errors.filter(e => /precio de referencia/i.test(e.message)).map(e => e.line).join() === '2,3,4';
+})());
+check('La unidad de medida sale de la lista corta (sin importar mayúsculas ni tildes); otra se rechaza', (() => {
+  const ok = buildBookBatch(rowsOf('Libro A,Activo,juego,40,10,,Encolado\nLibro B,Activo,PAR,40,10,,Anillado'), []);
+  const bad = buildBookBatch(rowsOf('Libro C,Activo,Und.,40,10,,Encolado'), []);
+  return ok.errors.length === 0 && ok.drafts.map(d => d.item.unit).join() === 'Juego,Par' && bad.errors.some(e => e.line === 2 && /unidad de medida/i.test(e.message));
+})());
+check('La plantilla de carga masiva no trae la columna SKU', !BULK_HEADERS.some(h => /sku/i.test(h)) && BULK_HEADERS.length === 7);
+check('Un archivo con la columna SKU de la plantilla anterior sigue sirviendo (esa columna se ignora)', (() => {
+  const r = buildBookBatch(parseCsv('SKU,Nombre del libro,Estado,Unidad de medida,Costo referencial,Precio de venta,Descripción,Tipo de encuadernado\nLIB-1,Libro Uno,Activo,Unidad,40,60,Desc,Encolado'), []);
+  return r.errors.length === 0 && r.drafts.length === 1 && r.drafts[0].item.name === 'Libro Uno' && r.drafts[0].price === 60;
 })());
 check('Lote con errores: línea y motivo, nada se guarda', (() => {
-  const r = buildBookBatch(rowsOf('X,Repetido,Activo,Unidad,1,1,,Encolado\nLIB-3,,Activo,Unidad,abc,1,,Otro\nLIB-4,Bien,Activo,Unidad,1,1,,Anillado\nLIB-4,Repite,Activo,Unidad,1,1,,Anillado'), [{ id: 'X' }]);
-  return r.errors.some(e => e.line === 2 && /ya existe/.test(e.message)) && r.errors.some(e => e.line === 3 && /nombre/.test(e.message)) && r.errors.some(e => e.line === 3 && /costo/.test(e.message)) && r.errors.some(e => e.line === 3 && /encuadernado/.test(e.message)) && r.errors.some(e => e.line === 5 && /repetido/.test(e.message));
+  const r = buildBookBatch(rowsOf('Existente,Activo,Unidad,1,1,,Encolado\n,Activo,Unidad,abc,1,,Otro\nBien,Activo,Unidad,1,1,,Anillado\nBIÉN ,Activo,Unidad,1,1,,Anillado'), [{ name: 'existente', type: 'Libro' }]);
+  return r.errors.some(e => e.line === 2 && /ya existe/i.test(e.message)) && r.errors.some(e => e.line === 3 && /nombre/.test(e.message)) && r.errors.some(e => e.line === 3 && /costo/.test(e.message))
+    && r.errors.some(e => e.line === 3 && /encuadernado/.test(e.message)) && r.errors.some(e => e.line === 5 && /repetido/.test(e.message)) && r.drafts.length === 1;
 })());
+check('El nombre de un libro solo choca con otro LIBRO del catálogo (no con una herramienta que se llame igual)', buildBookBatch(rowsOf('Mochila,Activo,Unidad,1,1,,Encolado'), [{ name: 'Mochila', type: 'Herramienta / adicional' }]).errors.length === 0);
 check('Archivo sin columnas o vacío', buildBookBatch(parseCsv('a,b\n1,2'), []).errors.length === 1 && buildBookBatch([], []).errors.length === 1 && buildBookBatch(parseCsv(header), []).errors.length === 1);
 
 // ================================================================ CSV y documento imprimible

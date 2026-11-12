@@ -13,15 +13,15 @@ const HEADERS = ['Fecha', 'Tipo', 'Concepto', 'Referencia', 'Medio', 'Sede', 'Mo
 
 /** Reportes → Caja: ingresos y egresos por moneda, lo depositado, las reversas, los cierres con su diferencia y la caja chica. */
 export function CashReport() {
-  const { cashMovements, pettyCashMovements, cashClosures, branches, pettyFund, can } = useData();
+  const { cashMovements, pettyCashMovements, cashClosures, branches, pettyFundOf, can } = useData();
   const today = todayLocalISO();
   const { range, preset, setPreset, setRange } = useRange('mes');
   const [branchId, setBranchId] = useDefaultBranch();
   const [currency, setCurrency] = useState<'PEN' | 'USD'>('PEN');
 
-  const ctx = useMemo(() => ({ cashMovements, pettyCashMovements, cashClosures, branches, fund: pettyFund }), [cashMovements, pettyCashMovements, cashClosures, branches, pettyFund]);
+  const ctx = useMemo(() => ({ cashMovements, pettyCashMovements, cashClosures, branches, fund: pettyFundOf(branchId), fundOf: pettyFundOf }), [cashMovements, pettyCashMovements, cashClosures, branches, pettyFundOf, branchId]);
   const caja = useMemo(() => cashReport(ctx, { range, branchId, currency }), [ctx, range, branchId, currency]);
-  const chica = useMemo(() => pettyReport(ctx, range), [ctx, range]);
+  const chica = useMemo(() => pettyReport(ctx, range, branchId), [ctx, range, branchId]);
   if (!can(PERM.reportCash)) return <NoAccess />;
 
   const sym = currency;

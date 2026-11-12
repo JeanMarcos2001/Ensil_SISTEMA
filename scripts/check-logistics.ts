@@ -54,7 +54,7 @@ check('La sede de una transferencia debe estar activa', /inactiva/.test(transfer
 check('Sin almacén definido tampoco hay transferencias', /Organización → Almacenes/.test(transferRouteError('PIU', 'CHI', noWarehouse) ?? ''));
 
 // ------------------------------------------------------------------------------------------------------------------ Recetas
-const item = (id: string, extra: Partial<Item> = {}): Item => ({ id, name: `Artículo ${id}`, status: 'Activo', type: 'Libro', description: '', unit: 'u', cost: 1, isSold: false, isDeliveredOnEnrollment: true, ...extra } as Item);
+const item = (id: string, extra: Partial<Item> = {}): Item => ({ id, name: `Artículo ${id}`, status: 'Activo', type: 'Libro', description: '', unit: 'Unidad', cost: 1, isDeliveredOnEnrollment: true, ...extra } as Item);
 const items = [item('LIB'), item('MAT'), item('OFF', { status: 'Inactivo' }), item('NOENT', { isDeliveredOnEnrollment: false })];
 const R = (id: string, extra: Partial<Recipe> = {}): Recipe => ({
   id, name: `Receta ${id}`, programId: 'P1', levelId: 'N1', branchIds: [], applyToAllBranches: true, status: 'Activo', items: [{ itemId: 'LIB', quantity: 1 }],

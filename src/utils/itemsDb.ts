@@ -13,7 +13,7 @@ type Money = number | string;
 
 export interface ArticuloRow {
   id: string; nombre: string; estado: Estado; tipo: ItemType; descripcion: string; unidad: string; costo: Money;
-  se_vende: boolean; se_entrega_en_matricula: boolean; es_paquete: boolean; permite_desempaquetar: boolean;
+  se_entrega_en_matricula: boolean; es_paquete: boolean;
   sesiones: number | null; gimnasia_por_sesion: number | null; entrenamientos_por_sesion: number | null;
   modo_entrenamiento: 'General' | 'Variable' | null; entrenamientos_variables: { sesion: number; entrenamientos: number }[] | null;
   tipo_libro: 'Individual' | 'Paquete/Juego' | null; encuadernado: 'Anillado' | 'Encolado' | null;
@@ -33,7 +33,7 @@ const nul = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
 export const itemFromRow = (r: ArticuloRow): Item => ({
   id: r.id, name: r.nombre, status: r.estado, type: r.tipo, description: r.descripcion ?? '', unit: r.unidad, cost: Number(r.costo),
-  isSold: r.se_vende, isDeliveredOnEnrollment: r.se_entrega_en_matricula, isPackage: r.es_paquete, allowUnpacking: r.permite_desempaquetar,
+  isDeliveredOnEnrollment: r.se_entrega_en_matricula, isPackage: r.es_paquete,
   ...(r.sesiones !== null ? { sessions: Number(r.sesiones) } : {}),
   ...(r.gimnasia_por_sesion !== null ? { gymnasticsPerSession: Number(r.gimnasia_por_sesion) } : {}),
   ...(r.entrenamientos_por_sesion !== null ? { trainingsPerSession: Number(r.entrenamientos_por_sesion) } : {}),
@@ -46,7 +46,7 @@ export const itemFromRow = (r: ArticuloRow): Item => ({
 
 export const itemToRow = (i: Item): ArticuloRow => ({
   id: i.id.trim(), nombre: i.name.trim(), estado: i.status, tipo: i.type, descripcion: i.description ?? '', unidad: (i.unit ?? '').trim() || 'Unidad', costo: i.cost ?? 0,
-  se_vende: !!i.isSold, se_entrega_en_matricula: !!i.isDeliveredOnEnrollment, es_paquete: !!i.isPackage, permite_desempaquetar: !!i.allowUnpacking,
+  se_entrega_en_matricula: !!i.isDeliveredOnEnrollment, es_paquete: !!i.isPackage,
   sesiones: nul(i.sessions), gimnasia_por_sesion: nul(i.gymnasticsPerSession), entrenamientos_por_sesion: nul(i.trainingsPerSession),
   modo_entrenamiento: nul(i.trainingMode),
   entrenamientos_variables: i.trainingMode === 'Variable' || (i.variableTrainings?.length ?? 0) > 0
@@ -55,7 +55,7 @@ export const itemToRow = (i: Item): ArticuloRow => ({
   composicion: i.isPackage || (i.composition?.length ?? 0) > 0 ? (i.composition ?? []).map(c => ({ articulo_id: c.itemId, cantidad: c.quantity })) : null,
 });
 
-/** Completa el nombre de cada componente de un paquete con el nombre actual de su artículo (si ya no existe, queda su SKU). */
+/** Completa el nombre de cada componente de un kit con el nombre actual de su artículo (si ya no existe, queda su SKU). */
 export function withComponentNames(items: Item[]): Item[] {
   const names = new Map(items.map(i => [i.id, i.name]));
   return items.map(i => (i.composition ? { ...i, composition: i.composition.map(c => ({ ...c, name: names.get(c.itemId) ?? c.itemId })) } : i));
@@ -87,6 +87,10 @@ export const recipeToRow = (r: Recipe): RecetaRow => ({
 /** Un id de receta repetido por dos personas que crean a la vez: se reintenta con el siguiente. */
 export const isRecipeIdConflict = (e: DbErrorLike | null | undefined): boolean =>
   !!e && e.code === '23505' && /recetas_pkey/.test(`${e.message ?? ''} ${e.details ?? ''}`.toLowerCase());
+
+/** Un SKU repetido por dos personas que crean a la vez: se reintenta con el siguiente. */
+export const isItemIdConflict = (e: DbErrorLike | null | undefined): boolean =>
+  !!e && e.code === '23505' && /articulos_pkey|articulos_id_unico/.test(`${e.message ?? ''} ${e.details ?? ''}`.toLowerCase());
 
 export function itemsErrorMessage(e: DbErrorLike | null | undefined): string {
   if (!e) return 'No se pudo guardar. Intente de nuevo.';
