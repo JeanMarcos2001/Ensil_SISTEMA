@@ -312,7 +312,7 @@ check('Las acciones del dinero son asíncronas y devuelven { ok, error }', async
 check('Esas acciones no están entre las que lanzan error al negar el permiso (devuelven resultado)', asyncActions.every(a => !THROWS_ON_DENIAL.has(a)));
 
 const gate = read('src/components/auth/AccessGate.tsx');
-check('Las matrículas y el dinero se leen de la base al iniciar sesión, junto con lo demás', /loadMoney\(moneyRepo\)/.test(gate) && /loaded\.people, loaded\.money, loaded\.cashBoxes\)/.test(gate) && /money=\{money\}/.test(read('src/App.tsx')) && /money: moneyData/.test(ctxSrc));
+check('Las matrículas y el dinero se leen de la base al iniciar sesión, junto con lo demás', /loadMoney\(moneyRepo\)/.test(gate) && /loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /money=\{money\}/.test(read('src/App.tsx')) && /money: moneyData/.test(ctxSrc));
 const awaits = (file: string, re: RegExp) => re.test(read(file));
 check('Las pantallas esperan la respuesta de la base antes de seguir y apagan el botón mientras guardan',
   awaits('src/components/payments/RegisterPaymentModal.tsx', /await registerPayment\(/) && awaits('src/components/payments/RegisterPaymentModal.tsx', /disabled=\{saving\}/)

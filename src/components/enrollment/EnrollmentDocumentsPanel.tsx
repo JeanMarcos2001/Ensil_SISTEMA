@@ -23,7 +23,7 @@ export function EnrollmentDocumentsPanel({ enrollmentId }: { enrollmentId: strin
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const ctx = useMemo(() => data.documentContextOf(enrollmentId), [enrollmentId, data.enrollments, data.students, data.guardians, data.plans, data.schedules, data.programs, data.branches, data.companies, data.contractTemplate]);
+  const ctx = useMemo(() => data.documentContextOf(enrollmentId), [enrollmentId, data.enrollments, data.students, data.guardians, data.plans, data.schedules, data.programs, data.branches, data.companies, data.contractTemplate, data.contractTemplates]);
   if (!ctx) return null;
   const kinds: DocKind[] = ['contract', 'ficha'];
   const built: Record<DocKind, BuiltDocument> = { contract: buildDocument('contract', ctx), ficha: buildDocument('ficha', ctx) };
@@ -47,7 +47,7 @@ export function EnrollmentDocumentsPanel({ enrollmentId }: { enrollmentId: strin
 
   return (
     <div className="space-y-4">
-      {!data.contractTemplate.reviewed && (
+      {!ctx.template.reviewed && (
         <div className="flex gap-2 text-sm bg-warning-tint/60 border border-warning-text/20 rounded-xl px-4 py-2.5 text-text-primary">
           <AlertTriangle size={16} className="shrink-0 mt-0.5 text-warning-text" />
           <p>La plantilla del contrato aún es un <strong>texto modelo</strong>: el área legal debe revisarla y marcarla como revisada en Configuración → Documentos → Plantillas de contrato y ficha antes de firmar contratos reales.</p>

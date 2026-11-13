@@ -279,7 +279,7 @@ async function run() {
     !['addProgram', 'updateProgram', 'deleteProgram', 'addLevel', 'updateLevel', 'deleteLevel', 'addPaymentType', 'updatePaymentType', 'deletePaymentType', 'addTariff', 'updateTariff', 'deleteTariff', 'addPromotion', 'updatePromotion', 'deletePromotion', 'addLeadSource', 'updateLeadSource', 'deleteLeadSource'].some(a => THROWS_ON_DENIAL.has(a)));
 
   const gate = read('src/components/auth/AccessGate.tsx');
-  check('El catálogo se lee al iniciar sesión (antes de montar el sistema), junto con roles, cuentas y sedes', /loadCatalog\(catalogRepo\)/.test(gate) && /children\(loaded\.access, account\.id, loaded\.org, loaded\.catalog, loaded\.items, loaded\.logistics, loaded\.people, loaded\.money, loaded\.cashBoxes\)/.test(gate) && /catalog=\{catalog\}/.test(read('src/App.tsx')));
+  check('El catálogo se lee al iniciar sesión (antes de montar el sistema), junto con roles, cuentas y sedes', /loadCatalog\(catalogRepo\)/.test(gate) && /children\(loaded\.access, account\.id, loaded\.org, loaded\.catalog, loaded\.items, loaded\.logistics, loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /catalog=\{catalog\}/.test(read('src/App.tsx')));
   const hook = read('src/hooks/useCatalog.ts');
   check('El gancho arranca con lo ya leído y valida contra lo último que se vio', /useCatalog\(initial: CatalogData/.test(hook) && /useState<CatalogData>\(initial\)/.test(hook) && /dataRef\.current = data/.test(hook) && !/useEffect/.test(hook));
 

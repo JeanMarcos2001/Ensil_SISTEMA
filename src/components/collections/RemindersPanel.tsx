@@ -19,15 +19,20 @@ export function RemindersPanel() {
   const [note, setNote] = useState<string | null>(null);
   const [skipping, setSkipping] = useState<Reminder | null>(null);
   const [view, setView] = useState<'pendientes' | 'historial'>('pendientes');
+  const [saving, setSaving] = useState(false);
 
   const reminders = useMemo(
     () => buildReminders({ plans, enrollments, students, guardians, branches }, collectionPolicy, reminderLogs, today),
     [plans, enrollments, students, guardians, branches, collectionPolicy, reminderLogs, today]
   );
-  const mayRemind = can(PERM.sendReminders);
+  const mayRemind = can(PERM.sendReminders) && !saving;
 
-  const send = (r: Reminder, channel: ReminderLog['channel']) => {
-    const res = logReminder(r, channel, 'Enviado', '');
+  /** Registra el recordatorio en la base (un mismo recordatorio no se registra dos veces) y espera el resultado antes de dejar tocar otro. */
+  const send = async (r: Reminder, channel: ReminderLog['channel']) => {
+    if (saving) return;
+    setSaving(true);
+    const res = await logReminder(r, channel, 'Enviado', '');
+    setSaving(false);
     setNote(res.ok ? `Registrado: recordatorio a ${r.recipient} (${r.installmentName}).` : res.error ?? 'No se pudo registrar.');
   };
   const copy = async (r: Reminder) => {
@@ -82,8 +87,8 @@ export function RemindersPanel() {
                         ? <a href={r.whatsappUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-8 px-3 rounded-xl text-xs font-medium bg-surface border border-border-soft hover:bg-surface-muted"><MessageCircle size={14} /> WhatsApp</a>
                         : <span className="inline-flex items-center h-8 px-2 text-xs text-text-muted" title="El titular no tiene un celular válido registrado">Sin celular</span>}
                       <Button variant="secondary" size="sm" className="gap-1" onClick={() => copy(r)}><Copy size={14} /> Copiar</Button>
-                      <Button variant="primary" size="sm" disabled={!mayRemind} onClick={() => send(r, 'WhatsApp')} title="Registra que el mensaje se envió por WhatsApp">Marcar enviado</Button>
-                      <Button variant="ghost" size="sm" className="gap-1" disabled={!mayRemind} onClick={() => send(r, 'Llamada')} title="Registra una llamada"><Phone size={14} /></Button>
+                      <Button variant="primary" size="sm" disabled={!mayRemind} onClick={() => void send(r, 'WhatsApp')} title="Registra que el mensaje se envió por WhatsApp">Marcar enviado</Button>
+                      <Button variant="ghost" size="sm" className="gap-1" disabled={!mayRemind} onClick={() => void send(r, 'Llamada')} title="Registra una llamada"><Phone size={14} /></Button>
                       <Button variant="ghost" size="sm" disabled={!mayRemind} onClick={() => setSkipping(r)}>Omitir</Button>
                     </div>
                   </td>
@@ -128,9 +133,9 @@ export function RemindersPanel() {
         size="md"
         detailLabel="Motivo"
         detailPlaceholder="Ej: ya pagó, se coordinó por teléfono..."
-        onSubmit={({ detail }) => {
+        onSubmit={async ({ detail }) => {
           if (!skipping) return;
-          const res = logReminder(skipping, 'Otro', 'Omitido', detail);
+          const res = await logReminder(skipping, 'Otro', 'Omitido', detail);
           if (res.ok) setNote(`Omitido: ${skipping.installmentName} de ${skipping.studentName}.`);
           return res.ok ? null : res.error ?? 'No se pudo omitir.';
         }}

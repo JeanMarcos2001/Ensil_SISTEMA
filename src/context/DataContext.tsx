@@ -38,11 +38,14 @@ import {
 } from '../utils/enrollmentChange';
 import { canRequest, canResolve, type ChangeKind } from '../utils/authority';
 import {
-  DEFAULT_CONTRACT_TEMPLATE, buildDocument, docState, documentProblems, issueDocument, validateSignature, validateTemplate, type DocContext, type DocKind,
+  buildDocument, docState, documentProblems, issueDocument, validateSignature, type DocContext, type DocKind,
 } from '../utils/enrollmentDocuments';
 import {
-  DEFAULT_POLICY, chargeMoraOn, parsePolicy, validateMoraCharge, validatePolicy, validateReminderLog, type CollectionPolicy, type Reminder, type ReminderLog,
+  chargeMoraOn, validateMoraCharge, type CollectionPolicy, type Reminder, type ReminderLog,
 } from '../utils/collections';
+import { templateForIssued, type PolicyVersion } from '../utils/collectionConfigDb';
+import type { CollectionConfigData, PolicyForm } from '../services/collectionConfig';
+import { useCollectionConfig } from '../hooks/useCollectionConfig';
 import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils/refinance';
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, LaborRegime, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
@@ -193,6 +196,11 @@ export interface IssuedDocument {
   generatedBy: string;
   /** Resumen de los datos con los que se generó (si cambian, el documento queda desactualizado). */
   fingerprint: string;
+  /**
+   * Versión de la plantilla del contrato con la que se generó (solo el contrato). El contrato conserva su texto: editar la plantilla después solo afecta a
+   * los contratos nuevos. Los generados antes de este registro no la traen y se arman con la plantilla vigente.
+   */
+  templateVersion?: number;
   signedAt?: string;
   signedBy?: string;
   /** Nombre del archivo escaneado con la firma (el sistema aún no guarda archivos). */
@@ -1506,19 +1514,25 @@ interface DataContextType {
   /** Fondo fijo y tope por gasto de la caja chica de cada sede (por id de sede; una sede sin fila usa los de partida: `pettyFundOf`). */
   pettyFunds: Record<string, PettyFund>;
   pettyFundOf: (branchId: string) => PettyFund;
+  /** La política de cobranza vigente: UNA para todo el grupo (en la base, por versiones; sin ninguna guardada valen los valores de partida). */
   collectionPolicy: CollectionPolicy;
-  /** Guarda la política de cobranza (días de gracia, mora y días de recordatorio). */
-  updateCollectionPolicy: (input: { graceDays: string; moraMonthlyRatePct: string; remindBefore: string; remindAfter: string }) => StockResult;
+  /** Las versiones guardadas de la política (la más nueva primero), con quién y cuándo las guardó. */
+  collectionPolicyVersions: PolicyVersion[];
+  /** Guarda la política de cobranza del grupo (días de gracia, mora y días de recordatorio) como una versión nueva si cambió. */
+  updateCollectionPolicy: (input: PolicyForm) => Promise<StockResult>;
   reminderLogs: ReminderLog[];
-  /** Registra que un recordatorio de cobranza se envió (o se omitió, con motivo). */
-  logReminder: (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string) => StockResult;
-  /** Cobra la mora acumulada de una cuota vencida generando una cuota «Mora». */
+  /** Registra que un recordatorio de cobranza se envió (o se omitió, con motivo). Un mismo recordatorio no se registra dos veces. */
+  logReminder: (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string) => Promise<StockResult>;
+  /** Cobra la mora acumulada de una cuota vencida generando una cuota «Mora». La base vuelve a calcularla con la política vigente. */
   chargeMora: (planId: string, installmentId: string) => Promise<StockResult>;
+  /** La plantilla vigente del contrato (la última versión; sin ninguna guardada, el texto modelo). */
   contractTemplate: ContractTemplate;
-  /** Guarda la plantilla del contrato (sube la versión; pierde la marca de revisada si el texto cambió). */
-  updateContractTemplate: (template: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>) => StockResult;
-  /** Datos con los que se arman el contrato y la ficha de una matrícula. */
-  documentContextOf: (enrollmentId: string) => DocContext | undefined;
+  /** Todas las versiones guardadas de la plantilla (la más nueva primero): cada contrato conserva la que tenía al generarse. */
+  contractTemplates: ContractTemplate[];
+  /** Guarda la plantilla del contrato: si el texto cambió es una versión nueva (sin revisar) y los contratos ya generados conservan la suya. */
+  updateContractTemplate: (template: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>) => Promise<StockResult>;
+  /** Datos con los que se arman el contrato y la ficha de una matrícula (el contrato ya generado, con la versión de plantilla con la que se generó). */
+  documentContextOf: (enrollmentId: string, options?: { currentTemplate?: boolean }) => DocContext | undefined;
   /** Genera (o regenera, si los datos cambiaron) el contrato o la ficha de la matrícula. */
   generateEnrollmentDocument: (enrollmentId: string, kind: DocKind) => Promise<StockResult>;
   /** Registra que el documento fue firmado (fecha y archivo escaneado). */
@@ -1616,7 +1630,7 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
  * los titulares y los alumnos, y `money` = las matrículas con su plan, cuotas, pagos, caja, notas de crédito y grupos promocionales (todo de la base);
  * `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData, collection: collectionData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData; collection: CollectionConfigData }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
@@ -1626,9 +1640,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const { guardians, students } = people;
   // Matrículas, planes, cuotas, pagos, caja, notas de crédito, grupos promocionales, solicitudes sobre las matrículas y registro de correcciones: de la
   // base de datos (`useMoney`, más abajo).
-  const [collectionPolicy, setCollectionPolicy] = useState<CollectionPolicy>(DEFAULT_POLICY);
-  const [reminderLogs, setReminderLogs] = useState<ReminderLog[]>([]);
-  const [contractTemplate, setContractTemplate] = useState<ContractTemplate>(DEFAULT_CONTRACT_TEMPLATE);
+  // La política de cobranza (una para todo el grupo), los recordatorios registrados y la plantilla del contrato (por versiones): de la base de datos
+  // (`useCollectionConfig`). Sin ninguna política o plantilla guardada valen los valores de partida.
+  const collection = useCollectionConfig(collectionData);
+  const { policy: collectionPolicy, policies: collectionPolicyVersions, reminders: reminderLogs, template: contractTemplate, templates: contractTemplates } = collection;
   // Los cierres de caja y la caja chica (movimientos y fondo de cada sede): de la base de datos (`useCashBoxes`, más abajo, junto a la caja).
 
   /**
@@ -2854,7 +2869,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   };
 
   // ---- Contrato y ficha de la matrícula
-  const documentContextOf = (enrollmentId: string): DocContext | undefined => {
+  // El contrato ya generado se arma con la versión de la plantilla con la que se generó (editar la plantilla después no lo cambia ni lo deja
+  // «desactualizado»); un contrato nuevo, o uno que se vuelve a generar, usa la plantilla vigente (`currentTemplate`).
+  const documentContextOf = (enrollmentId: string, options?: { currentTemplate?: boolean }): DocContext | undefined => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return undefined;
     const today = todayLocalISO();
@@ -2867,30 +2884,27 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       enrollment, student, guardians: guardiansOf, program,
       level: levels.find(l => l.id === enrollment.levelId), plan: plans.find(p => p.mat === enrollment.id), branch,
       company: companies.find(c => c.name === branch?.company), firstSession: firstSessionOf(enrollment.id, schedules),
-      validity: enrollmentValidity(enrollment, program, schedules, today), template: contractTemplate, today,
+      validity: enrollmentValidity(enrollment, program, schedules, today), today,
+      template: options?.currentTemplate ? contractTemplate : templateForIssued(contractTemplates, enrollment.documents?.contract, contractTemplate),
     };
   };
 
-  const updateContractTemplate = (input: Omit<ContractTemplate, 'version' | 'updatedAt' | 'updatedBy'>): StockResult => {
-    if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede editar las plantillas de documentos.' };
-    const problems = validateTemplate({ ...input, version: contractTemplate.version });
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const changed = JSON.stringify([input.intro, input.clauses, input.closing]) !== JSON.stringify([contractTemplate.intro, contractTemplate.clauses, contractTemplate.closing]);
-    setContractTemplate({
-      ...input, reviewed: input.reviewed,
-      version: changed ? contractTemplate.version + 1 : contractTemplate.version, updatedAt: new Date().toISOString(), updatedBy: currentUser.name,
-    });
-    return { ok: true };
-  };
+  /** Guarda la plantilla del contrato en la base: una versión nueva si el texto cambió (los contratos ya generados conservan la suya). */
+  const updateContractTemplate: DataContextType['updateContractTemplate'] = async input => asResult(await collection.saveTemplate(input));
 
   const generateEnrollmentDocument: DataContextType['generateEnrollmentDocument'] = async (enrollmentId, kind) => {
     if (!can(PERM.documents)) return { ok: false, error: 'Su rol no puede generar contratos ni fichas.' };
-    const ctx = documentContextOf(enrollmentId);
-    if (!ctx) return { ok: false, error: 'No se encontró la matrícula.' };
+    // Un documento al día (con los datos y la plantilla con que se generó) no se vuelve a generar
+    const pinned = documentContextOf(enrollmentId);
+    if (!pinned) return { ok: false, error: 'No se encontró la matrícula.' };
+    const existing = pinned.enrollment.documents?.[kind];
+    if (docState(existing, buildDocument(kind, pinned).fingerprint) === 'vigente') return { ok: true };
+    // Un documento nuevo, o uno que se vuelve a generar porque cambiaron los datos, se arma con la plantilla vigente
+    const ctx = documentContextOf(enrollmentId, { currentTemplate: true })!;
     const problems = documentProblems(kind, ctx);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDocument(kind, ctx);
-    const issued = issueDocument(kind, ctx.enrollment.documents?.[kind], built, currentUser.name, new Date().toISOString());
+    const issued = issueDocument(kind, existing, built, currentUser.name, new Date().toISOString(), ctx.template.version);
     const d = money.draft();
     d.enrollments = d.enrollments.map(e => (e.id === enrollmentId ? { ...e, documents: { ...(e.documents ?? {}), [kind]: issued } } : e));
     return saveMoney('documentos', d);
@@ -2912,24 +2926,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   };
 
   // ---- Cobranza: política, recordatorios y mora
-  const updateCollectionPolicy = (input: { graceDays: string; moraMonthlyRatePct: string; remindBefore: string; remindAfter: string }): StockResult => {
-    if (!can(PERM.configCollections)) return { ok: false, error: 'Su rol no puede configurar la política de cobranza.' };
-    const problems = validatePolicy(input);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setCollectionPolicy(parsePolicy(input));
-    return { ok: true };
-  };
+  // La política y los recordatorios están en la base (`useCollectionConfig`): se validan con las reglas puras, se guardan, y la base vuelve a comprobar y
+  // pone quién y cuándo. El código de cada recordatorio (REC-NNN) lo asigna la base.
+  const updateCollectionPolicy: DataContextType['updateCollectionPolicy'] = async input => asResult(await collection.savePolicy(input));
 
-  const logReminder = (reminder: Pick<Reminder, 'key' | 'planId' | 'installmentId' | 'stage'>, channel: ReminderLog['channel'], result: ReminderLog['result'], note: string): StockResult => {
-    if (!can(PERM.sendReminders)) return { ok: false, error: 'Su rol no puede registrar recordatorios.' };
-    const problems = validateReminderLog(reminder, channel, result, note, reminderLogs);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setReminderLogs(prev => [{
-      id: nextSequentialId('REC', prev.map(r => r.id)), key: reminder.key, planId: reminder.planId, installmentId: reminder.installmentId, stageOffset: reminder.stage.offset,
-      at: new Date().toISOString(), by: currentUser.name, channel, result, note: note.trim() || undefined,
-    }, ...prev]);
-    return { ok: true };
-  };
+  const logReminder: DataContextType['logReminder'] = async (reminder, channel, result, note) => asResult(await collection.logReminder(reminder, channel, result, note));
 
   const chargeMora: DataContextType['chargeMora'] = async (planId, installmentId) => {
     if (!can(PERM.chargeMora)) return { ok: false, error: 'Su rol no puede cobrar mora.' };
@@ -3359,11 +3360,13 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       updateEnrollmentData,
       reversePayment,
       collectionPolicy,
+      collectionPolicyVersions,
       updateCollectionPolicy,
       reminderLogs,
       logReminder,
       chargeMora,
       contractTemplate,
+      contractTemplates,
       updateContractTemplate,
       documentContextOf,
       generateEnrollmentDocument,

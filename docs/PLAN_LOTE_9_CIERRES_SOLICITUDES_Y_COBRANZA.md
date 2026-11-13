@@ -6,7 +6,7 @@ Documento de trabajo del **2026-11-12**. Cierra el bloque de dinero: pasa a la b
 |---|---|---|
 | **9A** | Cierres y reaperturas de caja (por sede y moneda) y caja chica (un fondo por sede) | 0017 |
 | **9B** | Solicitudes (caída, reactivación, cambio de programa, traslado) con su historial y el registro de correcciones de una matrícula | 0018 |
-| **9C** | Política de cobranza, recordatorios enviados y plantilla del contrato | 0021 (la 0019 y la 0020 son las de los códigos asignados por la base) |
+| **9C** | Política de cobranza (una para todo el grupo), recordatorios enviados y plantilla del contrato (por versiones) | 0021 (la 0019 y la 0020 son las de los códigos asignados por la base) |
 
 Queda fuera de este lote (tienen su propio lote): la agenda de Psicopedagogía y los avisos/mensajería (Plan de lanzamiento §6.7 y §6.8).
 
@@ -87,9 +87,38 @@ La función de la base de la matrícula y el dinero (Lote 8) pasa a poder tocar 
 
 **Datos de partida:** `supabase/seed/solicitudes_de_ejemplo.sql` (generado desde `src/data/seedPeople.ts`): la solicitud de caída de ejemplo (CAI-001, ya aprobada) que la matrícula MAT-2026-003 ya nombra.
 
-## 9C — Cobranza y plantilla del contrato (migración 0021) — por diseñar al llegar
+## 9C — Cobranza y plantilla del contrato (migración 0021)
 
-Política de cobranza (una por grupo o por empresa: decidir al llegar), recordatorios enviados (no se envían solos: se preparan y se registran) y la plantilla del contrato con sus versiones.
+**Estado (2026-11-13): hecho y verificado en el código** (`tsc`, `vite build`, los 44 `check-*`, la migración probada contra Postgres en memoria con cuentas de dos sedes y los envíos que arma el propio cliente, y su «deshacer»). **Falta que el usuario pegue la migración (no hay carga de partida) y probar en el navegador; no se sube a `main` antes** (la aplicación lee las tablas nuevas al iniciar sesión).
+
+**Decisión del usuario (2026-11-13): UNA sola política de cobranza para todo el grupo.**
+
+### Tablas
+
+| Tabla | Qué guarda | Notas |
+|---|---|---|
+| `cobranza_politicas` | versión, días de gracia, tasa de mora mensual, días de recordatorio antes y después, quién y cuándo | **Solo se agregan versiones**; la vigente es la más alta; sin filas valen los valores de partida |
+| `recordatorios_cobranza` | `REC-NNN` (lo asigna la base), plan, cuota, etapa, clave única (plan + cuota + etapa), sede (la de la matrícula), canal, resultado, nota, quién y cuándo | **Solo se agrega**; un mismo recordatorio no se registra dos veces; omitir pide motivo; se ve por sede |
+| `plantilla_contrato_versiones` | versión, introducción, cláusulas, cierre, si el área legal la revisó (con quién y cuándo), quién y cuándo la creó | El texto de una versión **no cambia ni se borra**; solo se anota la marca de revisada |
+
+### Funciones de la base (todas piden su función del registro, vuelven a validar y dejan quién y cuándo)
+
+- `guardar_politica_cobranza(...)` — `op-cobranza:config`. Rangos de la política; sin cambios no agrega versión.
+- `registrar_recordatorio(...)` — `op-cobranza:remind` y sede alcanzable. La etapa debe ser de la política vigente; la cuota debe tener saldo; no se repite.
+- `guardar_plantilla_contrato(...)` — `cfg-plantillas:edit`. Texto nuevo = versión nueva; solo la marca = se anota en la vigente.
+- **Vigilancia de la mora**: `aplicar_cambios_matricula` pasa a ser una envoltura más (la de la 0019 es ahora `app.aplicar_cambios_matricula_con_codigos`); en la acción `mora` vuelve a calcular lo que corresponde con la política guardada y rechaza lo que sobre (margen de un centavo).
+
+### Cada contrato conserva su versión de plantilla
+
+El contrato generado guarda `templateVersion`. Se arma, se imprime y se compara con ESA versión: editar la plantilla solo afecta a los contratos nuevos; un contrato queda «desactualizado» solo cuando cambian los datos de su matrícula; regenerarlo usa la plantilla vigente (versión siguiente del contrato, sin firma).
+
+### Quién ve
+
+La política y la plantilla, cualquier cuenta vigente. Los recordatorios, quien tiene «Ver cartera y reportes de cobranza» y de su sede (comparado con el registro en `check-collection-db.ts`).
+
+### Pantallas que cambian
+
+Configuración → Cobranza → Política de cobranza (guardado con espera, versión vigente e historial), Configuración → Documentos → Plantillas (guardado con espera y mensaje de que los contratos ya generados conservan su texto), Planes y cartera → Recordatorios (botones apagados mientras se registra) y la ficha de la matrícula (el aviso de plantilla sin revisar es el de la versión que se usa).
 
 ## Verificación de cada entrega
 

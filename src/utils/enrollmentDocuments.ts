@@ -10,6 +10,9 @@
  *    cuotas, titular…) el documento queda «desactualizado»: se vuelve a generar (versión siguiente) y hay que firmarlo de nuevo.
  *  - La firma se registra con la fecha y el nombre del archivo escaneado (el sistema aún no guarda archivos).
  *  - La plantilla de contrato que trae el sistema es un TEXTO MODELO: debe revisarla el área legal y marcarse como revisada.
+ *  - La plantilla vive en la base por versiones y **cada contrato conserva la versión con la que se generó** (`IssuedDocument.templateVersion`,
+ *    `templateForIssued` en `collectionConfigDb.ts`): editar la plantilla solo afecta a los contratos nuevos, y un contrato solo queda «desactualizado»
+ *    cuando cambian los datos de su matrícula. Volver a generarlo (por un cambio de datos) usa la plantilla vigente.
  */
 import type {
   Branch, Company, ContractClause, ContractTemplate, Enrollment, EnrollmentDocuments, Guardian, IssuedDocument, Level, Plan, Program, Schedule, Student,
@@ -264,7 +267,7 @@ export const docState = (issued: IssuedDocument | undefined, fingerprint: string
  * (`utils/draftIds.ts`), y lo protege con un índice único (dos sedes no emiten el mismo contrato ni la misma ficha).
  */
 export function issueDocument(
-  kind: DocKind, existing: IssuedDocument | undefined, built: BuiltDocument, by: string, at: string
+  kind: DocKind, existing: IssuedDocument | undefined, built: BuiltDocument, by: string, at: string, templateVersion?: number
 ): IssuedDocument {
   if (existing && existing.fingerprint === built.fingerprint) return existing;
   const year = parseInt(at.slice(0, 4), 10);
@@ -274,6 +277,8 @@ export function issueDocument(
     generatedAt: at,
     generatedBy: by,
     fingerprint: built.fingerprint,
+    // El contrato recuerda con qué versión de la plantilla se generó: editar la plantilla después no lo cambia (solo afecta a los contratos nuevos)
+    ...(kind === 'contract' && templateVersion ? { templateVersion } : {}),
   };
 }
 

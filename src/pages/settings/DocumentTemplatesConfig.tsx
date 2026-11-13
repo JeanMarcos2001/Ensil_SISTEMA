@@ -8,12 +8,13 @@ const areaCls = 'w-full bg-surface border border-border-soft rounded-xl p-3 text
 
 /** Configuración → Documentos → Plantillas de contrato y ficha: texto del contrato de servicios educativos (con campos entre llaves dobles). */
 export function DocumentTemplatesConfig() {
-  const { contractTemplate, updateContractTemplate, can } = useData();
+  const { contractTemplate, contractTemplates, updateContractTemplate, can } = useData();
   const [intro, setIntro] = useState(contractTemplate.intro);
   const [closing, setClosing] = useState(contractTemplate.closing);
   const [clauses, setClauses] = useState<ContractClause[]>(contractTemplate.clauses);
   const [reviewed, setReviewed] = useState(contractTemplate.reviewed);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setIntro(contractTemplate.intro); setClosing(contractTemplate.closing); setClauses(contractTemplate.clauses); setReviewed(contractTemplate.reviewed);
@@ -23,13 +24,18 @@ export function DocumentTemplatesConfig() {
   const problems = validateTemplate({ version: contractTemplate.version, reviewed, intro, clauses, closing });
   const edit = (fn: () => void) => { fn(); setReviewed(false); setMessage(null); };
 
-  const save = () => {
-    const r = updateContractTemplate({ reviewed, intro, clauses, closing });
-    setMessage(r.ok ? { ok: true, text: 'Plantilla guardada. Los contratos ya generados no cambian hasta que se regeneren.' } : { ok: false, text: r.error ?? 'No se pudo guardar.' });
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    const r = await updateContractTemplate({ reviewed, intro, clauses, closing });
+    setSaving(false);
+    setMessage(r.ok
+      ? { ok: true, text: dirty ? 'Plantilla guardada como una versión nueva. Los contratos ya generados conservan el texto con el que se generaron: solo los contratos nuevos usan esta versión.' : 'Marca de revisión guardada.' }
+      : { ok: false, text: r.error ?? 'No se pudo guardar.' });
   };
 
   return (
-    <fieldset disabled={!can('cfg-plantillas:edit')} className="max-w-4xl space-y-6 min-w-0">
+    <fieldset disabled={!can('cfg-plantillas:edit') || saving} className="max-w-4xl space-y-6 min-w-0">
       <div>
         <h2 className="text-xl font-semibold text-text-primary">Plantillas de documentos</h2>
         <p className="text-sm text-text-secondary">Texto del contrato de servicios educativos. La ficha de matrícula usa un formato fijo con los datos de la matrícula.</p>
@@ -83,9 +89,9 @@ export function DocumentTemplatesConfig() {
       {message && <p className={`text-sm ${message.ok ? 'text-success-text' : 'text-danger-text'}`}>{message.text}</p>}
 
       <div className="flex items-center gap-3">
-        {can('cfg-plantillas:edit') && <Button variant="primary" onClick={save} disabled={(!dirty && reviewed === contractTemplate.reviewed) || problems.length > 0}>Guardar plantilla</Button>}
+        {can('cfg-plantillas:edit') && <Button variant="primary" onClick={() => void save()} disabled={(!dirty && reviewed === contractTemplate.reviewed) || problems.length > 0 || saving}>{saving ? 'Guardando…' : 'Guardar plantilla'}</Button>}
         {can('cfg-plantillas:edit') && <Button variant="ghost" onClick={() => { setIntro(DEFAULT_CONTRACT_TEMPLATE.intro); setClosing(DEFAULT_CONTRACT_TEMPLATE.closing); setClauses(DEFAULT_CONTRACT_TEMPLATE.clauses); setReviewed(false); setMessage(null); }}>Restablecer el texto modelo</Button>}
-        <span className="text-xs text-text-muted">Versión {contractTemplate.version}{contractTemplate.updatedBy ? ` · actualizada por ${contractTemplate.updatedBy}` : ''}</span>
+        <span className="text-xs text-text-muted">{contractTemplates.length === 0 ? 'Todavía no se guardó ninguna versión: es el texto modelo.' : `Versión ${contractTemplate.version}${contractTemplate.updatedBy ? ` · actualizada por ${contractTemplate.updatedBy}` : ''}`}</span>
       </div>
     </fieldset>
   );
