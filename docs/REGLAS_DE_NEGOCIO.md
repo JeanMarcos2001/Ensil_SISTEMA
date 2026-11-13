@@ -743,7 +743,7 @@ Lote 8 (migración 0015 `supabase/migrations/20261110140000_matriculas_y_dinero.
 - **Stock y dinero en la misma operación.** La venta en caja, la reversa de una venta y la entrega de materiales (verificación) mueven el stock **dentro de la misma llamada** que guarda el dinero: si falta stock, no queda el ingreso; si el dinero se rechaza, no baja el stock. Antes eran dos pasos.
 - **Lo derivable no se guarda.** El nombre del alumno, del programa, del nivel, de la sede, del asesor, del origen, del tipo de pago y del tarifario salen de sus ids al mostrar (si un programa cambia de nombre, la matrícula lo muestra al instante); el plan de una matrícula, de su `planId`; «Vencida» no la escribe nadie. El saldo y el estado del plan son el resumen que escribe `recomputePlan` y la base comprueba. El pago guarda la **constancia** del nombre del alumno ese día y la **sede donde se cobró** (no cambia si la matrícula se traslada).
 - **Quién ve qué, por sede.** Matrículas, planes, cuotas, pagos, caja y notas se ven por sede (`app.ve_sede`) y con una función que las muestre (las listas de la base coinciden con el registro). Un movimiento sin sede (caja general) lo ve y lo registra quien alcanza todas las sedes. **Los alumnos y titulares también se limitan por sede ahora:** se ve a quien aún no tiene matrícula (el asistente lo acaba de crear) o la tiene en una sede que se alcanza. Quien no tiene «ver cuotas» ve el plan sin cuotas.
-- **Códigos.** Siguen asignándolos las pantallas (máximo + 1): si dos personas registran a la vez, la base rechaza el repetido («otra persona registró algo al mismo tiempo, vuelva a intentarlo»); nunca se reparte mal. Es una limitación conocida para cuando haya muchas personas matriculando a la vez.
+- **Códigos.** Los asigna la base, no la pantalla (ver «Códigos que asigna la base» al final de esta sección). Lo que se dijo aquí antes («los asigna la pantalla con el máximo que ve») ya no es cierto.
 - **Un depósito lleva la sede de los ingresos** que se depositan (si vienen de una sola); de varias sedes es caja general.
 - **Los datos de ejemplo** (5 matrículas, 5 planes, 10 pagos, 11 movimientos) se cargan con `supabase/seed/matriculas_de_ejemplo.sql` (**generado**: `npx tsx scripts/doc-matriculas-seed.ts`; repetible) con los mismos códigos, porque la agenda y las solicitudes de ejemplo en memoria los nombran. Las fechas salen de un día fijo (2026-11-10): con los días las cuotas de ejemplo se vuelven «Vencidas», lo esperado en una base de prueba. Al derivar el origen del id se corrigió el ejemplo (dos matrículas decían «Referido» con el id de «Orgánico»).
 - **Qué sigue en memoria.** Las solicitudes (caída, reactivación, cambio de programa, traslado) y su historial, el registro de correcciones, los cierres de caja y la reapertura, la caja chica, los recordatorios de cobranza, la política de cobranza, la plantilla del contrato y la agenda de Psicopedagogía (asesorías, actividades, seguimiento). **Lo que esas acciones cambian en una matrícula o en un plan sí se guarda** (al aprobar una caída, la matrícula y las cuotas anuladas o condonadas se guardan juntas; la agenda y la solicitud se actualizan solo si eso salió bien). Una matrícula nueva crea su primera asesoría en memoria: al recargar, vuelve a pedirse (el próximo lote).
@@ -787,3 +787,57 @@ Lo que el usuario dictó sobre los kits y los precios, ya aplicado en las pantal
 - **Un día cerrado no admite movimientos a mano** (ingreso, egreso o venta, ni su reversa). Para registrarlos hay que **reabrir el último cierre de esa caja**, con motivo (mínimo 5 letras); queda en el historial (Sistema → Reaperturas) y avisa. Los **cobros** de pagos con fecha cubierta siguen entrando: el cierre queda «desactualizado» y se avisa (conviene reabrir y volver a cerrar).
 - **Un cierre no se borra** y un movimiento de caja chica tampoco: se reabre / se reversa con su motivo.
 - La caja chica de la vista global pide elegir sede; «Arqueo y cierre» pide la sede en su ventana (y «Caja general» solo la ofrece a quien alcanza todas las sedes).
+
+## Solicitudes y correcciones de matrículas (2026-11-12, Lote 9B)
+
+- **Las solicitudes viven en la base**, con su historial. Una solicitud (caída, reactivación, cambio de programa o traslado de sede) **nace pendiente** y después solo se **aprueba o se rechaza, una sola vez**; nunca se borra ni cambia otra cosa. Una resuelta no vuelve a cambiar.
+- **Quién y cuándo** pidieron y resolvieron salen de la **cuenta** con la que se inició sesión, no de lo que diga la pantalla.
+- **Quien pidió una solicitud no la resuelve** (aprobar ni rechazar), salvo el Superusuario. Antes solo lo frenaba la pantalla; ahora lo exige también la base, comparando la cuenta (no el nombre).
+- **Una sola solicitud pendiente por matrícula:** una de caída y una de cambio (reactivación, cambio de programa o traslado). Rechazada o aprobada la anterior, se puede pedir otra.
+- **Se pide solo en el estado que corresponde:** la caída, el cambio de programa y el traslado, de una matrícula activa; la reactivación, de una caída. La fecha de una caída no es futura ni anterior a la matrícula.
+- **Aprobar y su efecto quedan guardados juntos o no queda nada:** la matrícula, su plan, la solicitud (con el historial de lo que se hizo) y la corrección. La base comprueba que **lo aprobado deja la matrícula como se aprobó** (la caída, caída desde la fecha pedida y nombrando la solicitud; la reactivación, activa y nombrándola; el cambio, con el programa y el nivel pedidos; el traslado, en la sede pedida). Aprobar un traslado pide alcanzar las **dos** sedes.
+- **Rechazar** solo deja la solicitud rechazada, con su explicación (mínimo 5 letras); no toca la matrícula.
+- **Correcciones:** el registro (un campo, el valor de antes y de después, el motivo, quién y cuándo) **solo se agrega**; un error se corrige con otra corrección. Solo nace **junto con un cambio de esa misma matrícula** (corregir datos, reactivar, cambiar de programa o trasladar). La caída no escribe en él.
+- **Se ve por sede** (la de la matrícula). Las solicitudes las ven quienes tienen una función que las muestre (Ver matrículas, Resumen general, Reporte de matrículas, Solicitudes pendientes o alguna de aprobar); las correcciones, quien ve matrículas.
+- **Códigos** (`CAI-NNN`, `SOL-NNN`, `COR-NNN`): los asigna la base (ver «Códigos que asigna la base»).
+
+---
+
+## Códigos que asigna la base (2026-11-13, migración 0019)
+
+**Por qué.** Antes cada pantalla inventaba el código de lo que iba a guardar con lo que veía («el más alto de mi sede + 1»). Una cuenta ve solo sus sedes, así que la de Chiclayo veía las matrículas 002 y 004, proponía la 005 y esa ya existía en Piura: la base la rechazaba y el reintento proponía la misma otra vez (la cuenta quedaba atascada). Peor: los números de contrato, ficha, lote de depósito y nota de crédito no tenían ninguna protección contra repetidos: dos sedes podían emitir el mismo «Contrato 2026-001» o la misma nota `BC01-000013` sin aviso.
+
+**Cómo.** La pantalla arma todo con códigos de **borrador** donde antes iba el código (`PAG-~3~`, `MAT-2026-~1~`, `BC01-~2~`; el número entre `~` solo ordena). Al guardar, la base (función `aplicar_cambios_matricula`):
+1. pide la función del registro de esa acción;
+2. exige que el código de toda fila nueva sea un borrador del tipo que le toca (si una pantalla desactualizada manda un código escrito a mano, se rechaza con «recargue la página»);
+3. por cada tipo (y año) se pone en fila con un candado que dura hasta el final de la operación, siempre en el mismo orden (no se traban entre sí), y mira el código **más alto que existe en todas las sedes** (aunque la cuenta no las vea);
+4. entrega los siguientes, en el orden de los borradores, y cambia cada borrador por su código real en todo el envío: en las filas, en las referencias entre ellas (el plan nombra a su matrícula, el cobro a su pago) y también dentro de los textos;
+5. guarda todo o nada y devuelve la lista «borrador → código real».
+Si algo falla, todo se deshace y los números quedan libres: **sin repetidos y sin huecos**. No hay tabla de contadores (nada que se pueda desfasar): el más alto sale de los propios datos.
+
+**Qué códigos.** `MAT-AAAA-NNN` (por año), `PLN`, `PAG`, `PGR`, `CJ`, `NC`, `CAI`, `SOL`, `COR`, `DEP-NNN` (lote de depósito), `CTR-AAAA-NNN` y `FIC-AAAA-NNN` (contrato y ficha, por año, dentro de la matrícula) y el **correlativo de las notas de crédito** por serie (`BC01-NNNNNN` para boletas, `FC01-NNNNNN` para facturas, a 6 dígitos). Una nota «emitida» por el sistema toma el siguiente de su serie (las externas ya registradas cuentan en la serie); una nota «externa» trae su número y se rechaza si ya está registrado en cualquier sede. Al pasar de 999 el número crece sin recortarse (`PAG-1000`).
+
+**Protecciones nuevas en la base** (índices únicos): número de contrato, número de ficha, código de lote de depósito y (serie, correlativo) de las notas de crédito.
+
+**Qué se ve en pantalla.** Al reversar un pago con nota emitida, la pantalla ya no dice qué número tendrá la nota («el sistema le asigna el siguiente número de la serie BC01»): se sabe al guardar. Después de guardar, la pantalla vuelve a leer lo guardado y muestra los códigos reales.
+
+**Lo que sigue igual.** Los códigos que ya existen y su formato. Personal, asignaciones, contratos de personal y ajustes de planilla tienen su propio apartado más abajo (migración 0020). Lo que sigue proponiéndose en la pantalla con lo que ve son solo los códigos de la agenda, que sigue en memoria hasta su lote.
+
+**Cómo se prueba.** `npx tsx scripts/check-draft-ids.ts` (reglas puras, el caso exacto de la cuenta de Chiclayo con los datos de ejemplo, y que la migración y el contexto estén cableados) y, contra una copia de la base, la migración con 21 operaciones reales (cobros de dos sedes seguidos, notas por serie, contratos, depósitos, matrícula completa, rechazos por código escrito a mano o desconocido, «todo o nada», más de 999, deshacer y volver a aplicar) comparando cada resultado con el espejo de TypeScript (`utils/draftIds.ts`). Limitación: la copia de prueba tiene una sola conexión, así que el candado entre dos operaciones simultáneas de verdad no se probó (es el candado estándar de Postgres, `pg_advisory_xact_lock`).
+
+---
+
+## Códigos de Personal, Asignaciones y Contratos de personal (2026-11-13, migración 0020)
+
+**Por qué.** Es el mismo problema que el del dinero, en otra parte. Personal, Asignaciones y los contratos se ven **por sede**: la cuenta de Chiclayo solo ve a su gente y a quien aún no tiene asignación. Al crear una ficha proponía «el más alto que veo + 1», que podía ser el de alguien de Piura. La base lo rechazaba (en la ficha, con un error de seguridad poco claro) y el reintento solo sumaba uno: con una diferencia de más de tres se rendía. Lo mismo con el código de seis dígitos de la ficha, la asignación y el contrato.
+
+**Cómo.** La pantalla manda un **borrador** donde iba el código (`STF-~1~` la ficha, `ASG-~1~` la asignación, `CON-~1~` el contrato, `AJU-~1~` el ajuste de planilla) y la base lo cambia por el siguiente al más alto que existe en **toda** la tabla, con un candado por tipo que dura hasta el final de la operación:
+- **Ficha y asignación** (se guardan con un `insert`): un disparador antes de insertar cambia el borrador; en la ficha asigna además el **código de seis dígitos** (000013…), que la pantalla manda vacío. Corre antes que los disparadores de validación.
+- **Contrato (crear y renovar) y ajuste de planilla** (se guardan con funciones): la función pública asigna el código, llama a la función de siempre y **devuelve el código asignado**.
+- Sin repetidos y, si algo falla (permiso, datos mal escritos, documento repetido), **sin huecos**: el número sale del más alto que existe, no de un contador.
+- **Un código que no es borrador se respeta** (carga de partida; una pantalla vieja sigue funcionando y la llave primaria la protege).
+
+**Qué se ve en pantalla.** Nada cambia a simple vista: la ficha, la asignación y el contrato aparecen con su código real al guardar. Ya no hay «No se pudo asignar un código… intente de nuevo».
+
+**Cómo se prueba.** `npx tsx scripts/check-staff-codes.ts` (el borrador de cada tipo, la migración y su «deshacer» cableados y que las pantallas ya no inventen estos códigos), `check-staff-db.ts` y `check-contracts-db.ts` (repositorios en memoria que asignan como la base: una cuenta que solo ve parte de la tabla recibe el siguiente de toda) y, contra una copia de la base, la migración con cuentas de dos sedes (Chiclayo y Piura: personal, asignaciones, contratos —crear y renovar— y ajustes), permisos, rechazos sin huecos, funciones base cerradas, deshacer y volver a aplicar. Limitación: la copia tiene una sola conexión, así que el candado entre dos operaciones simultáneas de verdad no se probó (es el candado estándar de Postgres).
+

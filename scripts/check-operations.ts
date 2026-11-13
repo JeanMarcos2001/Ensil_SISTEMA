@@ -139,7 +139,8 @@ check('Depósito: cuenta, selección, fecha y saldo', (() => {
 })());
 check('El lote suma, nombra y marca los ingresos', (() => {
   const b = buildDeposit({ date: TODAY, bank: 'BCP - Cuenta Corriente PEN', currency: 'PEN', movementIds: ['CJ-5', 'CJ-6'] }, cash, 'Admin', '2026-10-23T12:00:00.000Z');
-  return b.code === 'DEP-001' && b.egress.amount === 310 && b.egress.kind === 'Egreso' && b.egress.deposit?.movementIds.length === 2 && b.selected.length === 2;
+  // El código del lote es un borrador (`DEP-~n~`): la base asigna el definitivo al guardar
+  return /^DEP-~\d+~$/.test(b.code) && b.egress.deposit?.code === b.code && b.egress.amount === 310 && b.egress.kind === 'Egreso' && b.egress.deposit?.movementIds.length === 2 && b.selected.length === 2;
 })());
 check('Un ingreso depositado no se reversa; reversar el lote lo libera', (() => {
   const b = buildDeposit({ date: TODAY, bank: 'BCP - Cuenta Corriente PEN', currency: 'PEN', movementIds: ['CJ-6'] }, cash, 'Admin', '2026-10-23T12:00:00.000Z');

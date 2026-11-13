@@ -5,7 +5,7 @@ import { Modal } from '../ui/Modal';
 import { useData } from '../../context/DataContext';
 import { REFUND_REASON, REVERSAL_REASONS, applyReversalToPlan, reversalTargets, validateReversal } from '../../utils/paymentReversal';
 import { todayLocalISO } from '../../utils/schedule';
-import { NOTE_SERIES, allowedNoteModes, documentOf, nextNoteNumber, noteLabel, validateNoteChoice, type NoteMode } from '../../utils/creditNotes';
+import { NOTE_SERIES, allowedNoteModes, documentOf, validateNoteChoice, type NoteMode } from '../../utils/creditNotes';
 import { Field, inputCls } from '../../pages/enrollment/fields';
 import { formatDisplayDate } from '../../utils/tariffs';
 
@@ -58,7 +58,8 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
   ];
   const doc = documentOf(payment);
   const modes = allowedNoteModes(payment);
-  const nextLabel = doc ? noteLabel(NOTE_SERIES[doc.type], nextNoteNumber(data.creditNotes, NOTE_SERIES[doc.type])) : '';
+  // El número de la nota lo asigna la base al guardar (el siguiente de la serie en toda la empresa): aquí solo se dice la serie
+  const noteSeries = doc ? NOTE_SERIES[doc.type] : '';
 
   const handleSave = async () => {
     if (saving) return;
@@ -152,7 +153,7 @@ export function ReversePaymentModal({ paymentId, onClose }: Props) {
             {doc && (
               <div className="space-y-2">
                 {([
-                  ['emitir', `Emitir la nota de crédito (el sistema le asigna ${nextLabel})`],
+                  ['emitir', `Emitir la nota de crédito (el sistema le asigna el siguiente número de la serie ${noteSeries})`],
                   ['externa', 'Registrar una nota que ya se emitió en otro sistema de facturación'],
                   ['no-entregado', 'El comprobante nunca se entregó al cliente (se deja constancia)'],
                 ] as [NoteMode, string][]).filter(([m]) => modes.includes(m)).map(([m, label]) => (

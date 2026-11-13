@@ -42,9 +42,10 @@ export function ChangeRequestModal({ kind, enrollmentId, onClose }: Props) {
   const [firstDate, setFirstDate] = useState('');
   const [firstTime, setFirstTime] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setReason(''); setDetail(''); setStartDate(todayLocalISO()); setProgramId(''); setLevelId(''); setBranchId(''); setFirstDate(''); setFirstTime(''); setError(null);
+    setReason(''); setDetail(''); setStartDate(todayLocalISO()); setProgramId(''); setLevelId(''); setBranchId(''); setFirstDate(''); setFirstTime(''); setError(null); setSaving(false);
   }, [kind, enrollmentId]);
 
   const ctx: ChangeContext = useMemo(() => ({
@@ -74,10 +75,12 @@ export function ChangeRequestModal({ kind, enrollmentId, onClose }: Props) {
   const needsFirst = !!targetBranch && !!agenda?.firstSessionLost;
   const targetSchedules = agenda ? data.schedules.filter(s => !agenda.scheduleIds.includes(s.id)) : data.schedules;
 
-  const submit = () => {
-    const r = kind === 'Reactivación' ? data.requestReactivation(enrollment.id, { startDate, reason, detail })
+  const submit = async () => {
+    setSaving(true);
+    const r = await (kind === 'Reactivación' ? data.requestReactivation(enrollment.id, { startDate, reason, detail })
       : kind === 'Cambio de programa' ? data.requestProgramChange(enrollment.id, { programId, levelId, reason, detail })
-      : data.requestTransfer(enrollment.id, { branchId, firstDate, firstTime, reason, detail });
+      : data.requestTransfer(enrollment.id, { branchId, firstDate, firstTime, reason, detail }));
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo enviar la solicitud.'); return; }
     onClose();
   };
@@ -96,8 +99,8 @@ export function ChangeRequestModal({ kind, enrollmentId, onClose }: Props) {
       size="3xl"
       footer={
         <div className="flex justify-end gap-3 w-full">
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={submit}>Enviar solicitud</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button variant="primary" onClick={submit} disabled={saving}>{saving ? 'Enviando…' : 'Enviar solicitud'}</Button>
         </div>
       }
     >

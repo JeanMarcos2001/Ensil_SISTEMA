@@ -5,8 +5,8 @@
  * comprueba que el archivo esté al día. Función pura: no toca archivos.
  *
  * Los vencimientos y las fechas se arman a partir de un día fijo (`SEED_REFERENCE_DAY`): con el paso de los días las cuotas de ejemplo se vuelven
- * «Vencidas», que es lo esperado en una base de prueba. Las solicitudes (caída, cambio, traslado), la agenda y los cierres de caja siguen en
- * memoria y nombran estas matrículas por su código.
+ * «Vencidas», que es lo esperado en una base de prueba. Las solicitudes (caída, cambio, traslado) van en su propio archivo
+ * (`solicitudes_de_ejemplo.sql`) y la agenda sigue en memoria: ambas nombran estas matrículas por su código.
  */
 import { buildPeopleSeed } from '../data/seedPeople';
 import { insert, type Value } from './catalogSeedSql';
@@ -19,6 +19,7 @@ export function renderMoneySeedSql(): string {
   const seed = buildPeopleSeed(SEED_REFERENCE_DAY);
   const data = moneyRowsFromState({
     enrollments: seed.enrollments, plans: seed.plans, payments: seed.payments, cashMovements: seed.cashMovements, creditNotes: [], promotionGroups: [],
+    dropRequests: [], changeRequests: [], enrollmentChanges: [],
   }, true);
   const planes = data.planes.map(({ cuotas: _cuotas, ...plan }) => plan);
   const cuotas = data.planes.flatMap(p => (p.cuotas ?? []).map(c => ({ plan_id: p.id, ...c })));

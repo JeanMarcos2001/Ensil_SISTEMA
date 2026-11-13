@@ -14,6 +14,7 @@ import {
  *
  * Cada acción del contexto pide un borrador (`draft`), lo cambia con las reglas puras de siempre y lo entrega con `commit(acción, borrador)`: la base lo
  * aplica todo o nada, con la función del registro de esa acción. Si falla, el estado no cambia y se devuelve el motivo (nunca lanza).
+ * Los registros nuevos llevan códigos de BORRADOR (`utils/draftIds.ts`): la base asigna los definitivos y `commit` devuelve `codes` («borrador → código real»).
  */
 export function useMoney(initial: MoneyRows, lists: EnrollmentLists, onStockMoved?: () => void | Promise<void>) {
   const repo = useMemo(() => createSupabaseMoneyRepository(supabase), []);
@@ -42,7 +43,7 @@ export function useMoney(initial: MoneyRows, lists: EnrollmentLists, onStockMove
    * Guarda lo que cambió entre el estado de ahora y el borrador, con la acción dada y los movimientos de stock que la acción pida (los aplica la misma
    * llamada de la base). Devuelve el estado como quedó guardado (para que quien llama siga trabajando con él).
    */
-  const commit = useCallback(async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<OpResult<MoneyState>> => {
+  const commit = useCallback(async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<OpResult<MoneyState> & { codes?: Record<string, string> }> => {
     const res = await applyMoney(repo, action, stateRef.current, next, stock);
     if (!res.ok || !res.value) return { ok: false, error: res.error };
     const merged = mergeMoneyRows(rowsRef.current, res.value.fresh);
@@ -50,7 +51,8 @@ export function useMoney(initial: MoneyRows, lists: EnrollmentLists, onStockMove
     stateRef.current = sortMoneyState(moneyStateFromRows(merged, listsRef.current));
     setRows(merged);
     if (stock.length > 0 && onStockMoved) await onStockMoved();
-    return { ok: true, value: stateRef.current };
+    // `codes` = «borrador → código real» de lo que la base asignó: quien usó borradores fuera del dinero (la agenda, los avisos) los traduce con ella
+    return { ok: true, value: stateRef.current, codes: res.value.codes };
   }, [repo, onStockMoved]);
 
   return { ...state, reload, draft, commit };

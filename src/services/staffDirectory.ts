@@ -10,9 +10,8 @@ import type { Assignment, Staff } from '../context/DataContext';
 import {
   type AssignmentForm, buildAssignment, closeAssignmentIn, closeImpact, isActive, type Place, validateAssignmentClose, validateAssignmentForm,
 } from '../utils/assignments';
-import { ID_PREFIX, nextSequentialId } from '../utils/ids';
+import { draftId } from '../utils/draftIds';
 import { firstError } from '../utils/orgDirectory';
-import { nextStaffCode } from '../utils/staff';
 import { type InactivationContext, validateInactivation, validateReactivation } from '../utils/staffStatus';
 import type { OpResult, RepoResult } from './orgDirectory';
 
@@ -28,26 +27,18 @@ export interface StaffRepository {
 }
 
 const fail = (error: string): OpResult<never> => ({ ok: false, error });
-const MAX_ID_ATTEMPTS = 3;
 
 // ------------------------------------------------------------------------------------------------------------------ Personal
 
-/** El id `STF-NNN` y el código de seis dígitos los asigna el sistema; si dos personas crean a la vez, se reintenta con los siguientes. */
+/**
+ * El id `STF-NNN` y el código de seis dígitos los asigna la BASE al guardar (el siguiente al más alto de todo el personal, aunque esta cuenta solo
+ * vea el de sus sedes): la pantalla manda un borrador de id y el código vacío, y el repositorio devuelve la ficha con los reales.
+ */
 export async function createStaff(repo: StaffRepository, staff: Staff[], input: Omit<Staff, 'id' | 'code'>): Promise<OpResult<Staff>> {
   const doc = input.docNumber.trim().toLowerCase();
   if (staff.some(s => s.docNumber.trim().toLowerCase() === doc)) return fail('Este documento ya está registrado en el personal.');
-  const takenIds = staff.map(s => s.id);
-  const takenCodes = staff.map(s => ({ code: s.code }));
-  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-    const id = nextSequentialId(ID_PREFIX.personal, takenIds);
-    const code = nextStaffCode(takenCodes);
-    const res = await repo.insertStaff({ ...input, id, code, status: 'Activo' });
-    if (res.ok && res.data) return { ok: true, value: res.data };
-    if (!res.idConflict) return fail(res.error ?? 'No se pudo guardar la ficha.');
-    takenIds.push(id);
-    takenCodes.push({ code });
-  }
-  return fail('No se pudo asignar un código a la ficha. Intente de nuevo.');
+  const res = await repo.insertStaff({ ...input, id: draftId('STF'), code: '', status: 'Activo' });
+  return res.ok && res.data ? { ok: true, value: res.data } : fail(res.error ?? 'No se pudo guardar la ficha.');
 }
 
 /** El id, el código y el estado no se cambian aquí (el estado se cambia con inactivar y reactivar). */
@@ -96,7 +87,7 @@ export async function reactivateStaff(repo: StaffRepository, staff: Staff[], id:
 
 export interface SaveAssignmentResult { saved: Assignment }
 
-/** Crea o edita una asignación. La base hace pasar la principal anterior a secundaria y deja las sedes de la cuenta al día. */
+/** Crea o edita una asignación. La base le asigna el código, hace pasar la principal anterior a secundaria y deja las sedes de la cuenta al día. */
 export async function saveAssignment(
   repo: StaffRepository, assignments: Assignment[], staff: Staff[], places: Place[], form: AssignmentForm, today: string, editingId?: string,
 ): Promise<OpResult<SaveAssignmentResult>> {
@@ -116,16 +107,10 @@ export async function saveAssignment(
     const res = await repo.updateAssignment(previous.id, built, places);
     return res.ok && res.data ? { ok: true, value: { saved: res.data } } : fail(res.error ?? 'No se pudo guardar la asignación.');
   }
-  const taken = assignments.map(a => a.id);
-  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-    const id = nextSequentialId(ID_PREFIX.asignacion, taken);
-    const built: Assignment = { ...buildAssignment(form, id, assignments), placeId: place.id, placeKind: place.kind, branch: place.name };
-    const res = await repo.insertAssignment(built, places);
-    if (res.ok && res.data) return { ok: true, value: { saved: res.data } };
-    if (!res.idConflict) return fail(res.error ?? 'No se pudo guardar la asignación.');
-    taken.push(id);
-  }
-  return fail('No se pudo asignar un código a la asignación. Intente de nuevo.');
+  // El código `ASG-NNN` lo asigna la base al guardar (el siguiente al más alto de todas las asignaciones, no de las que esta cuenta ve)
+  const built: Assignment = { ...buildAssignment(form, draftId('ASG'), assignments), placeId: place.id, placeKind: place.kind, branch: place.name };
+  const res = await repo.insertAssignment(built, places);
+  return res.ok && res.data ? { ok: true, value: { saved: res.data } } : fail(res.error ?? 'No se pudo guardar la asignación.');
 }
 
 /**

@@ -34,7 +34,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Alumno, Titular, Plan de pago, Programa, Nivel → — | — |
+| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Solicitud sobre una matrícula, Alumno, Titular, Plan de pago, Programa, Nivel → — | — |
 | **Crear matrícula** 💲<br><code>op-matriculas:create</code> | crear | Ver matrículas | Registrar la entrega de materiales en la misma sede (recomendada)<br>Crear programación (agendar asesorías) en la misma sede (recomendada) | Programa, Nivel, Tarifario, Promoción, Tipo de pago → Matrícula, Alumno, Titular, Plan de pago, Pago, Movimiento de caja, Verificación de materiales, Asesoría | — |
 | **Editar borrador** _(reservada)_<br><code>op-matriculas:edit_draft</code> | editar | Ver matrículas | — | — → — | — |
 | **Confirmar matrícula** _(reservada)_<br><code>op-matriculas:confirm</code> | operar | Ver matrículas | — | — → — | — |
@@ -546,6 +546,7 @@ Acciones del contexto que no pertenecen a una persona (consultas, ayudas interna
 - `attendanceBlockOf`: Consulta (bloqueo de asistencia).
 - `pendingFirstSessions`: Consulta (primeras asesorías pendientes).
 - `payrollLinesOf`: Consulta (líneas de una planilla).
+- `pettyFundOf`: Consulta (el fondo de la caja chica de una sede; sin fila valen los de partida).
 - `documentContextOf`: Consulta (datos para armar un documento).
 - `setIsEnrollmentWizardOpen`: Estado de la interfaz (abrir el asistente de matrícula).
 - `reloadOrgDirectory`: Consulta (vuelve a leer las empresas y filiales de la base de datos).

@@ -63,7 +63,7 @@ export function StaffFormModal({ isOpen, onClose, editing }: Props) {
     if (sameAsLogin) { setServerError('Ese correo es el de ingreso de su cuenta: el correo personal debe ser otro.'); return; }
     setSaving(true);
     try {
-      const built = buildStaff(form, today, editing ? { code: editing.code, status: editing.status } : undefined, staff);
+      const built = buildStaff(form, today, editing ? { code: editing.code, status: editing.status } : undefined);
       const { code: _code, ...data } = built;
       // Al editar, un campo opcional vacío se manda como texto vacío para que se borre (un valor ausente significaría «no cambiar»)
       const r = editing

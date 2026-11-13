@@ -3,7 +3,8 @@
  *
  * Un comprobante ya entregado (boleta o factura) no se borra ni se «reutiliza»: se anula con una NOTA DE CRÉDITO que lo
  * referencia. Al reversar un pago con comprobante hay tres caminos:
- *  - «emitir»: el sistema genera la nota con el siguiente correlativo de su serie (BC01 para boletas, FC01 para facturas);
+ *  - «emitir»: el sistema genera la nota con el siguiente correlativo de su serie (BC01 para boletas, FC01 para facturas); el correlativo lo asigna
+ *    la base al guardar, con el más alto de todas las sedes (así dos sedes no emiten el mismo número);
  *  - «externa»: la nota ya se emitió en otro sistema de facturación (SUNAT/OSE); se registra su número para llevar el control;
  *  - «no-entregado»: el comprobante nunca llegó al cliente; se deja constancia y no se emite nota.
  * Un pago sin comprobante no genera nota. La nota sale por el monto total del pago.
@@ -12,6 +13,7 @@
  * necesita un proveedor (OSE/PSE) — ver el informe de facturación.
  */
 import type { CreditNote, Payment } from '../context/DataContext';
+import { draftId } from './draftIds';
 import { documentLabel, parseReceipt, type DocType, type PaymentDocument } from './payments';
 import { MIN_DETAIL } from './enrollmentDrop';
 import { escapeHtml } from './printTable';
@@ -26,11 +28,6 @@ export const NOTE_NUMBER_DIGITS = 6;
 export const documentOf = (p: Pick<Payment, 'document' | 'receipt'>): PaymentDocument | undefined => p.document ?? parseReceipt(p.receipt);
 
 export const noteLabel = (series: string, n: number) => `${series}-${String(n).padStart(NOTE_NUMBER_DIGITS, '0')}`;
-
-/** Siguiente número de nota de una serie (las externas también cuentan si usan la misma serie). */
-export function nextNoteNumber(notes: Pick<CreditNote, 'series' | 'sequence'>[], series: string): number {
-  return notes.filter(n => n.series === series).reduce((a, n) => Math.max(a, n.sequence), 0) + 1;
-}
 
 /** Descompone «BC01-000012» → serie y correlativo; null si el formato no corresponde al tipo de comprobante. */
 export function parseNoteNumber(text: string, type: DocType): { series: string; sequence: number } | null {
@@ -71,14 +68,20 @@ export interface NoteDraft {
   at: string;
 }
 
-/** Arma la nota (sin id). Debe haberse validado antes con `validateNoteChoice`. */
-export function buildCreditNote(d: NoteDraft, notes: Pick<CreditNote, 'series' | 'sequence'>[]): Omit<CreditNote, 'id'> {
+/**
+ * Arma la nota (sin id). Debe haberse validado antes con `validateNoteChoice`.
+ * Una nota «emitida» por el sistema NO lleva su número: la etiqueta es un borrador (`BC01-~3~`) y la base asigna el siguiente correlativo de la serie
+ * al guardar, mirando las notas de TODAS las sedes (`utils/draftIds.ts`); la pantalla solo conoce el número después de guardar. Una nota
+ * «externa» trae el número que ya tiene.
+ */
+export function buildCreditNote(d: NoteDraft): Omit<CreditNote, 'id'> {
   const doc = documentOf(d.payment)!;
-  const parsed = d.mode === 'externa' ? parseNoteNumber(d.external, doc.type)! : { series: NOTE_SERIES[doc.type], sequence: nextNoteNumber(notes, NOTE_SERIES[doc.type]) };
+  const series = NOTE_SERIES[doc.type];
+  const parsed = d.mode === 'externa' ? parseNoteNumber(d.external, doc.type)! : { series, sequence: 0 };
   return {
     series: parsed.series,
     sequence: parsed.sequence,
-    label: noteLabel(parsed.series, parsed.sequence),
+    label: d.mode === 'externa' ? noteLabel(parsed.series, parsed.sequence) : draftId(series as 'BC01' | 'FC01'),
     origin: d.mode === 'emitir' ? 'sistema' : 'externa',
     paymentId: d.payment.id,
     studentName: d.payment.student,

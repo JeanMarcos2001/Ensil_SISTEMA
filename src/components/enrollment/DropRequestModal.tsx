@@ -27,10 +27,11 @@ export function DropRequestModal({ enrollmentId, onClose }: Props) {
   const [detail, setDetail] = useState('');
   const [effectiveDate, setEffectiveDate] = useState(today);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!enrollmentId) return;
-    setReason(''); setDetail(''); setEffectiveDate(today); setError(null);
+    setReason(''); setDetail(''); setEffectiveDate(today); setError(null); setSaving(false);
   }, [enrollmentId]);
 
   const preview = useMemo(() => {
@@ -46,8 +47,10 @@ export function DropRequestModal({ enrollmentId, onClose }: Props) {
 
   if (!enrollment) return null;
 
-  const handleSave = () => {
-    const r = data.requestEnrollmentDrop(enrollment.id, { reason, detail, effectiveDate });
+  const handleSave = async () => {
+    setSaving(true);
+    const r = await data.requestEnrollmentDrop(enrollment.id, { reason, detail, effectiveDate });
+    setSaving(false);
     if (!r.ok) { setError(r.error ?? 'No se pudo registrar la solicitud.'); return; }
     onClose();
   };
@@ -62,8 +65,8 @@ export function DropRequestModal({ enrollmentId, onClose }: Props) {
       size="3xl"
       footer={
         <div className="flex justify-end gap-3 w-full">
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>Enviar solicitud</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Enviando…' : 'Enviar solicitud'}</Button>
         </div>
       }
     >

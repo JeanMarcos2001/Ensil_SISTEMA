@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
+import { draftId, replaceDraftIds } from '../utils/draftIds';
 import { createIdAllocator, ID_PREFIX, nextNumericId, nextSequentialId } from '../utils/ids';
 import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
@@ -37,7 +38,7 @@ import {
 } from '../utils/enrollmentChange';
 import { canRequest, canResolve, type ChangeKind } from '../utils/authority';
 import {
-  DEFAULT_CONTRACT_TEMPLATE, buildDocument, docState, documentProblems, issueDocument, issuedNumbers, validateSignature, validateTemplate, type DocContext, type DocKind,
+  DEFAULT_CONTRACT_TEMPLATE, buildDocument, docState, documentProblems, issueDocument, validateSignature, validateTemplate, type DocContext, type DocKind,
 } from '../utils/enrollmentDocuments';
 import {
   DEFAULT_POLICY, chargeMoraOn, parsePolicy, validateMoraCharge, validatePolicy, validateReminderLog, type CollectionPolicy, type Reminder, type ReminderLog,
@@ -1489,7 +1490,7 @@ interface DataContextType {
   enableExtension: (enrollmentId: string) => Promise<StockResult>;
   dropRequests: DropRequest[];
   /** Solicita la caída de una matrícula: queda pendiente hasta que alguien con autoridad la resuelva. */
-  requestEnrollmentDrop: (enrollmentId: string, input: DropInput) => StockResult;
+  requestEnrollmentDrop: (enrollmentId: string, input: DropInput) => Promise<StockResult>;
   /** Aprueba (aplica los efectos en plan, asesorías, actividades y alumno) o rechaza una solicitud de caída. */
   resolveEnrollmentDrop: (requestId: string, decision: 'Aprobada' | 'Rechazada', opts: { note: string; forgiveOverdue: boolean }) => Promise<StockResult>;
   enrollmentChanges: EnrollmentChange[];
@@ -1524,11 +1525,11 @@ interface DataContextType {
   registerDocumentSignature: (enrollmentId: string, kind: DocKind, input: { date: string; file: string }) => Promise<StockResult>;
   changeRequests: ChangeRequest[];
   /** Pide reactivar una matrícula caída (la resuelve quien tiene autoridad). */
-  requestReactivation: (enrollmentId: string, input: ReactivationInput) => StockResult;
+  requestReactivation: (enrollmentId: string, input: ReactivationInput) => Promise<StockResult>;
   /** Pide cambiar el programa o el nivel de una matrícula activa. */
-  requestProgramChange: (enrollmentId: string, input: ProgramChangeInput) => StockResult;
+  requestProgramChange: (enrollmentId: string, input: ProgramChangeInput) => Promise<StockResult>;
   /** Pide trasladar una matrícula activa a otra sede. */
-  requestTransfer: (enrollmentId: string, input: TransferInput) => StockResult;
+  requestTransfer: (enrollmentId: string, input: TransferInput) => Promise<StockResult>;
   /** Aprueba (aplica los efectos) o rechaza una solicitud de reactivación, cambio de programa o traslado. */
   resolveChangeRequest: (requestId: string, decision: 'Aprobada' | 'Rechazada', note: string) => Promise<StockResult>;
   updatePettyFund: (branchId: string, fund: { assigned: string; maxExpense: string }) => Promise<StockResult>;
@@ -1623,25 +1624,29 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // `supabase/seed/personas_de_ejemplo.sql`, con los mismos códigos, porque las matrículas de ejemplo en memoria los nombran).
   const people = usePeople(peopleData);
   const { guardians, students } = people;
-  // Matrículas, planes, cuotas, pagos, caja, notas de crédito y grupos promocionales: de la base de datos (`useMoney`, más abajo).
-  const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
+  // Matrículas, planes, cuotas, pagos, caja, notas de crédito, grupos promocionales, solicitudes sobre las matrículas y registro de correcciones: de la
+  // base de datos (`useMoney`, más abajo).
   const [collectionPolicy, setCollectionPolicy] = useState<CollectionPolicy>(DEFAULT_POLICY);
   const [reminderLogs, setReminderLogs] = useState<ReminderLog[]>([]);
   const [contractTemplate, setContractTemplate] = useState<ContractTemplate>(DEFAULT_CONTRACT_TEMPLATE);
   // Los cierres de caja y la caja chica (movimientos y fondo de cada sede): de la base de datos (`useCashBoxes`, más abajo, junto a la caja).
 
-  /** Guarda lo que una acción cambió en el dinero (todo o nada, con la función del registro de esa acción) y devuelve `{ ok, error }`. */
-  const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<StockResult> => {
+  /**
+   * Guarda lo que una acción cambió en el dinero (todo o nada, con la función del registro de esa acción) y devuelve `{ ok, error }`.
+   * Los registros nuevos se arman con códigos de BORRADOR (`draftId`): la base asigna los definitivos al guardar (el más alto de todas las sedes) y
+   * `codes` trae «borrador → código real» para completar lo que sigue en memoria (agenda, avisos) y lo que se devuelve a la pantalla.
+   */
+  const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<StockResult & { codes?: Record<string, string> }> => {
     const res = await money.commit(action, next, stock);
-    return res.ok ? { ok: true } : { ok: false, error: res.error };
+    return res.ok ? { ok: true, codes: res.codes } : { ok: false, error: res.error };
   };
 
-  /** Pone código y autor a los movimientos de caja nuevos de una operación (varios a la vez no repiten código). */
+  /** Pone código (de borrador) y autor a los movimientos de caja nuevos de una operación. */
   const newCashMovements = (list: Omit<CashMovement, 'id' | 'user'>[]): CashMovement[] =>
-    list.map(m => ({ ...m, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name }));
+    list.map(m => ({ ...m, id: draftId('CJ'), user: currentUser.name }));
 
   const addCashMovement: DataContextType['addCashMovement'] = async m => {
-    const created: CashMovement = { ...m, id: allocId('CJ', cashMovements.map(x => x.id)), date: m.date ?? new Date().toISOString(), user: currentUser.name, status: 'Aplicado' };
+    const created: CashMovement = { ...m, id: draftId('CJ'), date: m.date ?? new Date().toISOString(), user: currentUser.name, status: 'Aplicado' };
     const d = money.draft();
     d.cashMovements = [created, ...d.cashMovements];
     return saveMoney(m.kind === 'Egreso' ? 'egreso_caja' : 'ingreso_caja', d);
@@ -1860,8 +1865,6 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   };
 
   const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
-  const [dropRequests, setDropRequests] = useState<DropRequest[]>(() => structuredClone(PEOPLE_SEED.dropRequests));
-  const [enrollmentChanges, setEnrollmentChanges] = useState<EnrollmentChange[]>([]);
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
@@ -1984,13 +1987,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const log = useLogistics(logisticsData, { items, locations });
   const { stockItems, kardex, transfers, shipments, couriers, shippingMethods, adjustments, incidents } = log;
 
-  // Matrículas, planes, cuotas, pagos, caja, notas de crédito y grupos promocionales: de la base de datos (`AccessGate` los lee al iniciar sesión).
+  // Matrículas, planes, cuotas, pagos, caja, notas de crédito, grupos promocionales, solicitudes (caída, reactivación, cambio de programa y traslado) y
+  // registro de correcciones: de la base de datos (`AccessGate` los lee al iniciar sesión).
   // Las acciones de más abajo piden un borrador (`money.draft()`), lo cambian con las reglas puras de siempre y lo entregan a la base con
   // `saveMoney` (todo o nada, con la función del registro de esa acción); si algo no cuadra, la base lo rechaza y no cambia nada. Los nombres del
   // alumno, programa, nivel, sede, asesor, origen, tipo de pago y tarifario salen de sus ids. Los datos de ejemplo están en `data/seedPeople.ts` (se
-  // cargan con `supabase/seed/matriculas_de_ejemplo.sql`, con los mismos códigos, porque la agenda y las solicitudes de ejemplo en memoria los nombran).
+  // cargan con `supabase/seed/matriculas_de_ejemplo.sql` y `supabase/seed/solicitudes_de_ejemplo.sql`, con los mismos códigos, porque la agenda de ejemplo en memoria los nombra).
   const money = useMoney(moneyData, { students, programs, levels, branches, staff, leadSources, paymentTypes, tariffs }, () => log.refreshStock());
-  const { enrollments, plans, payments, cashMovements, creditNotes, promotionGroups } = money;
+  const { enrollments, plans, payments, cashMovements, creditNotes, promotionGroups, dropRequests, changeRequests, enrollmentChanges } = money;
   // Cierres de caja y caja chica: cada sede cierra la suya y tiene su fondo; la base calcula el saldo esperado y bloquea los días cerrados.
   const cashBoxes = useCashBoxes(cashBoxesData, cashMovements);
   const { closures: cashClosures, pettyMovements: pettyCashMovements, pettyFunds } = cashBoxes;
@@ -2046,7 +2050,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (closed) return { ok: false, error: closed };
     const totalUsd = Math.round(unitPrice * input.qty * 100) / 100;
     const sale: CashMovement = {
-      id: allocId('CJ', cashMovements.map(x => x.id)), date: new Date().toISOString(), user: currentUser.name, status: 'Aplicado',
+      id: draftId('CJ'), date: new Date().toISOString(), user: currentUser.name, status: 'Aplicado',
       kind: 'Ingreso',
       concept: 'Venta de artículo',
       reference: `${input.receiptType} ${input.receiptNumber || 'S/N'} / ${input.customerName || 'Cliente General'}`,
@@ -2171,7 +2175,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (received > owed + 0.01) return { ok: false, error: `El monto equivale a USD ${received.toFixed(2)} y supera el saldo de USD ${owed.toFixed(2)}.` };
     const paymentData = { date: input.date, amount: Math.round(Math.min(received, owed) * 100) / 100, receipt: documentLabel(input.document) };
 
-    const paymentId = allocId('PAG', payments.map(p => p.id));
+    const paymentId = draftId('PAG');
     const d = money.draft();
     d.plans = d.plans.map(plan => {
       if (plan.id !== planId) return plan;
@@ -2343,13 +2347,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     d.cashMovements = [...newCashMovements(b.cashMovements), ...d.cashMovements];
     const saved = await saveMoney('matricular', d);
     if (!saved.ok) return { ok: false, error: `Las personas se guardaron, pero no se pudo matricular: ${saved.error}` };
-    // La agenda (la primera asesoría) sigue en memoria
-    setSchedules(prev => [...prev, ...b.schedules]);
+    // La agenda (la primera asesoría) sigue en memoria y nombra a la matrícula: se completa con el código que asignó la base
+    const codes = saved.codes ?? {};
+    setSchedules(prev => [...prev, ...replaceDraftIds(b.schedules, codes)]);
 
-    return { ok: true, enrollmentIds: b.enrollments.map(e => e.id) };
+    return { ok: true, enrollmentIds: b.enrollments.map(e => codes[e.id] ?? e.id) };
   };
 
-  const requestEnrollmentDrop = (enrollmentId: string, input: DropInput): StockResult => {
+  const requestEnrollmentDrop = async (enrollmentId: string, input: DropInput): Promise<StockResult> => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const auth = canRequest(authority(), 'Caída');
@@ -2357,7 +2362,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const problems = validateDropRequest(enrollment, input, dropRequests, todayLocalISO());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const request: DropRequest = {
-      id: nextSequentialId('CAI', dropRequests.map(r => r.id)),
+      id: draftId('CAI'),
       enrollmentId,
       studentId: enrollment.studentId,
       requestedAt: new Date().toISOString(),
@@ -2367,7 +2372,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       effectiveDate: input.effectiveDate,
       status: 'Pendiente',
     };
-    setDropRequests(prev => [request, ...prev]);
+    // La solicitud se guarda en la base (nace pendiente); quién y cuándo la pidió los pone la base con la cuenta
+    const d = money.draft();
+    d.dropRequests = [request, ...d.dropRequests];
+    const saved = await saveMoney('solicitar_caida', d);
+    if (!saved.ok) return saved;
     notify('drop_request_pending', { title: 'Solicitud de caída pendiente', message: `${currentUser.name} solicitó la caída de la matrícula ${enrollmentId} (${enrollment.student}): ${input.reason}.`, type: 'warning', scope: { subjectBranchId: enrollment.branchId, requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
@@ -2382,8 +2391,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const resolution = { status: decision, resolvedAt: new Date().toISOString(), resolvedBy: currentUser.name, resolutionNote: opts.note.trim() || undefined };
 
     if (decision === 'Rechazada') {
-      setDropRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...resolution } : r)));
-      return { ok: true };
+      const d = money.draft();
+      d.dropRequests = d.dropRequests.map(r => (r.id === requestId ? { ...r, ...resolution } : r));
+      return saveMoney('rechazar_caida', d);
     }
 
     const enrollment = enrollments.find(e => e.id === request.enrollmentId);
@@ -2397,14 +2407,15 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const forgive = opts.forgiveOverdue && preview.overdue.length > 0;
     const effects = summarizeDrop(preview, forgive);
 
-    // La matrícula y su plan (cuotas anuladas o condonadas) se guardan juntos en la base
+    // La matrícula, su plan (cuotas anuladas o condonadas) y la solicitud aprobada (con su resumen de efectos) se guardan juntos en la base
     const d = money.draft();
     d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e));
     if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p));
+    d.dropRequests = d.dropRequests.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r));
     const saved = await saveMoney('caida', d);
     if (!saved.ok) return saved;
 
-    // La agenda y las solicitudes siguen en memoria
+    // La agenda sigue en memoria
     if (preview.scheduleIds.length > 0) {
       setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
       logSystemCancel(preview.scheduleIds, 'Caída de la matrícula');
@@ -2419,7 +2430,6 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       })));
     }
     // El estado del alumno no se guarda: pasa a «Inactivo» solo, porque ya no le queda ninguna matrícula activa (utils/identity.ts)
-    setDropRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r)));
     return { ok: true };
   };
 
@@ -2436,14 +2446,12 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const at = new Date().toISOString();
     const d = money.draft();
     d.enrollments = d.enrollments.map(e => (e.id === enrollmentId ? { ...e, ...buildEnrollmentPatch(after, names) } : e));
-    const saved = await saveMoney('corregir', d);
-    if (!saved.ok) return saved;
-    // El registro de las correcciones sigue en memoria
-    setEnrollmentChanges(prev => [
-      ...changes.map(c => ({ id: allocId('COR', enrollmentChanges.map(x => x.id)), enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
-      ...prev,
-    ]);
-    return { ok: true };
+    // El registro de las correcciones se guarda con el cambio de la matrícula (todo o nada)
+    d.enrollmentChanges = [
+      ...changes.map(c => ({ id: draftId('COR'), enrollmentId, at, by: currentUser.name, field: c.field, label: c.label, from: c.from, to: c.to, reason: reason.trim() })),
+      ...d.enrollmentChanges,
+    ];
+    return saveMoney('corregir', d);
   };
 
   /** Autoridad del usuario actual (ver `utils/authority.ts`). */
@@ -2467,8 +2475,9 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const d = money.draft();
     let note: CreditNote | undefined;
     if (noteMode === 'emitir' || noteMode === 'externa') {
-      const built = buildCreditNote({ payment, mode: noteMode, external: input.creditNote, reason: input.reason, detail: input.detail, by: currentUser.name, at: new Date().toISOString() }, creditNotes);
-      note = { ...built, id: allocId('NC', creditNotes.map(n => n.id)) };
+      // Su código y, si la emite el sistema, su número de serie son borradores: la base asigna los definitivos al guardar
+      const built = buildCreditNote({ payment, mode: noteMode, external: input.creditNote, reason: input.reason, detail: input.detail, by: currentUser.name, at: new Date().toISOString() });
+      note = { ...built, id: draftId('NC') };
       d.creditNotes = [note, ...d.creditNotes];
     }
 
@@ -2633,14 +2642,15 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const closed = closedMessage(cashClosures, 'caja', input.currency, input.date, sedes.length === 1 && sedes[0] ? sedes[0] : undefined);
     if (closed) return { ok: false, error: closed };
     const created: CashMovement = {
-      ...built.egress, id: allocId('CJ', cashMovements.map(x => x.id)), user: currentUser.name, status: 'Aplicado',
+      ...built.egress, id: draftId('CJ'), user: currentUser.name, status: 'Aplicado',
       ...(sedes.length === 1 && sedes[0] ? { branchId: sedes[0] } : {}),
     };
     const ids = new Set(built.selected.map(m => m.id));
     const d = money.draft();
     d.cashMovements = [created, ...d.cashMovements.map(m => (ids.has(m.id) ? { ...m, depositedIn: built.code } : m))];
     const saved = await saveMoney('deposito', d);
-    return saved.ok ? { ok: true, code: built.code } : saved;
+    // El código del lote lo asignó la base (el borrador de `buildDeposit` se traduce con lo que devolvió)
+    return saved.ok ? { ok: true, code: saved.codes?.[built.code] ?? built.code } : saved;
   };
 
   // ---- Caja chica y cierres de caja (en la base: las reglas y el orden «validar → guardar» están en `services/cashBoxes.ts`; la base vuelve a comprobar todo)
@@ -2684,17 +2694,21 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     payments, groups: promotionGroups, requests: omit ? changeRequests.filter(r => r.id !== omit) : changeRequests, responsibles: responsiblesByBranch(staff, assignments, branches), today: todayLocalISO(),
   });
 
-  const openChange = (kind: ChangeKind & ChangeRequest['kind'], enrollment: Enrollment, reason: string, detail: string, payload: Record<string, string>): StockResult => {
+  const openChange = async (kind: ChangeKind & ChangeRequest['kind'], enrollment: Enrollment, reason: string, detail: string, payload: Record<string, string>): Promise<StockResult> => {
     const request: ChangeRequest = {
-      id: nextSequentialId('SOL', changeRequests.map(r => r.id)), kind, enrollmentId: enrollment.id, studentId: enrollment.studentId,
+      id: draftId('SOL'), kind, enrollmentId: enrollment.id, studentId: enrollment.studentId,
       requestedAt: new Date().toISOString(), requestedBy: currentUser.name, reason, detail: detail.trim(), payload, status: 'Pendiente',
     };
-    setChangeRequests(prev => [request, ...prev]);
+    // La solicitud se guarda en la base (nace pendiente); quién y cuándo la pidió los pone la base con la cuenta
+    const d = money.draft();
+    d.changeRequests = [request, ...d.changeRequests];
+    const saved = await saveMoney(kind === 'Reactivación' ? 'solicitar_reactivacion' : kind === 'Cambio de programa' ? 'solicitar_cambio_programa' : 'solicitar_traslado', d);
+    if (!saved.ok) return saved;
     notify(kind === 'Reactivación' ? 'reactivation_request_pending' : kind === 'Cambio de programa' ? 'program_change_request_pending' : 'enrollment_transfer_pending', { title: `Solicitud de ${kind.toLowerCase()} pendiente`, message: `${currentUser.name} solicitó ${kind.toLowerCase()} para la matrícula ${enrollment.id} (${enrollment.student}): ${reason}.`, type: 'warning', scope: { subjectBranchId: enrollment.branchId, requesterId: currentUser.id, requesterName: currentUser.name } });
     return { ok: true };
   };
 
-  const requestReactivation = (enrollmentId: string, input: ReactivationInput): StockResult => {
+  const requestReactivation = async (enrollmentId: string, input: ReactivationInput): Promise<StockResult> => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const auth = canRequest(authority(), 'Reactivación');
@@ -2704,7 +2718,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return openChange('Reactivación', enrollment, input.reason, input.detail, { startDate: input.startDate });
   };
 
-  const requestProgramChange = (enrollmentId: string, input: ProgramChangeInput): StockResult => {
+  const requestProgramChange = async (enrollmentId: string, input: ProgramChangeInput): Promise<StockResult> => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const auth = canRequest(authority(), 'Cambio de programa');
@@ -2714,7 +2728,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return openChange('Cambio de programa', enrollment, input.reason, input.detail, { programId: input.programId, levelId: input.levelId });
   };
 
-  const requestTransfer = (enrollmentId: string, input: TransferInput): StockResult => {
+  const requestTransfer = async (enrollmentId: string, input: TransferInput): Promise<StockResult> => {
     const enrollment = enrollments.find(e => e.id === enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const auth = canRequest(authority(), 'Traslado de sede');
@@ -2722,6 +2736,13 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const problems = validateTransferRequest(enrollment, input, changeContext());
     if (problems.length > 0) return { ok: false, error: problems[0] };
     return openChange('Traslado de sede', enrollment, input.reason, input.detail, { branchId: input.branchId, firstDate: input.firstDate, firstTime: input.firstTime });
+  };
+
+  /** La acción de la base que aprueba o rechaza cada tipo de solicitud (cada una pide la función de aprobar de su tipo). */
+  const CHANGE_ACTIONS: Record<ChangeRequest['kind'], { approve: MoneyAction; reject: MoneyAction }> = {
+    'Reactivación': { approve: 'reactivacion', reject: 'rechazar_reactivacion' },
+    'Cambio de programa': { approve: 'cambio_programa', reject: 'rechazar_cambio_programa' },
+    'Traslado de sede': { approve: 'traslado', reject: 'rechazar_traslado' },
   };
 
   const resolveChangeRequest: DataContextType['resolveChangeRequest'] = async (requestId, decision, note) => {
@@ -2734,31 +2755,33 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const at = new Date().toISOString();
     const base = { status: decision, resolvedAt: at, resolvedBy: currentUser.name, resolutionNote: note.trim() || undefined };
     if (decision === 'Rechazada') {
-      setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base } : r)));
-      return { ok: true };
+      const d = money.draft();
+      d.changeRequests = d.changeRequests.map(r => (r.id === requestId ? { ...r, ...base } : r));
+      return saveMoney(CHANGE_ACTIONS[request.kind].reject, d);
     }
     const enrollment = enrollments.find(e => e.id === request.enrollmentId);
     if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
     const c = changeContext(requestId);
     const today = c.today;
-    const log = (field: string, label: string, from: string, to: string) =>
-      setEnrollmentChanges(prev => [{ id: allocId('COR', enrollmentChanges.map(x => x.id)), enrollmentId: enrollment.id, at, by: currentUser.name, field, label, from, to, reason: request.reason }, ...prev]);
+    const entry = (field: string, label: string, from: string, to: string): EnrollmentChange =>
+      ({ id: draftId('COR'), enrollmentId: enrollment.id, at, by: currentUser.name, field, label, from, to, reason: request.reason });
     const plan = plans.find(p => p.mat === enrollment.id);
     const effects: string[] = [];
+    let log: EnrollmentChange;
+    /** Lo que sigue en memoria (la agenda): se aplica solo si la base guardó. */
+    let afterSave: () => void = () => {};
 
-    // En cada caso, lo que cambia en la matrícula y su plan se guarda primero en la base (todo o nada); lo que sigue en memoria (agenda, registro de
-    // correcciones y la propia solicitud) se aplica solo si eso salió bien.
+    // En cada caso se arma TODO antes de guardar: lo que cambia en la matrícula y su plan, el historial de la solicitud (`effects`) y la corrección que queda
+    // en el registro. La base los guarda juntos (todo o nada) y recién entonces se aplica lo que sigue en memoria (agenda).
+    const d = money.draft();
     if (request.kind === 'Reactivación') {
       const problems = reactivationProblems(enrollment, c);
       if (problems.length > 0) return { ok: false, error: problems[0] };
       const startDate = request.payload.startDate || today;
       const preview = previewReactivation(enrollment, c, startDate);
-      const d = money.draft();
       d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Activa' as const, dropDate: undefined, dropRequestId: undefined, reactivatedAt: at, reactivationRequestId: request.id } : e));
       if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyReactivationToPlan(p, preview, today) : p));
-      const saved = await saveMoney('reactivacion', d);
-      if (!saved.ok) return saved;
-      log('reactivation', 'Reactivación de la matrícula', 'Caída', 'Activa');
+      log = entry('reactivation', 'Reactivación de la matrícula', 'Caída', 'Activa');
       effects.push(`Matrícula reactivada desde el ${startDate}.`, `${preview.restored.length} cuota(s) restituida(s) por USD ${preview.restoredUSD.toFixed(2)}, con el calendario corrido ${preview.shiftDays} día(s).`);
       if (preview.keptDebt.length > 0) effects.push(`Sigue pendiente la deuda vencida de USD ${preview.keptDebtUSD.toFixed(2)}.`);
     } else if (request.kind === 'Cambio de programa') {
@@ -2769,25 +2792,24 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       if (!preview) return { ok: false, error: 'No se pudo calcular el precio del programa nuevo.' };
       if (preview.remaining < 0) return { ok: false, error: `Ya se cobró más (USD ${preview.paidUSD.toFixed(2)}) que el precio del programa nuevo (USD ${preview.newTotal.toFixed(2)}): primero devuelva la diferencia.` };
       const toLabel = preview.level ? `${preview.program.name} - ${preview.level.name}` : preview.program.name;
-      const d = money.draft();
       d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? {
         ...e, program: preview.program.name, programId: preview.program.id, level: preview.level?.name ?? 'Sin nivel', levelId: preview.level?.id,
         tariffId: preview.tariff.id, tariffName: preview.tariff.name, assignedPrice: preview.newTotal,
         verificationStatus: preview.verificationReset ? 'Pendiente' : e.verificationStatus,
       } : e));
       if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyProgramChangeToPlan(p, preview, today) : p));
-      const saved = await saveMoney('cambio_programa', d);
-      if (!saved.ok) return saved;
-      const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && o.studentId === enrollment.studentId);
-      setSchedules(prev => prev.map(sc => {
-        const mine = sc.studentId === enrollment.studentId;
-        const target = otherActive ? sc.isFirst && sc.enrollmentId === enrollment.id : mine;
-        return target && sc.date >= today && ['Reservado', 'Reprogramado'].includes(sc.status) ? { ...sc, program: preview.program.name, level: preview.level?.name ?? 'Sin nivel' } : sc;
-      }));
       // El programa del alumno tampoco se guarda: sale de su matrícula más reciente
-      log('program', 'Cambio de programa o nivel', preview.fromLabel, toLabel);
+      log = entry('program', 'Cambio de programa o nivel', preview.fromLabel, toLabel);
       effects.push(`${preview.fromLabel} → ${toLabel}.`, `Precio: USD ${preview.oldTotal.toFixed(2)} → USD ${preview.newTotal.toFixed(2)}; cobrado USD ${preview.paidUSD.toFixed(2)}; saldo USD ${preview.remaining.toFixed(2)}.`);
       if (preview.verificationReset) effects.push('La verificación vuelve a «Pendiente» para entregar los materiales del programa nuevo.');
+      afterSave = () => {
+        const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && o.studentId === enrollment.studentId);
+        setSchedules(prev => prev.map(sc => {
+          const mine = sc.studentId === enrollment.studentId;
+          const target = otherActive ? sc.isFirst && sc.enrollmentId === enrollment.id : mine;
+          return target && sc.date >= today && ['Reservado', 'Reprogramado'].includes(sc.status) ? { ...sc, program: preview.program.name, level: preview.level?.name ?? 'Sin nivel' } : sc;
+        }));
+      };
     } else {
       const input = { branchId: request.payload.branchId, firstDate: request.payload.firstDate ?? '', firstTime: request.payload.firstTime ?? '' };
       const problems = transferProblems(enrollment, input, c);
@@ -2795,36 +2817,38 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       const preview = previewTransfer(enrollment, input, c);
       if (!preview) return { ok: false, error: 'No se encontró la sede destino.' };
       const fromName = preview.fromName;
-      const d = money.draft();
       d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, branchId: input.branchId, sede: preview.toName } : e));
-      const saved = await saveMoney('traslado', d);
-      if (!saved.ok) return saved;
-      if (preview.scheduleIds.length > 0) {
-        setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
-        logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
-      }
-      logActivityRemovals(preview.activityRemovals, `Traslado de sede (${fromName} → ${preview.toName})`);
-      if (preview.activityRemovals.length > 0) {
-        setMonthlySchedules(prev => prev.map(m => ({
-          ...m,
-          actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
-        })));
-      }
       // La nueva primera asesoría en la sede destino (con personal de Psicopedagogía de esa sede)
-      if (preview.newFirst) {
-        const taken = responsiblesByBranch(staff, assignments, branches)[input.branchId] ?? [];
-        const responsible = taken[0] ?? '';
-        addSchedule({
-          student: enrollment.student, studentId: enrollment.studentId, branchId: input.branchId, program: enrollment.program, level: enrollment.level,
-          date: preview.newFirst.date, time: preview.newFirst.time, duration: SLOT_DURATION, responsible, status: 'Reservado',
-          isFirst: true, registrationId: enrollment.id, enrollmentId: enrollment.id,
-        });
-        effects.push(`Nueva primera asesoría en ${preview.toName}: ${preview.newFirst.date} a las ${preview.newFirst.time}${responsible ? ` con ${responsible}` : ''}.`);
-      }
-      log('branch', 'Traslado de sede', fromName, preview.toName);
+      const responsible = (responsiblesByBranch(staff, assignments, branches)[input.branchId] ?? [])[0] ?? '';
+      if (preview.newFirst) effects.push(`Nueva primera asesoría en ${preview.toName}: ${preview.newFirst.date} a las ${preview.newFirst.time}${responsible ? ` con ${responsible}` : ''}.`);
+      log = entry('branch', 'Traslado de sede', fromName, preview.toName);
       effects.push(`Sede: ${fromName} → ${preview.toName}.`, `${preview.scheduleIds.length} asesoría(s) y ${preview.activityRemovals.length} inscripción(es) de la sede anterior canceladas.`);
+      afterSave = () => {
+        if (preview.scheduleIds.length > 0) {
+          setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
+          logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
+        }
+        logActivityRemovals(preview.activityRemovals, `Traslado de sede (${fromName} → ${preview.toName})`);
+        if (preview.activityRemovals.length > 0) {
+          setMonthlySchedules(prev => prev.map(m => ({
+            ...m,
+            actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
+          })));
+        }
+        if (preview.newFirst) {
+          addSchedule({
+            student: enrollment.student, studentId: enrollment.studentId, branchId: input.branchId, program: enrollment.program, level: enrollment.level,
+            date: preview.newFirst.date, time: preview.newFirst.time, duration: SLOT_DURATION, responsible, status: 'Reservado',
+            isFirst: true, registrationId: enrollment.id, enrollmentId: enrollment.id,
+          });
+        }
+      };
     }
-    setChangeRequests(prev => prev.map(r => (r.id === requestId ? { ...r, ...base, effects } : r)));
+    d.changeRequests = d.changeRequests.map(r => (r.id === requestId ? { ...r, ...base, effects } : r));
+    d.enrollmentChanges = [log, ...d.enrollmentChanges];
+    const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d);
+    if (!saved.ok) return saved;
+    afterSave();
     notify('request_resolved', { title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info', scope: { subjectBranchId: enrollment.branchId, requesterName: request.requestedBy } });
     return { ok: true };
   };
@@ -2866,7 +2890,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const problems = documentProblems(kind, ctx);
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const built = buildDocument(kind, ctx);
-    const issued = issueDocument(kind, ctx.enrollment.documents?.[kind], built, currentUser.name, new Date().toISOString(), issuedNumbers(enrollments, kind));
+    const issued = issueDocument(kind, ctx.enrollment.documents?.[kind], built, currentUser.name, new Date().toISOString());
     const d = money.draft();
     d.enrollments = d.enrollments.map(e => (e.id === enrollmentId ? { ...e, documents: { ...(e.documents ?? {}), [kind]: issued } } : e));
     return saveMoney('documentos', d);

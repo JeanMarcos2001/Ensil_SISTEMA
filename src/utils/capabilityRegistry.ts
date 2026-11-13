@@ -232,7 +232,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Operación
   f('op-matriculas', 'Matrículas', 'mod-operacion', [
-    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'student', 'guardian', 'plan', 'program', 'level'] },
+    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'guardian', 'plan', 'program', 'level'], note: 'Muestra, en la lista y en la ficha, las solicitudes pendientes de cada matrícula y su historial.' },
     {
       action: 'create', label: 'Crear matrícula', kind: 'crear', requires: ['view'], sensitive: 'dinero',
       reads: ['program', 'level', 'tariff', 'promotion', 'paymentType'], writes: ['enrollment', 'student', 'guardian', 'plan', 'payment', 'cashMovement', 'verification', 'schedule'],

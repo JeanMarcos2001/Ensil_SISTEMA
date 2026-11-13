@@ -11,7 +11,7 @@
  * Un movimiento reversado no se borra: queda marcado «Reversado» con quién, cuándo y por qué, y deja de contar en el saldo.
  */
 import type { CashMovement, Plan } from '../context/DataContext';
-import { nextSequentialId } from './ids';
+import { draftId } from './draftIds';
 import { localDateOf } from './schedule';
 
 export const CASH_REVERSAL_REASONS = [
@@ -158,7 +158,8 @@ export function buildDeposit(
   input: DepositInput, movements: CashMovement[], by: string, at: string
 ): { code: string; egress: Omit<CashMovement, 'id' | 'user' | 'status'>; selected: CashMovement[] } {
   const selected = eligibleForDeposit(movements, input.currency).filter(m => input.movementIds.includes(m.id));
-  const code = nextSequentialId('DEP', movements.filter(m => m.deposit).map(m => m.deposit!.code));
+  // El código del lote es un borrador: la base asigna el definitivo (DEP-NNN) al guardar, el más alto de todas las sedes más uno
+  const code = draftId('DEP');
   const amount = round2(selected.reduce((a, m) => a + m.amount, 0));
   const amountUSD = round2(selected.reduce((a, m) => a + (m.amountUSD || 0), 0));
   void by;

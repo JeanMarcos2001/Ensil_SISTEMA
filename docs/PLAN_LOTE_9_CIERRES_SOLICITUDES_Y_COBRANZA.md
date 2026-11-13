@@ -6,7 +6,7 @@ Documento de trabajo del **2026-11-12**. Cierra el bloque de dinero: pasa a la b
 |---|---|---|
 | **9A** | Cierres y reaperturas de caja (por sede y moneda) y caja chica (un fondo por sede) | 0017 |
 | **9B** | Solicitudes (caída, reactivación, cambio de programa, traslado) con su historial y el registro de correcciones de una matrícula | 0018 |
-| **9C** | Política de cobranza, recordatorios enviados y plantilla del contrato | 0019 |
+| **9C** | Política de cobranza, recordatorios enviados y plantilla del contrato | 0021 (la 0019 y la 0020 son las de los códigos asignados por la base) |
 
 Queda fuera de este lote (tienen su propio lote): la agenda de Psicopedagogía y los avisos/mensajería (Plan de lanzamiento §6.7 y §6.8).
 
@@ -55,11 +55,39 @@ Sistema → Cierres (columna Sede; cerrar eligiendo sede), Caja (el estado y «A
 
 `supabase/seed/caja_chica_de_ejemplo.sql` (generado): el fondo de Piura y los 3 movimientos de ejemplo que mostraba la pantalla (ahora de esa sede).
 
-## 9B — Solicitudes y correcciones (migración 0018) — por diseñar al llegar
+## 9B — Solicitudes y correcciones de matrículas (migración 0018)
 
-Solicitudes de caída y de cambio (reactivación, cambio de programa, traslado) con su historial y sus efectos, y el registro de correcciones. Aprobar una solicitud ya cambia la matrícula y el plan en la base (Lote 8); aquí además se guarda la solicitud misma, **en la misma operación atómica** (`aplicar_cambios_matricula` pasa a poder tocar las tablas de solicitudes y correcciones).
+**Estado (2026-11-12): hecho y verificado en el código** (`tsc`, `vite build`, los 41 `check-*`, la migración probada contra Postgres en memoria con más de 120 casos —también con los payloads que arma el propio cliente— y su «deshacer»). **Falta que el usuario pegue la migración y la carga de partida; no se sube a `main` antes** (la aplicación lee las tablas nuevas al iniciar sesión). Diseño:
 
-## 9C — Cobranza y plantilla del contrato (migración 0019) — por diseñar al llegar
+### Tablas
+
+| Tabla | Qué guarda | Notas |
+|---|---|---|
+| `solicitudes_matricula` | UNA tabla para las cuatro clases de solicitud (`tipo`: Caída, Reactivación, Cambio de programa, Traslado de sede). Código `CAI-NNN` (caídas) o `SOL-NNN` (las demás), matrícula, motivo, detalle, `fecha_efecto` (solo caídas), `datos` (lo propio de cada tipo: fecha de reinicio, programa y nivel destino, sede destino y primera asesoría), estado (Pendiente / Aprobada / Rechazada), quién y cuándo resolvió, nota de la resolución y `efectos` (lo que se hizo al aprobar, para el historial) | **Nace pendiente y después solo se aprueba o se rechaza** (nunca se borra ni se cambia otra cosa); una resuelta no vuelve a cambiar. Quién y cuándo (pidió y resolvió) salen de la cuenta, no de la pantalla. Una sola pendiente por matrícula (una de caída y una de cambio, como hoy en pantalla) |
+| `correcciones_matricula` | Código `COR-NNN`, matrícula, campo, etiqueta, valor de antes y de después, motivo, quién y cuándo | **Solo se agrega** (un error se corrige con otra corrección). Solo puede nacer junto con un cambio de esa misma matrícula |
+
+Lo derivable no se guarda: el alumno de la solicitud sale de su matrícula.
+
+### La misma operación atómica (`aplicar_cambios_matricula`)
+
+La función de la base de la matrícula y el dinero (Lote 8) pasa a poder tocar también estas dos tablas, **en la misma llamada**, así una aprobación y su efecto (la matrícula y el plan) quedan guardados juntos o no se guarda nada:
+
+- **Pedir** (`solicitar_caida`, `solicitar_reactivacion`, `solicitar_cambio_programa`, `solicitar_traslado`): agrega UNA solicitud pendiente; pide la función de pedir de ese tipo (`op-matriculas:req_*`), la sede de la matrícula alcanzable y que la matrícula esté en el estado que ese tipo pide (la caída, el cambio y el traslado, activa; la reactivación, caída).
+- **Aprobar** (`caida`, `reactivacion`, `cambio_programa`, `traslado`): cambia la matrícula y el plan **y** deja la solicitud aprobada con sus efectos (y la corrección en el registro, salvo en la caída). La base comprueba que el efecto cuadra con lo aprobado (la matrícula quedó caída y nombra esta solicitud; el programa y nivel o la sede quedaron como se pidió).
+- **Rechazar** (`rechazar_caida`, `rechazar_reactivacion`, `rechazar_cambio_programa`, `rechazar_traslado`): solo deja la solicitud rechazada, con su nota (mínimo 5 letras).
+- **Corregir** (`corregir`): además de la matrícula, agrega las correcciones al registro.
+- **Quien pidió no resuelve** (salvo el Superusuario): ahora lo exige también la base (compara la cuenta, no el nombre).
+- Se ve por sede (`app.ve_matricula`); las solicitudes las leen las funciones que, en el registro, leen «Solicitud sobre una matrícula» (se suma «Ver matrículas», que muestra las pendientes en su lista) y las correcciones, quien lee matrículas.
+
+### Qué cambia en el sistema
+
+`useMoney` guarda además las solicitudes y las correcciones (entran en el borrador y en el comparador `diffMoney`); `requestEnrollmentDrop`, `requestReactivation`, `requestProgramChange` y `requestTransfer` pasan a ser asíncronas; en cada aprobación el historial (`effects`) y el registro de correcciones se arman antes de guardar y viajan con la matrícula. Lo que sigue en memoria (agenda, avisos) se aplica solo después de que la base guardó.
+
+**Los códigos** (`CAI-`, `SOL-`, `COR-`) los asigna la base (migración 0019, 2026-11-13): ver `docs/REGLAS_DE_NEGOCIO.md` («Códigos que asigna la base»). Antes los proponía la pantalla con lo que veía de su sede.
+
+**Datos de partida:** `supabase/seed/solicitudes_de_ejemplo.sql` (generado desde `src/data/seedPeople.ts`): la solicitud de caída de ejemplo (CAI-001, ya aprobada) que la matrícula MAT-2026-003 ya nombra.
+
+## 9C — Cobranza y plantilla del contrato (migración 0021) — por diseñar al llegar
 
 Política de cobranza (una por grupo o por empresa: decidir al llegar), recordatorios enviados (no se envían solos: se preparan y se registran) y la plantilla del contrato con sus versiones.
 

@@ -20,6 +20,7 @@ import {
   diffMoney, emptyMoneyRows, enrollmentFromRow, enrollmentToRow, mergeMoneyRows, mergeRows, MONEY_ACTIONS, moneyErrorMessage, moneyRowsFromState, moneyStateFromRows,
   numberOfCode, paymentBranchOf, sortMoneyState, type EnrollmentLists, type MoneyRows, type MoneyState, type StockOp,
 } from '../src/utils/moneyDb';
+import { assignDraftIds, draftId, draftPayloadProblem, highestOfRows } from '../src/utils/draftIds';
 import { renderMoneySeedSql } from '../src/utils/moneySeedSql';
 import { SEED_REFERENCE_DAY } from '../src/utils/peopleSeedSql';
 import { seedBranches, seedLeadSources, seedLevels, seedPaymentTypes, seedPrograms, seedTariffs } from '../src/data/seedCatalog';
@@ -40,6 +41,7 @@ const lists: EnrollmentLists = {
 };
 const world = (): MoneyState => structuredClone({
   enrollments: seed.enrollments, plans: seed.plans, payments: seed.payments, cashMovements: seed.cashMovements, creditNotes: [], promotionGroups: [],
+  dropRequests: [], changeRequests: [], enrollmentChanges: [],
 });
 
 /** Sin claves vacías ni falsas, con las claves en orden: lo que no es información no cuenta al comparar. */
@@ -146,13 +148,19 @@ function memoryRepo(initial: MoneyRows) {
         data: {
           matriculas: db.matriculas.filter(r => t.matriculas.includes(r.id)), planes: db.planes.filter(r => t.planes.includes(r.id)), pagos: db.pagos.filter(r => t.pagos.includes(r.id)),
           movimientos: db.movimientos.filter(r => t.movimientos.includes(r.id)), notas: db.notas.filter(r => t.notas.includes(r.id)), grupos: db.grupos.filter(r => t.grupos.includes(r.id)),
+          solicitudes: db.solicitudes.filter(r => t.solicitudes.includes(r.id)), correcciones: db.correcciones.filter(r => t.correcciones.includes(r.id)),
         },
       };
     },
-    async apply(action, payload): Promise<RepoResult<null>> {
+    async apply(action, payload): Promise<RepoResult<{ codes: Record<string, string> }>> {
       calls.push({ fn: 'apply', args: { action, payload } });
       if (apply.fail) return { ok: false, error: apply.fail };
-      // «La base»: agrega las filas nuevas y cambia las columnas que vienen
+      // «La base»: exige que el código de toda fila nueva sea un borrador, asigna los códigos reales con el más alto de TODA la base (no de lo que ve
+      // la pantalla), agrega las filas nuevas y cambia las columnas que vienen
+      const problem = draftPayloadProblem(payload as unknown as Record<string, unknown>);
+      if (problem) return { ok: false, error: problem };
+      const assigned = assignDraftIds(payload, highestOfRows(db));
+      const real = assigned.payload;
       const put = <R extends { id: string }>(list: R[], news: Record<string, unknown>[]) => {
         for (const row of news) {
           const { _nueva, ...rest } = row;
@@ -160,9 +168,9 @@ function memoryRepo(initial: MoneyRows) {
           if (_nueva) list.push(rest as unknown as R); else if (at >= 0) Object.assign(list[at], rest);
         }
       };
-      put(db.matriculas, payload.matriculas); put(db.planes, payload.planes); put(db.pagos, payload.pagos); put(db.movimientos, payload.movimientos);
-      put(db.notas, payload.notas); put(db.grupos, payload.grupos);
-      return { ok: true, data: null };
+      put(db.matriculas, real.matriculas); put(db.planes, real.planes); put(db.pagos, real.pagos); put(db.movimientos, real.movimientos);
+      put(db.notas, real.notas); put(db.grupos, real.grupos); put(db.solicitudes, real.solicitudes); put(db.correcciones, real.correcciones);
+      return { ok: true, data: { codes: assigned.codes } };
     },
   };
   return { repo, calls, apply, db: () => db };
@@ -172,10 +180,12 @@ function memoryRepo(initial: MoneyRows) {
   const m = memoryRepo(rows);
   const loaded = await loadMoney(m.repo);
   check('Cargar: trae todo el dinero de una vez', !!loaded.ok && loaded.value!.matriculas.length === 5 && loaded.value!.pagos.length === 10 && loaded.value!.movimientos.length === 11);
-  const after = { ...w, payments: [{ ...w.payments[0], id: 'PAG-011' }, ...w.payments] };
+  const borrador = draftId('PAG');
+  const after = { ...w, payments: [{ ...w.payments[0], id: borrador }, ...w.payments] };
   const r = await applyMoney(m.repo, 'cobrar', w, after);
-  check('Guardar: compara, aplica UNA vez, vuelve a leer lo tocado y devuelve lo que quedó',
-    !!r.ok && m.calls.filter(c => c.fn === 'apply').length === 1 && m.calls.at(-1)?.fn === 'fetch' && r.value!.fresh.pagos.length === 1 && r.value!.fresh.pagos[0].id === 'PAG-011');
+  check('Guardar: compara, aplica UNA vez, vuelve a leer lo tocado (con el código que asignó la base) y devuelve lo que quedó',
+    !!r.ok && m.calls.filter(c => c.fn === 'apply').length === 1 && m.calls.at(-1)?.fn === 'fetch' && r.value!.fresh.pagos.length === 1 && r.value!.fresh.pagos[0].id === 'PAG-011'
+    && r.value!.codes[borrador] === 'PAG-011' && r.value!.touched.pagos.join() === 'PAG-011');
   check('Guardar manda la acción que corresponde', (m.calls.find(c => c.fn === 'apply')!.args as { action: string }).action === 'cobrar');
 }
 {
@@ -185,12 +195,12 @@ function memoryRepo(initial: MoneyRows) {
 }
 {
   const m = memoryRepo(rows); m.apply.fail = 'Su rol no puede registrar pagos.';
-  const r = await applyMoney(m.repo, 'cobrar', w, { ...w, payments: [{ ...w.payments[0], id: 'PAG-011' }, ...w.payments] });
+  const r = await applyMoney(m.repo, 'cobrar', w, { ...w, payments: [{ ...w.payments[0], id: draftId('PAG') }, ...w.payments] });
   check('Si la base rechaza, se devuelve el motivo y no se vuelve a leer nada', !r.ok && r.error === 'Su rol no puede registrar pagos.' && !m.calls.some(c => c.fn === 'fetch'));
 }
 {
   const m = memoryRepo(rows); m.apply.failFetch = true;
-  const r = await applyMoney(m.repo, 'cobrar', w, { ...w, payments: [{ ...w.payments[0], id: 'PAG-011' }, ...w.payments] });
+  const r = await applyMoney(m.repo, 'cobrar', w, { ...w, payments: [{ ...w.payments[0], id: draftId('PAG') }, ...w.payments] });
   check('Si se guardó pero no se pudo volver a leer, lo dice (no finge que no pasó nada)', !r.ok && /se guardó/i.test(r.error ?? ''));
 }
 {
@@ -215,6 +225,7 @@ check('La carga es repetible (no pisa nada) y no lleva datos de personas ni de s
 
 // ------------------------------------------------------------------------------------------------------------------ Cableado
 const migration = read('supabase/migrations/20261110140000_matriculas_y_dinero.sql');
+const migration18 = read('supabase/migrations/20261112160000_solicitudes_y_correcciones.sql');
 const down = read('supabase/deshacer/20261110140000_matriculas_y_dinero.down.sql');
 const repoSrc = read('src/services/moneyRepository.ts');
 const tables = ['matriculas', 'planes', 'cuotas', 'pagos', 'movimientos_caja', 'notas_credito', 'grupos_promocionales'];
@@ -224,8 +235,8 @@ check('Nadie escribe las tablas directo: solo se leen (y la escritura pasa por l
   /grant select on public\.grupos_promocionales, public\.matriculas, public\.planes, public\.cuotas, public\.pagos, public\.movimientos_caja, public\.notas_credito\s+to authenticated/.test(migration)
   && !/grant (insert|update|delete)/.test(migration) && !/\.from\('[a-z_]+'\)\s*\.(insert|update|upsert|delete)/.test(repoSrc));
 
-const block = /create function app\.acciones_dinero\(\)[\s\S]*?select '(\{[\s\S]*?\})'::jsonb;/.exec(migration)?.[1] ?? '{}';
-const config = JSON.parse(block) as Record<string, { mensaje: string; funciones: string[]; tablas: Record<string, string>; extra?: Record<string, string>; stock?: string[]; mov_nuevo?: string }>;
+const block = /create or replace function app\.acciones_dinero\(\)[\s\S]*?select '(\{[\s\S]*?\})'::jsonb;/.exec(migration18)?.[1] ?? '{}';
+const config = JSON.parse(block) as Record<string, { mensaje: string; funciones: string[]; tablas: Record<string, string>; extra?: Record<string, string>; stock?: string[]; mov_nuevo?: string; sol_tipo?: string; sol_estado?: string }>;
 check('Las acciones de la base son exactamente las que conoce el cliente', Object.keys(config).sort().join() === [...MONEY_ACTIONS].sort().join(), `${Object.keys(config).sort().join()} ≠ ${[...MONEY_ACTIONS].sort().join()}`);
 const allFns = [...new Set(Object.values(config).flatMap(c => [...c.funciones, ...Object.values(c.extra ?? {})]))];
 check('Las funciones del registro que piden las acciones existen', allFns.length >= 15 && allFns.every(id => !!capabilityById(id)), allFns.filter(id => !capabilityById(id)).join());
@@ -234,14 +245,17 @@ const direct: [string, string][] = [
   ['cobrar', 'registerPayment'], ['refinanciar', 'refinanceInstallment'], ['mora', 'chargeMora'], ['reversar_movimiento', 'reverseCashMovement'], ['deposito', 'createDepositBatch'],
   ['venta', 'registerItemSale'], ['caida', 'resolveEnrollmentDrop'], ['corregir', 'updateEnrollmentData'], ['extension', 'enableExtension'], ['documentos', 'generateEnrollmentDocument'],
   ['verificacion', 'updateEnrollmentVerification'],
+  ['solicitar_caida', 'requestEnrollmentDrop'], ['solicitar_reactivacion', 'requestReactivation'], ['solicitar_cambio_programa', 'requestProgramChange'], ['solicitar_traslado', 'requestTransfer'],
+  ['rechazar_caida', 'resolveEnrollmentDrop'],
 ];
 check('Cada acción de la base pide la misma función que el contexto pide a la pantalla (una sola fuente: el registro)',
   direct.every(([a, ctx]) => sameSet(config[a].funciones, capabilitiesOfAction(ctx))), direct.filter(([a, ctx]) => !sameSet(config[a].funciones, capabilitiesOfAction(ctx))).map(([a, ctx]) => `${a}: ${config[a].funciones} ≠ ${capabilitiesOfAction(ctx)}`).join(' | '));
 check('Matricular pide crear o renovar; reversar un pago, «Reversar pago» (y las notas, «Nota de crédito»); ingreso y egreso de caja, cada una la suya',
   sameSet(config.matricular.funciones, ['op-matriculas:create', 'op-matriculas:renew']) && sameSet(config.reversar_pago.funciones, ['op-pagos:reverse_payment']) && config.reversar_pago.extra?.notas === 'op-pagos:credit_note'
   && sameSet(config.ingreso_caja.funciones, ['op-caja:reg_income']) && sameSet(config.egreso_caja.funciones, ['op-caja:reg_expense']));
-check('Reactivar, cambiar de programa y trasladar piden cada una su función de aprobar (y el contexto pide cualquiera de las tres a la pantalla)',
-  sameSet([...config.reactivacion.funciones, ...config.cambio_programa.funciones, ...config.traslado.funciones], capabilitiesOfAction('resolveChangeRequest')));
+check('Reactivar, cambiar de programa y trasladar piden cada una su función de aprobar (y el contexto pide cualquiera de las tres a la pantalla); rechazar pide la misma que aprobar',
+  sameSet([...config.reactivacion.funciones, ...config.cambio_programa.funciones, ...config.traslado.funciones], capabilitiesOfAction('resolveChangeRequest'))
+  && sameSet(config.rechazar_reactivacion.funciones, config.reactivacion.funciones) && sameSet(config.rechazar_cambio_programa.funciones, config.cambio_programa.funciones) && sameSet(config.rechazar_traslado.funciones, config.traslado.funciones));
 check('Cada acción solo toca las tablas que le corresponden: cobrar no toca matrículas; refinanciar, mora y traslado no tocan pagos ni caja; caja no toca planes',
   !config.cobrar.tablas.matriculas && !config.refinanciar.tablas.pagos && !config.refinanciar.tablas.movimientos && !config.mora.tablas.pagos && !config.traslado.tablas.planes
   && !config.ingreso_caja.tablas.planes && !config.deposito.tablas.planes && !config.corregir.tablas.planes && !config.corregir.tablas.pagos);
@@ -270,25 +284,30 @@ check('Hay script para deshacer', tables.every(t => new RegExp(`drop table if ex
 // ------------------------------------------------------------------------------------------------------------------ Contexto y pantallas
 const ctxSrc = read('src/context/DataContext.tsx');
 check('El contexto ya no guarda matrículas, planes, pagos, caja, notas ni grupos en memoria: usa los de la base (useMoney)',
-  !/setEnrollments|setPlans\(|setPayments|setCashMovements|setCreditNotes|setPromotionGroups/.test(ctxSrc) && /const money = useMoney\(moneyData/.test(ctxSrc) && /const \{ enrollments, plans, payments, cashMovements, creditNotes, promotionGroups \} = money/.test(ctxSrc));
+  !/setEnrollments|setPlans\(|setPayments|setCashMovements|setCreditNotes|setPromotionGroups/.test(ctxSrc) && /const money = useMoney\(moneyData/.test(ctxSrc) && /const \{ enrollments, plans, payments, cashMovements, creditNotes, promotionGroups, dropRequests, changeRequests, enrollmentChanges \} = money/.test(ctxSrc));
 const actionUsed = (a: string) => new RegExp(`saveMoney\\('${a}'`).test(ctxSrc);
-check('Cada acción del dinero se guarda con la acción de la base que le corresponde',
-  ['matricular', 'cobrar', 'refinanciar', 'mora', 'reversar_pago', 'reversar_movimiento', 'deposito', 'venta', 'caida', 'reactivacion', 'cambio_programa', 'traslado', 'corregir', 'extension', 'documentos', 'verificacion'].every(actionUsed)
-  && /saveMoney\(m\.kind === 'Egreso' \? 'egreso_caja' : 'ingreso_caja', d\)/.test(ctxSrc), ['matricular', 'cobrar', 'refinanciar', 'mora', 'reversar_pago', 'reversar_movimiento', 'deposito', 'venta', 'caida', 'reactivacion', 'cambio_programa', 'traslado', 'corregir', 'extension', 'documentos', 'verificacion'].filter(a => !actionUsed(a)).join());
+check('Cada acción del dinero se guarda con la acción de la base que le corresponde (aprobar y rechazar una solicitud de cambio, por su tipo)',
+  ['matricular', 'cobrar', 'refinanciar', 'mora', 'reversar_pago', 'reversar_movimiento', 'deposito', 'venta', 'caida', 'rechazar_caida', 'solicitar_caida', 'corregir', 'extension', 'documentos', 'verificacion'].every(actionUsed)
+  && /saveMoney\(m\.kind === 'Egreso' \? 'egreso_caja' : 'ingreso_caja', d\)/.test(ctxSrc)
+  && /'Reactivación': \{ approve: 'reactivacion', reject: 'rechazar_reactivacion' \}/.test(ctxSrc) && /'Cambio de programa': \{ approve: 'cambio_programa', reject: 'rechazar_cambio_programa' \}/.test(ctxSrc)
+  && /'Traslado de sede': \{ approve: 'traslado', reject: 'rechazar_traslado' \}/.test(ctxSrc),
+  ['matricular', 'cobrar', 'refinanciar', 'mora', 'reversar_pago', 'reversar_movimiento', 'deposito', 'venta', 'caida', 'rechazar_caida', 'solicitar_caida', 'corregir', 'extension', 'documentos', 'verificacion'].filter(a => !actionUsed(a)).join());
 check('Venta, reversa de una venta y entrega de materiales mueven el stock en la MISMA llamada que guarda el dinero (no hay dos pasos que puedan quedar a medias)',
   /op: 'vender'/.test(ctxSrc) && /op: 'reponer'/.test(ctxSrc) && /op: 'entregar'/.test(ctxSrc) && !/log\.sellFromStock|log\.restockReversedSale|log\.deliverFromStock/.test(ctxSrc) && /\(\) => log\.refreshStock\(\)/.test(ctxSrc));
 check('Cada acción valida con las reglas puras ANTES de llamar a la base y no se guarda nada si falla (el estado nuevo solo se entrega al final)',
   ctxSrc.indexOf("validatePaymentInput({ parts: input.parts") < ctxSrc.indexOf("saveMoney('cobrar'") && ctxSrc.indexOf('validateReversal(payment, input, ctx)') < ctxSrc.indexOf("saveMoney('reversar_pago'") && ctxSrc.indexOf('validateRefinance(plan, installmentId') < ctxSrc.indexOf("saveMoney('refinanciar'"));
-check('En una aprobación (caída, reactivación, cambio de programa, traslado) lo de la agenda y las solicitudes se aplica solo DESPUÉS de que la base guardó',
-  ctxSrc.indexOf("saveMoney('caida', d)") < ctxSrc.indexOf("Cancelada por la caída de la matrícula") && ctxSrc.indexOf("saveMoney('traslado', d)") < ctxSrc.indexOf('Cancelada por el traslado de sede')
-  && ctxSrc.indexOf("saveMoney('reactivacion', d)") < ctxSrc.indexOf("log('reactivation'"));
+check('En una aprobación (caída, reactivación, cambio de programa, traslado) lo que sigue en memoria (la agenda) se aplica solo DESPUÉS de que la base guardó; la solicitud y la corrección viajan CON la matrícula',
+  ctxSrc.indexOf("saveMoney('caida', d)") < ctxSrc.indexOf("Cancelada por la caída de la matrícula") && ctxSrc.indexOf('const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d);') < ctxSrc.indexOf('afterSave();')
+  && /d\.changeRequests = d\.changeRequests\.map\(r => \(r\.id === requestId \? \{ \.\.\.r, \.\.\.base, effects \} : r\)\);\s*d\.enrollmentChanges = \[log, \.\.\.d\.enrollmentChanges\];/.test(ctxSrc)
+  && /d\.dropRequests = d\.dropRequests\.map\(r => \(r\.id === requestId \? \{ \.\.\.r, \.\.\.resolution, effects \} : r\)\);\s*const saved = await saveMoney\('caida', d\)/.test(ctxSrc));
 check('Matricular guarda matrícula, plan, pago, caja y grupo juntos y avisa que las personas ya se guardaron si eso falla',
   /d\.promotionGroups = \[\.\.\.d\.promotionGroups, \.\.\.b\.promotionGroups\]/.test(ctxSrc) && /Las personas se guardaron, pero no se pudo matricular: \$\{saved\.error\}/.test(ctxSrc));
 check('Reversar un pago guarda el plan, el pago anulado, la nota de crédito y la caja en UNA operación', /d\.creditNotes = \[note, \.\.\.d\.creditNotes\]/.test(ctxSrc) && (ctxSrc.match(/saveMoney\('reversar_pago'/g) ?? []).length === 1);
 check('Un depósito lleva la sede de los ingresos que se depositan (si vienen de una sola)', /sedes\.length === 1 && sedes\[0\] \? \{ branchId: sedes\[0\] \}/.test(ctxSrc));
 const iface = ctxSrc.slice(ctxSrc.indexOf('interface DataContextType'), ctxSrc.indexOf('export const DataContext ='));
 const asyncActions = ['addCashMovement', 'createDepositBatch', 'reverseCashMovement', 'registerItemSale', 'registerEnrollments', 'registerPayment', 'refinanceInstallment', 'chargeMora', 'reversePayment',
-  'resolveEnrollmentDrop', 'resolveChangeRequest', 'updateEnrollmentData', 'enableExtension', 'generateEnrollmentDocument', 'registerDocumentSignature', 'updateEnrollmentVerification'];
+  'resolveEnrollmentDrop', 'resolveChangeRequest', 'updateEnrollmentData', 'enableExtension', 'generateEnrollmentDocument', 'registerDocumentSignature', 'updateEnrollmentVerification',
+  'requestEnrollmentDrop', 'requestReactivation', 'requestProgramChange', 'requestTransfer'];
 check('Las acciones del dinero son asíncronas y devuelven { ok, error }', asyncActions.every(a => new RegExp(`\\n  ${a}: .*=> Promise<`).test(iface) || new RegExp(`\\n  ${a}: \\([^)]*\\) => Promise<`).test(iface) || new RegExp(`\\n  ${a}: \\([\\s\\S]*?\\) => Promise<`).test(iface)), asyncActions.filter(a => !new RegExp(`\\n  ${a}: [\\s\\S]*?=> Promise<`).test(iface)).join());
 check('Esas acciones no están entre las que lanzan error al negar el permiso (devuelven resultado)', asyncActions.every(a => !THROWS_ON_DENIAL.has(a)));
 
@@ -304,7 +323,9 @@ check('Las pantallas esperan la respuesta de la base antes de seguir y apagan el
   && awaits('src/components/enrollment/ResolveDropModal.tsx', /await data\.resolveEnrollmentDrop\(/) && awaits('src/components/enrollment/ResolveChangeModal.tsx', /await data\.resolveChangeRequest\(/)
   && awaits('src/components/enrollment/EditEnrollmentModal.tsx', /await data\.updateEnrollmentData\(/) && awaits('src/components/enrollment/EnrollmentDocumentsPanel.tsx', /await data\.generateEnrollmentDocument\(/)
   && awaits('src/components/enrollment/EnrollmentDocumentsPanel.tsx', /await data\.registerDocumentSignature\(/) && awaits('src/components/enrollment/EnrollmentFichaModal.tsx', /await data\.enableExtension\(/)
-  && awaits('src/pages/Enrollments.tsx', /await enableExtension\(/));
+  && awaits('src/pages/Enrollments.tsx', /await enableExtension\(/)
+  && awaits('src/components/enrollment/DropRequestModal.tsx', /await data\.requestEnrollmentDrop\(/) && awaits('src/components/enrollment/DropRequestModal.tsx', /disabled=\{saving\}/)
+  && awaits('src/components/enrollment/ChangeRequestModal.tsx', /await \(kind === 'Reactivación' \? data\.requestReactivation\(/) && awaits('src/components/enrollment/ChangeRequestModal.tsx', /disabled=\{saving\}/));
 check('El hook guarda el estado de la base y entrega un borrador; si algo falla el estado no cambia', /export function useMoney/.test(read('src/hooks/useMoney.ts')) && /const draft = useCallback/.test(read('src/hooks/useMoney.ts')) && /if \(!res\.ok \|\| !res\.value\) return \{ ok: false, error: res\.error \}/.test(read('src/hooks/useMoney.ts')));
 
 if (failed > 0) {

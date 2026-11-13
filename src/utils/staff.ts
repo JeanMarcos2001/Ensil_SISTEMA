@@ -86,16 +86,13 @@ export function validateStaffForm(f: StaffForm, staff: Staff[], today: string, e
   return e;
 }
 
-/** Siguiente código correlativo de seis dígitos («000003»). */
-export function nextStaffCode(staff: Pick<Staff, 'code'>[]): string {
-  const max = staff.reduce((m, s) => Math.max(m, parseInt(s.code, 10) || 0), 0);
-  return String(max + 1).padStart(6, '0');
-}
-
-/** Ficha lista para guardar (la edad se calcula de la fecha de nacimiento). */
-export function buildStaff(f: StaffForm, today: string, base?: Pick<Staff, 'code' | 'status'>, staff: Pick<Staff, 'code'>[] = []): Omit<Staff, 'id'> {
+/**
+ * Ficha lista para guardar (la edad se calcula de la fecha de nacimiento). El código de seis dígitos de una ficha nueva queda vacío: lo asigna la
+ * base al guardar (el siguiente al más alto de todo el personal, aunque esta cuenta solo vea el de sus sedes; migración 0020).
+ */
+export function buildStaff(f: StaffForm, today: string, base?: Pick<Staff, 'code' | 'status'>): Omit<Staff, 'id'> {
   return {
-    code: base?.code ?? nextStaffCode(staff),
+    code: base?.code ?? '',
     status: base?.status ?? 'Activo',
     docType: f.docType,
     docNumber: f.docNumber.trim(),

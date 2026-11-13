@@ -36,7 +36,6 @@ import {
 import {
   buildStaff,
   emptyStaffForm,
-  nextStaffCode,
   staffToForm,
   validateStaffForm,
   type StaffForm,
@@ -77,9 +76,9 @@ check('Correo personal con formato', !!errs(goodStaff({ personalEmail: 'juan@' }
 check('Dirección muy corta → rechazada', !!errs(goodStaff({ address: 'Lima' })).address);
 check('Con hijos: el número es obligatorio (1 a 20)', !!errs(goodStaff({ hasChildren: true, childrenCount: '' })).childrenCount && !!errs(goodStaff({ hasChildren: true, childrenCount: '0' })).childrenCount && !errs(goodStaff({ hasChildren: true, childrenCount: '2' })).childrenCount);
 check('Sin hijos no se pide el número', !('childrenCount' in errs(goodStaff({ hasChildren: false }))));
-check('Código correlativo de 6 dígitos (sigue al más alto)', nextStaffCode(existing) === '000008' && nextStaffCode([]) === '000001');
-const built = buildStaff(goodStaff({ hasChildren: true, childrenCount: '2', specialty: ' ' }), TODAY, undefined, existing);
-check('La edad se calcula de la fecha de nacimiento (no se guarda), el estado queda Activo y se recortan los textos', staffAge(built, TODAY) === 34 && !('age' in built) && built.status === 'Activo' && built.code === '000008' && built.childrenCount === 2 && built.specialty === undefined);
+const built = buildStaff(goodStaff({ hasChildren: true, childrenCount: '2', specialty: ' ' }), TODAY);
+check('La edad se calcula de la fecha de nacimiento (no se guarda), el estado queda Activo y se recortan los textos', staffAge(built, TODAY) === 34 && !('age' in built) && built.status === 'Activo' && built.childrenCount === 2 && built.specialty === undefined);
+check('El código de seis dígitos de una ficha nueva lo asigna la base (queda vacío; la pantalla no lo inventa con el personal que ve)', built.code === '');
 check('Editar conserva código y estado', buildStaff(goodStaff(), TODAY, { code: '000002', status: 'Inactivo' }).code === '000002' && buildStaff(goodStaff(), TODAY, { code: '000002', status: 'Inactivo' }).status === 'Inactivo');
 check('Ida y vuelta ficha → formulario', staffToForm({ ...existing[0], hasChildren: true, childrenCount: 3, gender: 'Masculino' }).childrenCount === '3');
 

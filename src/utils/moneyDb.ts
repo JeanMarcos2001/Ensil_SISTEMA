@@ -10,9 +10,10 @@
  * `aplicar_cambios_matricula` y vuelve a comprobar los invariantes del dinero.
  */
 import type {
-  CashMovement, CreditNote, Enrollment, Installment, InstallmentPayment, Level, LeadSource, PaymentType, Payment, Plan, Program, PromotionGroup,
-  Staff, Student, Tariff, Branch,
+  CashMovement, ChangeRequest, CreditNote, DropRequest, Enrollment, EnrollmentChange, Installment, InstallmentPayment, Level, LeadSource, PaymentType, Payment, Plan, Program,
+  PromotionGroup, Staff, Student, Tariff, Branch,
 } from '../context/DataContext';
+import { correctionFromRow, correctionToRow, requestRowsFromState, requestsFromRows, type CorreccionRow, type SolicitudRow } from './requestsDb';
 import type { InstallmentStatus, PlanStatus } from './statuses';
 
 // ------------------------------------------------------------------------------------------------------------------ Filas
@@ -66,14 +67,19 @@ export interface GrupoRow {
 /** Todo lo que se lee de la base (las filas tal cual). */
 export interface MoneyRows {
   matriculas: MatriculaRow[]; planes: PlanRow[]; pagos: PagoRow[]; movimientos: MovimientoRow[]; notas: NotaRow[]; grupos: GrupoRow[];
+  /** Solicitudes de caída, reactivación, cambio de programa y traslado (una sola tabla) y el registro de correcciones de las matrículas. */
+  solicitudes: SolicitudRow[]; correcciones: CorreccionRow[];
 }
-export const emptyMoneyRows = (): MoneyRows => ({ matriculas: [], planes: [], pagos: [], movimientos: [], notas: [], grupos: [] });
+export const emptyMoneyRows = (): MoneyRows => ({ matriculas: [], planes: [], pagos: [], movimientos: [], notas: [], grupos: [], solicitudes: [], correcciones: [] });
 
 /** El estado del dinero tal como lo ven las pantallas y las reglas puras (con los nombres derivados). */
 export interface MoneyState {
   enrollments: Enrollment[]; plans: Plan[]; payments: Payment[]; cashMovements: CashMovement[]; creditNotes: CreditNote[]; promotionGroups: PromotionGroup[];
+  dropRequests: DropRequest[]; changeRequests: ChangeRequest[]; enrollmentChanges: EnrollmentChange[];
 }
-export const emptyMoneyState = (): MoneyState => ({ enrollments: [], plans: [], payments: [], cashMovements: [], creditNotes: [], promotionGroups: [] });
+export const emptyMoneyState = (): MoneyState => ({
+  enrollments: [], plans: [], payments: [], cashMovements: [], creditNotes: [], promotionGroups: [], dropRequests: [], changeRequests: [], enrollmentChanges: [],
+});
 
 /** Listas con las que se derivan los nombres de una matrícula. */
 export interface EnrollmentLists {
@@ -270,6 +276,7 @@ export const groupFromRow = (r: GrupoRow): PromotionGroup => {
 /** Las filas que se leen de la base, vueltas el estado que usan las pantallas (con los nombres derivados). */
 export function moneyStateFromRows(rows: MoneyRows, lists: EnrollmentLists): MoneyState {
   const planOf = new Map(rows.planes.map(p => [p.matricula_id, p.id]));
+  const studentOf = new Map(rows.matriculas.map(m => [m.id, m.alumno_id]));
   return {
     enrollments: rows.matriculas.map(m => enrollmentFromRow(m, planOf.get(m.id), lists)),
     plans: rows.planes.map(planFromRow),
@@ -277,6 +284,8 @@ export function moneyStateFromRows(rows: MoneyRows, lists: EnrollmentLists): Mon
     cashMovements: rows.movimientos.map(movementFromRow),
     creditNotes: rows.notas.map(noteFromRow),
     promotionGroups: rows.grupos.map(groupFromRow),
+    ...requestsFromRows(rows.solicitudes, id => studentOf.get(id)),
+    enrollmentChanges: rows.correcciones.map(correctionFromRow),
   };
 }
 
@@ -289,6 +298,8 @@ export function moneyRowsFromState(s: MoneyState, audit = false): MoneyRows {
     movimientos: s.cashMovements.map(m => movementToRow(m, audit)),
     notas: s.creditNotes.map(noteToRow),
     grupos: s.promotionGroups.map(groupToRow),
+    solicitudes: requestRowsFromState(s.dropRequests, s.changeRequests, audit),
+    correcciones: s.enrollmentChanges.map(c => correctionToRow(c, audit)),
   };
 }
 
@@ -303,15 +314,19 @@ export type StockOp =
 /** Lo que se manda a `aplicar_cambios_matricula`: por tabla, las filas nuevas (completas y marcadas con `_nueva`) y las cambiadas (su clave y solo las columnas que cambiaron). */
 export interface MoneyPayload {
   grupos: Record<string, unknown>[]; matriculas: Record<string, unknown>[]; planes: Record<string, unknown>[]; pagos: Record<string, unknown>[];
-  movimientos: Record<string, unknown>[]; notas: Record<string, unknown>[]; stock?: StockOp[];
+  movimientos: Record<string, unknown>[]; notas: Record<string, unknown>[]; solicitudes: Record<string, unknown>[]; correcciones: Record<string, unknown>[]; stock?: StockOp[];
 }
 
 /** Los códigos de las filas tocadas (para volver a leerlas después de guardar). */
-export interface MoneyTouched { matriculas: string[]; planes: string[]; pagos: string[]; movimientos: string[]; notas: string[]; grupos: string[] }
+export interface MoneyTouched {
+  matriculas: string[]; planes: string[]; pagos: string[]; movimientos: string[]; notas: string[]; grupos: string[]; solicitudes: string[]; correcciones: string[];
+}
 
 export const MONEY_ACTIONS = [
   'matricular', 'cobrar', 'refinanciar', 'mora', 'reversar_pago', 'reversar_movimiento', 'deposito', 'ingreso_caja', 'egreso_caja', 'venta', 'caida', 'reactivacion',
   'cambio_programa', 'traslado', 'corregir', 'extension', 'documentos', 'verificacion',
+  'solicitar_caida', 'solicitar_reactivacion', 'solicitar_cambio_programa', 'solicitar_traslado',
+  'rechazar_caida', 'rechazar_reactivacion', 'rechazar_cambio_programa', 'rechazar_traslado',
 ] as const;
 export type MoneyAction = (typeof MONEY_ACTIONS)[number];
 
@@ -352,11 +367,19 @@ export function diffMoney(before: MoneyState, after: MoneyState, stock: StockOp[
   const pa = run(b.pagos, a.pagos, before.payments, after.payments);
   const mo = run(b.movimientos, a.movimientos, before.cashMovements, after.cashMovements);
   const n = run(b.notas, a.notas, before.creditNotes, after.creditNotes);
-  const missing = [...g.missing, ...m.missing, ...p.missing, ...pa.missing, ...mo.missing, ...n.missing];
-  const payload: MoneyPayload = { grupos: g.changes, matriculas: m.changes, planes: p.changes, pagos: pa.changes, movimientos: mo.changes, notas: n.changes };
+  // Las solicitudes viven en dos listas del estado (caídas y cambios) y una sola tabla: si ninguna de las dos cambió, no se compara
+  const so = before.dropRequests === after.dropRequests && before.changeRequests === after.changeRequests ? { changes: [], missing: [] as string[] } : diffRows(b.solicitudes, a.solicitudes);
+  const co = run(b.correcciones, a.correcciones, before.enrollmentChanges, after.enrollmentChanges);
+  const missing = [...g.missing, ...m.missing, ...p.missing, ...pa.missing, ...mo.missing, ...n.missing, ...so.missing, ...co.missing];
+  const payload: MoneyPayload = {
+    grupos: g.changes, matriculas: m.changes, planes: p.changes, pagos: pa.changes, movimientos: mo.changes, notas: n.changes, solicitudes: so.changes, correcciones: co.changes,
+  };
   if (stock.length > 0) payload.stock = stock;
   const ids = (rows: Record<string, unknown>[]) => rows.map(r => String(r.id));
-  const touched: MoneyTouched = { grupos: ids(g.changes), matriculas: ids(m.changes), planes: ids(p.changes), pagos: ids(pa.changes), movimientos: ids(mo.changes), notas: ids(n.changes) };
+  const touched: MoneyTouched = {
+    grupos: ids(g.changes), matriculas: ids(m.changes), planes: ids(p.changes), pagos: ids(pa.changes), movimientos: ids(mo.changes), notas: ids(n.changes),
+    solicitudes: ids(so.changes), correcciones: ids(co.changes),
+  };
   const empty = Object.values(touched).every(l => l.length === 0) && stock.length === 0;
   return { payload, touched, empty, ...(missing.length > 0 ? { error: `No se pueden quitar registros del dinero (${missing.slice(0, 3).join(', ')}).` } : {}) };
 }
@@ -373,6 +396,7 @@ export function mergeRows<R extends { id: string }>(list: R[], fresh: R[]): R[] 
 export const mergeMoneyRows = (current: MoneyRows, fresh: MoneyRows): MoneyRows => ({
   matriculas: mergeRows(current.matriculas, fresh.matriculas), planes: mergeRows(current.planes, fresh.planes), pagos: mergeRows(current.pagos, fresh.pagos),
   movimientos: mergeRows(current.movimientos, fresh.movimientos), notas: mergeRows(current.notas, fresh.notas), grupos: mergeRows(current.grupos, fresh.grupos),
+  solicitudes: mergeRows(current.solicitudes, fresh.solicitudes), correcciones: mergeRows(current.correcciones, fresh.correcciones),
 });
 
 /** El orden en que se muestran: lo más reciente primero (pagos y caja) y por código (matrículas, planes, grupos). */
@@ -382,6 +406,7 @@ export function sortMoneyState(s: MoneyState): MoneyState {
   return {
     enrollments: byCode(s.enrollments), plans: byCode(s.plans), payments: newestFirst(s.payments), cashMovements: newestFirst(s.cashMovements),
     creditNotes: newestFirst(s.creditNotes), promotionGroups: byCode(s.promotionGroups),
+    dropRequests: newestFirst(s.dropRequests), changeRequests: newestFirst(s.changeRequests), enrollmentChanges: newestFirst(s.enrollmentChanges),
   };
 }
 

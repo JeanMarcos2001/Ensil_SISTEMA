@@ -6,11 +6,12 @@
  * Las reglas se aplican aquí para avisar bien y rápido; la base las exige otra vez en sus funciones (nadie escribe las tablas directo),
  * así que lo que se salte la pantalla lo frena la base con su propio mensaje.
  *
- * Los códigos (`CON-NNN`, `AJU-NNN`) los asigna el sistema; si dos personas crean a la vez, se reintenta con el siguiente. El código de una
+ * Los códigos (`CON-NNN`, `AJU-NNN`) los asigna la BASE al guardar (migración 0020: el siguiente al más alto de TODA la tabla, aunque esta cuenta
+ * solo vea los contratos de sus sedes): la pantalla manda un borrador y la función de la base devuelve el código asignado. El código de una
  * planilla es el de su empresa y su mes (`PLA-AAAA-MM-EMP-NNN`).
  */
 import type { Company, Contract, ContractRevisionChange, PayrollAdjustment, PayrollLine, PayrollRun, Staff } from '../context/DataContext';
-import { ID_PREFIX, nextSequentialId } from '../utils/ids';
+import { draftId } from '../utils/draftIds';
 import { buildRenewal, validateRenewal, type RenewalInput } from '../utils/contractRenewal';
 import { buildContract, buildContractPatch, diffContract, validateContractEdit, validateContractForm, type ContractForm } from '../utils/payroll';
 import { periodLabel, periodOf, round2 } from '../utils/payrollEngine';
@@ -21,13 +22,14 @@ import type { OpResult, RepoResult } from './orgDirectory';
 export interface ContractsPayrollRepository {
   listContracts(): Promise<RepoResult<Contract[]>>;
   listPayroll(): Promise<RepoResult<PayrollRun[]>>;
-  createContract(id: string, contract: Omit<Contract, 'id'>): Promise<RepoResult<null>>;
+  /** Las tres operaciones que crean algo devuelven el código que le asignó la base (`id` es un borrador). */
+  createContract(id: string, contract: Omit<Contract, 'id'>): Promise<RepoResult<{ id: string }>>;
   editContract(id: string, contract: Omit<Contract, 'id'>, reason: string, changes: ContractRevisionChange[]): Promise<RepoResult<null>>;
   closeContract(id: string, date: string, reason: string): Promise<RepoResult<null>>;
-  renewContract(previousId: string, id: string, contract: Omit<Contract, 'id'>): Promise<RepoResult<null>>;
+  renewContract(previousId: string, id: string, contract: Omit<Contract, 'id'>): Promise<RepoResult<{ id: string }>>;
   generatePayroll(id: string, companyId: string, period: string): Promise<RepoResult<null>>;
   deletePayrollDraft(id: string): Promise<RepoResult<null>>;
-  addAdjustment(id: string, runId: string, adjustment: PayrollAdjustment, detail: string): Promise<RepoResult<null>>;
+  addAdjustment(id: string, runId: string, adjustment: PayrollAdjustment, detail: string): Promise<RepoResult<{ id: string }>>;
   removeAdjustment(runId: string, adjustmentId: string, detail: string): Promise<RepoResult<null>>;
   closePayroll(runId: string, lines: PayrollLine[], detail: string): Promise<RepoResult<null>>;
   reopenPayroll(runId: string, reason: string): Promise<RepoResult<null>>;
@@ -36,7 +38,6 @@ export interface ContractsPayrollRepository {
 export interface ContractsPayrollData { contracts: Contract[]; runs: PayrollRun[] }
 
 const fail = (error: string): OpResult<never> => ({ ok: false, error });
-const MAX_ID_ATTEMPTS = 3;
 const ERR_SAVE = 'No se pudo guardar.';
 
 /** Lee los contratos y las planillas que la cuenta puede ver (la base decide cuáles, y si ve o no los sueldos). */
@@ -59,22 +60,15 @@ export interface ContractsContext {
   today: string;
 }
 
-/** Crea un contrato. La empresa es obligatoria; el código `CON-NNN` lo asigna el sistema. */
+/** Crea un contrato. La empresa es obligatoria; el código `CON-NNN` lo asigna la base. */
 export async function createContract(repo: ContractsPayrollRepository, ctx: ContractsContext, form: ContractForm): Promise<OpResult<{ id: string }>> {
   const problem = Object.values(validateContractForm(form, ctx.contracts, ctx.staff, ctx.today, undefined, ctx.agenda, ctx.companies))[0];
   if (problem) return fail(problem);
   // El neto del contrato sale del mismo motor que la planilla, así que respeta el régimen laboral de su empresa
   const regime = ctx.companies.find(x => x.id === form.companyId)?.laborRegime;
   const built = buildContract(form, ctx.staff.find(s => s.id === form.staffId) ?? {}, Number(ctx.today.slice(0, 4)), regime);
-  const taken = ctx.contracts.map(c => c.id);
-  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-    const id = nextSequentialId(ID_PREFIX.contrato, taken);
-    const res = await repo.createContract(id, built);
-    if (res.ok) return { ok: true, value: { id } };
-    if (!res.idConflict) return fail(res.error ?? ERR_SAVE);
-    taken.push(id);
-  }
-  return fail('No se pudo asignar un código al contrato. Intente de nuevo.');
+  const res = await repo.createContract(draftId('CON'), built);
+  return res.ok && res.data ? { ok: true, value: { id: res.data.id } } : fail(res.error ?? ERR_SAVE);
 }
 
 /**
@@ -128,15 +122,8 @@ export async function renewContract(repo: ContractsPayrollRepository, ctx: Contr
   if (problem) return fail(problem);
   const member = ctx.staff.find(s => s.id === old.staffId);
   const built = buildRenewal(old, input, member ?? {}, Number(ctx.today.slice(0, 4)), ctx.companies.find(x => x.id === old.companyId)?.laborRegime);
-  const taken = ctx.contracts.map(x => x.id);
-  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-    const newId = nextSequentialId(ID_PREFIX.contrato, taken);
-    const res = await repo.renewContract(id, newId, built);
-    if (res.ok) return { ok: true, value: { id: newId } };
-    if (!res.idConflict) return fail(res.error ?? ERR_SAVE);
-    taken.push(newId);
-  }
-  return fail('No se pudo asignar un código al contrato. Intente de nuevo.');
+  const res = await repo.renewContract(id, draftId('CON'), built);
+  return res.ok && res.data ? { ok: true, value: { id: res.data.id } } : fail(res.error ?? ERR_SAVE);
 }
 
 // ------------------------------------------------------------------------------------------------------------------ Planilla
@@ -174,21 +161,14 @@ export async function addPayrollAdjustment(
   const inLines = linesOf(run, ctx).lines.some(l => l.staffId === input.staffId);
   const problem = validateAdjustment(run, input, inLines)[0];
   if (problem) return fail(problem);
-  const taken = ctx.runs.flatMap(r => r.adjustments.map(a => a.id));
   const detail = `${input.kind}: ${input.concept.trim()} S/ ${round2(input.amount).toFixed(2)}${staffName ? ` (${staffName})` : ''}`;
-  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
-    const id = nextSequentialId(ID_PREFIX.ajustePlanilla, taken);
-    // `by` y `at` los pone la base con la cuenta con la que se ingresó (no se pueden falsear desde la pantalla)
-    const adjustment: PayrollAdjustment = {
-      id, staffId: input.staffId, kind: input.kind, concept: input.concept.trim(), amount: round2(input.amount),
-      taxable: input.kind === 'Ingreso' ? input.taxable : true, reason: input.reason.trim(), by: '', at: '',
-    };
-    const res = await repo.addAdjustment(id, runId, adjustment, detail);
-    if (res.ok) return { ok: true, value: { id } };
-    if (!res.idConflict) return fail(res.error ?? ERR_SAVE);
-    taken.push(id);
-  }
-  return fail('No se pudo asignar un código al ajuste. Intente de nuevo.');
+  // `by` y `at` los pone la base con la cuenta con la que se ingresó (no se pueden falsear desde la pantalla); el código `AJU-NNN`, también la base
+  const adjustment: PayrollAdjustment = {
+    id: draftId('AJU'), staffId: input.staffId, kind: input.kind, concept: input.concept.trim(), amount: round2(input.amount),
+    taxable: input.kind === 'Ingreso' ? input.taxable : true, reason: input.reason.trim(), by: '', at: '',
+  };
+  const res = await repo.addAdjustment(adjustment.id, runId, adjustment, detail);
+  return res.ok && res.data ? { ok: true, value: { id: res.data.id } } : fail(res.error ?? ERR_SAVE);
 }
 
 export async function removePayrollAdjustment(repo: ContractsPayrollRepository, runs: PayrollRun[], runId: string, adjustmentId: string): Promise<OpResult> {

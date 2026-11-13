@@ -12,7 +12,7 @@ import { leadSourceToRow, levelToRow, paymentTypeToRow, programToRow, promotionT
 export type Value = string | number | boolean | null | string[] | object;
 
 /** Columnas que guardan una lista de objetos (jsonb): una lista vacía NO es un arreglo de textos. */
-const JSONB_COLUMNS = new Set(['lineas', 'composicion', 'articulos', 'entrenamientos_variables', 'cobros', 'partes', 'reparto', 'documentos', 'documento', 'reversa', 'deposito', 'venta']);
+const JSONB_COLUMNS = new Set(['lineas', 'composicion', 'articulos', 'entrenamientos_variables', 'cobros', 'partes', 'reparto', 'documentos', 'documento', 'reversa', 'deposito', 'venta', 'datos', 'efectos']);
 
 const q = (v: string): string => `'${v.replace(/'/g, "''")}'`;
 

@@ -11,6 +11,7 @@ import {
   renewContract, reopenPayroll, type ContractsContext, type ContractsPayrollRepository,
 } from '../src/services/contractsPayroll';
 import type { RepoResult } from '../src/services/orgDirectory';
+import { isDraftId } from '../src/utils/draftIds';
 import {
   adjustmentPayload, contractFromRows, contractPayload, linesPayload, runsFromRows, type AjusteRow, type ContratoPagoRow, type ContratoRow, type EventoRow, type LineaRow, type PlanillaRow, type RevisionRow,
 } from '../src/utils/contractsDb';
@@ -88,20 +89,32 @@ check('Cuerpos de las funciones: el ajuste (sin quién ni cuándo) y la foto de 
 })());
 
 // ------------------------------------------------------------------------------------------------ Base en memoria
+/** El siguiente código de un tipo (el más alto que existe + 1, relleno a 3 dígitos): lo que hacen `app.siguiente_numero` y las funciones de la migración 0020 sobre TODA la tabla. */
+const nextCode = (prefix: string, existing: string[]) =>
+  `${prefix}-${String(existing.reduce((m, c) => Math.max(m, Number(new RegExp('^' + prefix + '-(\\d+)$').exec(c)?.[1] ?? 0)), 0) + 1).padStart(3, '0')}`;
+
 function memoryRepo(initialContracts: Contract[] = [], initialRuns: PayrollRun[] = [], opts: { failList?: boolean } = {}) {
   const st = { contracts: structuredClone(initialContracts), runs: structuredClone(initialRuns), calls: [] as string[] };
   const dup = (id: string): RepoResult<null> => ({ ok: false, error: 'Este código de contrato ya está en uso.', idConflict: true, data: undefined });
   const repo: ContractsPayrollRepository = {
     async listContracts() { return opts.failList ? { ok: false, error: 'Sin conexión.' } : { ok: true, data: structuredClone(st.contracts) }; },
     async listPayroll() { return { ok: true, data: structuredClone(st.runs) }; },
-    async createContract(id, c) { st.calls.push('createContract'); if (st.contracts.some(x => x.id === id)) return dup(id); st.contracts.push({ ...c, id }); return { ok: true, data: null }; },
+    async createContract(id, c) {
+      st.calls.push('createContract');
+      // La función de la base cambia el borrador por el código real con el más alto de TODA la tabla (aunque quien llama no vea todos los contratos)
+      const real = isDraftId(id) ? nextCode('CON', st.contracts.map(x => x.id)) : id;
+      if (st.contracts.some(x => x.id === real)) return dup(real);
+      st.contracts.push({ ...c, id: real });
+      return { ok: true, data: { id: real } };
+    },
     async editContract(id, c, reason, changes) { st.calls.push('editContract'); st.contracts = st.contracts.map(x => (x.id === id ? { ...x, ...c, id, revisions: [{ at: 'now', by: 'Rosa', reason, changes }, ...(x.revisions ?? [])] } : x)); return { ok: true, data: null }; },
     async closeContract(id, date, reason) { st.calls.push('closeContract'); st.contracts = st.contracts.map(x => (x.id === id ? { ...x, status: 'Cesado', endDate: date, terminationReason: reason } : x)); return { ok: true, data: null }; },
     async renewContract(prev, id, c) {
       st.calls.push('renewContract');
-      if (st.contracts.some(x => x.id === id)) return dup(id);
-      st.contracts = [...st.contracts.map(x => (x.id === prev ? { ...x, status: 'Renovado' as const } : x)), { ...c, id }];
-      return { ok: true, data: null };
+      const real = isDraftId(id) ? nextCode('CON', st.contracts.map(x => x.id)) : id;
+      if (st.contracts.some(x => x.id === real)) return dup(real);
+      st.contracts = [...st.contracts.map(x => (x.id === prev ? { ...x, status: 'Renovado' as const } : x)), { ...c, id: real }];
+      return { ok: true, data: { id: real } };
     },
     async generatePayroll(id, companyId, period) {
       st.calls.push('generatePayroll');
@@ -111,9 +124,10 @@ function memoryRepo(initialContracts: Contract[] = [], initialRuns: PayrollRun[]
     async deletePayrollDraft(id) { st.calls.push('deletePayrollDraft'); st.runs = st.runs.filter(r => r.id !== id); return { ok: true, data: null }; },
     async addAdjustment(id, runId, a, detail) {
       st.calls.push('addAdjustment');
-      if (st.runs.some(r => r.adjustments.some(x => x.id === id))) return { ok: false, error: 'dup', idConflict: true };
-      st.runs = st.runs.map(r => (r.id === runId ? { ...r, adjustments: [...r.adjustments, { ...a, by: 'Paula', at: 'now' }], events: [...r.events, { at: 'now', by: 'Paula', action: 'Ajuste', detail }] } : r));
-      return { ok: true, data: null };
+      const real = isDraftId(id) ? nextCode('AJU', st.runs.flatMap(r => r.adjustments.map(x => x.id))) : id;
+      if (st.runs.some(r => r.adjustments.some(x => x.id === real))) return { ok: false, error: 'dup', idConflict: true };
+      st.runs = st.runs.map(r => (r.id === runId ? { ...r, adjustments: [...r.adjustments, { ...a, id: real, by: 'Paula', at: 'now' }], events: [...r.events, { at: 'now', by: 'Paula', action: 'Ajuste', detail }] } : r));
+      return { ok: true, data: { id: real } };
     },
     async removeAdjustment(runId, adjId, detail) {
       st.calls.push('removeAdjustment');
@@ -164,10 +178,16 @@ const form = (o: Partial<ContractForm> = {}): ContractForm => ({
   check('Un trabajador tiene un solo contrato vigente (aunque sea de otra empresa)', !r.ok && /ya tiene un contrato vigente/.test(r.error!) && m1.st.contracts.length === 1);
   const m2 = memoryRepo([{ id: 'CON-001', staffId: 'STF-002', companyId: 'EMP-001', type: 'Indeterminado', startDate: '2025-01-01', status: 'Vigente' } as Contract]);
   r = await createContract(m2.repo, ctxOf(m2, { contracts: [] }), form());
-  check('Si otra persona creó el mismo código a la vez, se reintenta con el siguiente', r.ok && r.value?.id === 'CON-002' && m2.st.calls.filter(c => c === 'createContract').length === 2, JSON.stringify(r));
+  check('Una cuenta que solo ve una parte de los contratos (aquí ninguno) recibe el siguiente de TODA la tabla, en una sola llamada (la base asigna; no hay reintentos)', r.ok && r.value?.id === 'CON-002' && m2.st.calls.filter(c => c === 'createContract').length === 1, JSON.stringify(r));
   const m3 = memoryRepo(['CON-001', 'CON-002', 'CON-003'].map((id, i) => ({ id, staffId: `STF-9${i}`, companyId: 'EMP-001', type: 'Indeterminado', startDate: '2025-01-01', status: 'Vigente' }) as Contract));
   r = await createContract(m3.repo, ctxOf(m3, { contracts: [] }), form());
-  check('Tras varios choques seguidos se rinde con un mensaje claro', !r.ok && /No se pudo asignar un código/.test(r.error!) && m3.st.calls.length === 3);
+  check('Con varios contratos que esta cuenta no ve, tampoco se atasca: recibe CON-004 (antes se rendía tras tres choques seguidos)', r.ok && r.value?.id === 'CON-004' && m3.st.calls.length === 1, JSON.stringify(r));
+  {
+    let sent = '';
+    const spy: ContractsPayrollRepository = { ...m3.repo, createContract: (id, c) => { sent = id; return m3.repo.createContract(id, c); } };
+    await createContract(spy, ctxOf(m3, { contracts: [] }), form({ staffId: 'STF-002' }));
+    check('La pantalla manda un borrador de código (nunca uno inventado con lo que ve)', /^CON-~\d+~$/.test(sent), sent);
+  }
 
   // ---------------------------------------------------------------------------------------------- Editar
   console.log('— Editar un contrato');

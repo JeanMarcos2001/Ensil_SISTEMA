@@ -36,6 +36,12 @@ export function createSupabaseContractsPayrollRepository(client: SupabaseClient)
     const { error } = await client.rpc(fn, args);
     return error ? failure(error) : { ok: true, data: null };
   };
+  // Las funciones que CREAN algo (migración 0020) asignan el código y lo devuelven
+  const rpcCreate = async (fn: string, args: Record<string, unknown>): Promise<RepoResult<{ id: string }>> => {
+    const { data, error } = await client.rpc(fn, args);
+    if (error) return failure(error);
+    return typeof data === 'string' && data ? { ok: true, data: { id: data } } : { ok: false, error: 'La base no devolvió el código asignado. Actualice la página e intente de nuevo.' };
+  };
 
   return {
     async listContracts() {
@@ -65,14 +71,14 @@ export function createSupabaseContractsPayrollRepository(client: SupabaseClient)
       return { ok: true, data: runsFromRows(p.data, a.data, l.data, e.data) };
     },
 
-    createContract: (id, contract) => rpc('crear_contrato', { p_id: id, p: contractPayload(contract) }),
+    createContract: (id, contract) => rpcCreate('crear_contrato', { p_id: id, p: contractPayload(contract) }),
     editContract: (id, contract, reason, changes) => rpc('editar_contrato', { p_id: id, p: contractPayload(contract), p_motivo: reason, p_cambios: changes }),
     closeContract: (id, date, reason) => rpc('cesar_contrato', { p_id: id, p_fecha: date, p_motivo: reason }),
-    renewContract: (previousId, id, contract) => rpc('renovar_contrato', { p_anterior: previousId, p_id: id, p: contractPayload(contract) }),
+    renewContract: (previousId, id, contract) => rpcCreate('renovar_contrato', { p_anterior: previousId, p_id: id, p: contractPayload(contract) }),
 
     generatePayroll: (id, companyId, period) => rpc('generar_planilla', { p_id: id, p_empresa: companyId, p_periodo: period }),
     deletePayrollDraft: id => rpc('eliminar_borrador_planilla', { p_id: id }),
-    addAdjustment: (id, runId, adjustment, detail) => rpc('agregar_ajuste_planilla', { p_id: id, p_planilla: runId, p: adjustmentPayload(adjustment), p_detalle: detail }),
+    addAdjustment: (id, runId, adjustment, detail) => rpcCreate('agregar_ajuste_planilla', { p_id: id, p_planilla: runId, p: adjustmentPayload(adjustment), p_detalle: detail }),
     removeAdjustment: (runId, adjustmentId, detail) => rpc('quitar_ajuste_planilla', { p_planilla: runId, p_ajuste: adjustmentId, p_detalle: detail }),
     closePayroll: (runId, lines, detail) => rpc('cerrar_planilla', { p_id: runId, p_lineas: linesPayload(lines), p_detalle: detail }),
     reopenPayroll: (runId, reason) => rpc('reabrir_planilla', { p_id: runId, p_motivo: reason }),

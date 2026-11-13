@@ -5,7 +5,8 @@
  */
 import type { Branch, CashClosure, CashMovement, ChangeRequest, ContractTemplate, Enrollment, Guardian, Installment, Level, Payment, PettyCashMovement, Plan, Program, Role, Schedule, Student, Tariff, PaymentType } from '../src/context/DataContext';
 import { APPROVAL_POLICY, PERM, canRequest, canResolve, can } from '../src/utils/authority';
-import { NOTE_SERIES, allowedNoteModes, buildCreditNote, documentOf, nextNoteNumber, noteLabel, parseNoteNumber, validateNoteChoice } from '../src/utils/creditNotes';
+import { NOTE_SERIES, allowedNoteModes, buildCreditNote, documentOf, noteLabel, parseNoteNumber, validateNoteChoice } from '../src/utils/creditNotes';
+import { isDraftId } from '../src/utils/draftIds';
 import { buildClosure, closedMessage, closedUntil, closureDrift, expectedAt, isDateClosed, validateClosure, validateReopen } from '../src/utils/cashClosure';
 import { DEFAULT_FUND, refillNeeded, validateFund, validatePettyInput, emptyPettyInput } from '../src/utils/pettyCash';
 import { daysOverdue, installmentState, nextInstallment, planState, recomputePlan } from '../src/utils/planState';
@@ -49,15 +50,15 @@ const pay = (over: Partial<Payment> = {}): Payment => ({ id: 'PAG-1', date: '202
 check('Comprobante leído del texto o estructurado', documentOf(pay())?.type === 'Boleta' && documentOf(pay({ receipt: 'F001-9' }))?.type === 'Factura' && documentOf(pay({ receipt: 'S/N' })) === undefined);
 check('Sin comprobante no corresponde nota; con comprobante hay 3 caminos', allowedNoteModes(pay({ receipt: 'S/N' })).join() === 'ninguna' && allowedNoteModes(pay()).join() === 'emitir,externa,no-entregado');
 check('Número de nota: formato, tipo y correlativo', parseNoteNumber('bc01-000012', 'Boleta')?.sequence === 12 && parseNoteNumber('FC01-000003', 'Boleta') === null && parseNoteNumber('BC01-', 'Boleta') === null && noteLabel('BC01', 7) === 'BC01-000007');
-check('El correlativo sigue al mayor de la serie', nextNoteNumber([{ series: 'BC01', sequence: 3 }, { series: 'BC01', sequence: 9 }, { series: 'FC01', sequence: 20 }], 'BC01') === 10 && nextNoteNumber([], 'FC01') === 1);
 check('Validación de la elección de nota', validateNoteChoice(pay(), 'emitir', '', 'x', []).length === 0 && validateNoteChoice(pay(), 'ninguna', '', 'x', []).length === 1 && validateNoteChoice(pay({ receipt: 'S/N' }), 'emitir', '', '', []).length === 1
   && validateNoteChoice(pay(), 'externa', 'BC01-000002', '', [{ series: 'BC01', sequence: 2 }]).length === 1 && validateNoteChoice(pay(), 'externa', 'FC01-000002', '', []).length === 1 && validateNoteChoice(pay(), 'externa', 'BC01-000002', '', []).length === 0
   && validateNoteChoice(pay(), 'no-entregado', '', 'ok', []).length === 1);
-check('La nota emitida lleva el siguiente número y el monto del pago', (() => {
-  const n = buildCreditNote({ payment: pay({ amount: 250 }), mode: 'emitir', external: '', reason: 'Pago duplicado', detail: 'Duplicado', by: 'Admin', at: '2026-10-23T10:00:00Z' }, [{ series: 'BC01', sequence: 4 }]);
-  return n.label === 'BC01-000005' && n.amount === 250 && n.originalDocument === 'B001-000123' && n.origin === 'sistema' && n.series === NOTE_SERIES.Boleta;
+check('La nota emitida lleva un número BORRADOR de su serie (la base asigna el correlativo) y el monto del pago', (() => {
+  const n = buildCreditNote({ payment: pay({ amount: 250 }), mode: 'emitir', external: '', reason: 'Pago duplicado', detail: 'Duplicado', by: 'Admin', at: '2026-10-23T10:00:00Z' });
+  const m = buildCreditNote({ payment: pay({ amount: 250 }), mode: 'emitir', external: '', reason: 'Pago duplicado', detail: 'Duplicado', by: 'Admin', at: '2026-10-23T10:00:00Z' });
+  return isDraftId(n.label) && /^BC01-~\d+~$/.test(n.label) && n.label !== m.label && n.sequence === 0 && n.amount === 250 && n.originalDocument === 'B001-000123' && n.origin === 'sistema' && n.series === NOTE_SERIES.Boleta;
 })());
-check('La nota registrada conserva el número que trae', buildCreditNote({ payment: pay(), mode: 'externa', external: 'bc01-000042', reason: 'r', detail: 'd', by: 'A', at: 'x' }, []).label === 'BC01-000042');
+check('La nota registrada conserva el número que trae', buildCreditNote({ payment: pay(), mode: 'externa', external: 'bc01-000042', reason: 'r', detail: 'd', by: 'A', at: 'x' }).label === 'BC01-000042');
 
 // ================================================================ Cierre de caja
 const cm = (id: string, date: string, over: Partial<CashMovement> = {}): CashMovement => ({ id, date, kind: 'Ingreso', concept: 'c', reference: 'r', currency: 'PEN', amount: 100, amountUSD: 27, method: 'Efectivo', user: 'u', status: 'Aplicado', ...over });
@@ -289,25 +290,26 @@ check('Contrato: qué falta para generarlo', documentProblems('contract', docCtx
   && documentProblems('contract', docCtx({ enrollment: dropped() })).some(p => /activas/.test(p)));
 check('Un menor sin titular no puede ser su propio contratante', documentProblems('contract', docCtx({ guardians: [], student: student({ birthDate: '2014-01-01', address: 'Calle' }) })).some(p => /menor de edad/.test(p)) && documentProblems('contract', docCtx({ guardians: [], student: student({ birthDate: '1996-01-01', address: 'Calle' }) })).length === 0);
 check('La ficha solo exige tener al alumno', documentProblems('ficha', docCtx({ student: undefined })).length === 1 && documentProblems('ficha', docCtx({ plan: undefined, company: undefined })).length === 0);
-check('Numeración y versión: nuevo, igual, cambió', (() => {
+check('Numeración y versión: nuevo (número borrador, la base asigna el definitivo), igual, cambió', (() => {
   const built = buildContractDocument(docCtx());
-  const first = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z', []);
-  const same = issueDocument('contract', first, built, 'Ana', '2026-10-24T10:00:00Z', [first.number]);
+  const first = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z');
+  const same = issueDocument('contract', first, built, 'Ana', '2026-10-24T10:00:00Z');
   const changed = buildContractDocument(docCtx({ plan: basePlan({ total: 900, installments: basePlan().installments.slice(0, 3) }) }));
-  const second = issueDocument('contract', { ...first, signedAt: '2026-10-23', signedFile: 'x.pdf' }, changed, 'Ana', '2026-10-25T10:00:00Z', [first.number]);
-  const other = issueDocument('contract', undefined, built, 'Ana', '2026-10-25T10:00:00Z', [first.number]);
-  return first.number === 'CTR-2026-001' && first.version === 1 && same === first && second.number === first.number && second.version === 2 && !second.signedAt && other.number === 'CTR-2026-002';
+  const second = issueDocument('contract', { ...first, signedAt: '2026-10-23', signedFile: 'x.pdf' }, changed, 'Ana', '2026-10-25T10:00:00Z');
+  const other = issueDocument('contract', undefined, built, 'Ana', '2026-10-25T10:00:00Z');
+  return /^CTR-2026-~\d+~$/.test(first.number) && first.version === 1 && same === first && second.number === first.number && second.version === 2 && !second.signedAt
+    && /^CTR-2026-~\d+~$/.test(other.number) && other.number !== first.number;
 })());
 check('Estado del documento y alertas', (() => {
   const built = buildContractDocument(docCtx());
-  const issued = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z', []);
+  const issued = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z');
   return docState(undefined, built.fingerprint) === 'sin-generar' && docState(issued, built.fingerprint) === 'vigente' && docState(issued, 'otro') === 'desactualizado'
     && documentAlert({ status: 'Activa' }) === 'sin-contrato' && documentAlert({ status: 'Activa', documents: { contract: issued } }) === 'sin-firma' && documentAlert({ status: 'Activa', documents: { contract: { ...issued, signedAt: '2026-10-23' } } }) === null
     && documentAlert({ status: 'Caída' }) === null && documentAlert({ status: 'Activa', documents: { contract: issued } }, 'otro') === 'desactualizado';
 })());
 check('Firma: documento vigente, fecha y archivo', (() => {
   const built = buildContractDocument(docCtx());
-  const issued = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z', []);
+  const issued = issueDocument('contract', undefined, built, 'Ana', '2026-10-23T10:00:00Z');
   const ok = { date: '2026-10-23', file: 'contrato_firmado.pdf' };
   return validateSignature(issued, 'vigente', ok, TODAY).length === 0 && validateSignature(undefined, 'sin-generar', ok, TODAY).length === 1 && validateSignature(issued, 'desactualizado', ok, TODAY).length === 1
     && validateSignature(issued, 'vigente', { ...ok, date: '2026-12-01' }, TODAY).length === 1 && validateSignature(issued, 'vigente', { ...ok, date: '2026-10-20' }, TODAY).length === 1 && validateSignature(issued, 'vigente', { ...ok, file: '' }, TODAY).length === 1

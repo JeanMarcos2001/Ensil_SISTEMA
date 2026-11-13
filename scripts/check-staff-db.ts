@@ -9,6 +9,7 @@ import type { Assignment, Permission, Role, Schedule, Staff, User } from '../src
 import {
   AREAS, WAREHOUSE_AREA, areasForPlace, assignablePlaces, emptyAssignmentForm, placeAreaError, validateAssignmentForm, type AssignmentForm, type Place,
 } from '../src/utils/assignments';
+import { isDraftId } from '../src/utils/draftIds';
 import { dbErrorMessage, isIdConflict } from '../src/utils/orgDirectory';
 import { positionOf } from '../src/utils/payroll';
 import { ROL_SISTEMA_SOLO_TECNICO } from '../supabase/functions/usuarios/reglas.ts';
@@ -44,7 +45,7 @@ check('La base tiene una sola principal activa por persona y no repite lugar + �
 check('Una persona, una cuenta; el documento no se repite sin distinguir mayúsculas ni espacios', sql.includes('cuentas_personal_unico') && sql.includes('personal_documento_unico on public.personal (lower(btrim(numero_documento)))'));
 check('Los errores de los disparadores usan EN001 (el sistema los muestra tal cual)', (sql.match(/errcode = 'EN001'/g) ?? []).length >= 15 && dbErrorMessage({ code: 'EN001', message: 'La asignación está cerrada: no se edita. Cree una nueva.' }) === 'La asignación está cerrada: no se edita. Cree una nueva.');
 check('Los tipos de documento de la ficha son los de la base', ['DNI', 'CE', 'Pasaporte'].every(t => sql.includes(`'${t}'`)));
-check('Los mensajes de unicidad de Personal son claros y un id repetido se reintenta', dbErrorMessage({ code: '23505', message: 'duplicate key value violates unique constraint "personal_documento_unico"' }) === 'Este documento ya está registrado en el personal.'
+check('Los mensajes de unicidad de Personal son claros y un id repetido se reconoce', dbErrorMessage({ code: '23505', message: 'duplicate key value violates unique constraint "personal_documento_unico"' }) === 'Este documento ya está registrado en el personal.'
   && /ya tiene una asignación activa/.test(dbErrorMessage({ code: '23505', message: 'violates unique constraint "asignaciones_sin_duplicar"' }))
   && isIdConflict({ code: '23505', message: 'violates unique constraint "personal_pkey"' }) && isIdConflict({ code: '23505', message: 'violates unique constraint "personal_codigo_key"' }) && !isIdConflict({ code: '23505', message: 'violates unique constraint "personal_documento_unico"' }));
 
@@ -88,21 +89,26 @@ check('Asignación al almacén: se guarda como almacén (nunca como sede)', (() 
 check('Si el lugar ya no existe se muestra su id, sin romper la lista', assignmentFromRow(asgRow({ sede_id: 'FIL-999' }), FIL).branch === 'FIL-999');
 
 // ------------------------------------------------------------------------------------------------ Repositorio en memoria (imita lo que hacen la tabla y sus disparadores)
-interface Fallos { insertStaff?: string; updateStaff?: string; inactivate?: string; insertAssignment?: string; updateAssignment?: string; conflictOnce?: boolean }
+interface Fallos { insertStaff?: string; updateStaff?: string; inactivate?: string; insertAssignment?: string; updateAssignment?: string }
+
+/** El siguiente número de una lista de códigos (el más alto que existe + 1): lo que hacen `app.siguiente_numero` y los disparadores de la migración 0020 sobre TODA la tabla. */
+const nextNumber = (codes: string[], re: RegExp) => codes.reduce((m, c) => Math.max(m, Number(re.exec(c)?.[1] ?? 0)), 0) + 1;
 function fakeRepo(initialStaff: Staff[], initialAssignments: Assignment[], fallos: Fallos = {}) {
   const staff = initialStaff.map(s => ({ ...s }));
   const asg = initialAssignments.map(a => ({ ...a }));
   const calls: string[] = [];
-  let conflicted = false;
   const repo: StaffRepository = {
     async listStaff() { return { ok: true, data: staff }; },
     async listAssignments() { return { ok: true, data: asg }; },
     async insertStaff(s) {
       calls.push(`insertStaff:${s.id}:${s.code}`);
       if (fallos.insertStaff) return { ok: false, error: fallos.insertStaff };
-      if (fallos.conflictOnce && !conflicted) { conflicted = true; return { ok: false, error: 'dup', idConflict: true }; }
-      staff.push(s);
-      return { ok: true, data: s };
+      // El disparador de la base cambia el borrador por el id real y asigna el código de seis dígitos, con el más alto de TODA la tabla (no solo lo que la pantalla ve)
+      const saved = isDraftId(s.id)
+        ? { ...s, id: `STF-${String(nextNumber(staff.map(x => x.id), /^STF-(\d+)$/)).padStart(3, '0')}`, code: String(nextNumber(staff.map(x => x.code), /^(\d+)$/)).padStart(6, '0') }
+        : s;
+      staff.push(saved);
+      return { ok: true, data: saved };
     },
     async updateStaff(id, patch) {
       calls.push(`updateStaff:${id}:${Object.keys(patch).join('+')}`);
@@ -124,8 +130,9 @@ function fakeRepo(initialStaff: Staff[], initialAssignments: Assignment[], fallo
       calls.push(`insertAssignment:${a.id}:${a.placeKind}`);
       if (fallos.insertAssignment) return { ok: false, error: fallos.insertAssignment };
       if (a.isMain) for (const x of asg) if (x.staffId === a.staffId && x.isMain && x.status === 'Activa') x.isMain = false;
-      asg.push(a);
-      return { ok: true, data: a };
+      const saved = isDraftId(a.id) ? { ...a, id: `ASG-${String(nextNumber(asg.map(x => x.id), /^ASG-(\d+)$/)).padStart(3, '0')}` } : a;
+      asg.push(saved);
+      return { ok: true, data: saved };
     },
     async updateAssignment(id, a) {
       calls.push(`updateAssignment:${id}:${a.status}`);
@@ -144,12 +151,15 @@ function fakeRepo(initialStaff: Staff[], initialAssignments: Assignment[], fallo
   const { id: _id, code: _code, ...newData } = member({ docNumber: '70123456', names: 'Ana', lastNameP: 'Ruiz' });
   const r1 = fakeRepo([base], []);
   const c1 = await createStaff(r1.repo, [base], newData);
-  check('Crear: el id y el código los asigna el sistema (siguientes al mayor) y nace activa', c1.ok && c1.value?.id === 'STF-002' && c1.value.code === '000002' && c1.value.status === 'Activo' && r1.staff.length === 2);
+  check('Crear: el id y el código los asigna la base (siguientes al mayor) y nace activa', c1.ok && c1.value?.id === 'STF-002' && c1.value.code === '000002' && c1.value.status === 'Activo' && r1.staff.length === 2);
+  check('Crear: la pantalla manda un borrador de id y el código vacío (nunca uno inventado con lo que ve)', /^insertStaff:STF-~\d+~:$/.test(r1.calls[0]), r1.calls[0]);
   const dup = await createStaff(r1.repo, [base], { ...newData, docNumber: ' 45123456 ' });
   check('Crear: un documento repetido se rechaza antes de guardar', !dup.ok && /ya está registrado/.test(dup.error!) && r1.calls.length === 1);
-  const r2 = fakeRepo([base], [], { conflictOnce: true });
-  const c2 = await createStaff(r2.repo, [base], newData);
-  check('Crear: si dos personas crean a la vez (id repetido) se reintenta con el siguiente', c2.ok && r2.calls.length === 2, r2.calls.join());
+  // El caso que originó la migración 0020: la cuenta de una sede solo ve su personal (aquí, una persona) y en la base hay más
+  const tabla = Array.from({ length: 12 }, (_, i) => member({ id: `STF-${String(i + 1).padStart(3, '0')}`, code: String(i + 1).padStart(6, '0'), docNumber: `1000000${i}` }));
+  const r2 = fakeRepo(tabla, []);
+  const c2 = await createStaff(r2.repo, [tabla[0]], newData);
+  check('Crear: una cuenta que solo ve una parte del personal recibe el siguiente de TODA la tabla (no repite el de otra sede)', c2.ok && c2.value?.id === 'STF-013' && c2.value.code === '000013' && r2.calls.length === 1, JSON.stringify(c2));
   const r3 = fakeRepo([base], [], { insertStaff: 'Su cuenta no tiene permiso en la base de datos para esta operación.' });
   const c3 = await createStaff(r3.repo, [base], newData);
   check('Crear: el error de la base se muestra', !c3.ok && /no tiene permiso/.test(c3.error!));
@@ -190,9 +200,11 @@ function fakeRepo(initialStaff: Staff[], initialAssignments: Assignment[], fallo
   const asgForm = (extra: Partial<AssignmentForm> = {}): AssignmentForm => ({ ...emptyAssignmentForm('2026-11-01'), staffId: 'STF-001', branch: 'Piura', area: 'Psicopedagogía', ...extra });
   const s1 = fakeRepo([base], []);
   const sv1 = await saveAssignment(s1.repo, [], [base], FIL, asgForm(), today);
-  check('Crear una asignación en una sede: la primera es la principal; guarda el id del lugar', sv1.ok && sv1.value?.saved.id === 'ASG-001' && sv1.value.saved.isMain && sv1.value.saved.placeId === 'FIL-002' && sv1.value.saved.placeKind === 'sede' && s1.calls[0] === 'insertAssignment:ASG-001:sede');
+  check('Crear una asignación en una sede: la primera es la principal; guarda el id del lugar', sv1.ok && sv1.value?.saved.id === 'ASG-001' && sv1.value.saved.isMain && sv1.value.saved.placeId === 'FIL-002' && sv1.value.saved.placeKind === 'sede' && /^insertAssignment:ASG-~\d+~:sede$/.test(s1.calls[0]));
   const sv2 = await saveAssignment(s1.repo, s1.asg, [base], FIL, asgForm({ branch: 'Almacén central', area: 'Logística' }), today);
   check('Crear una asignación al almacén: queda como almacén y la principal anterior sigue siéndolo', sv2.ok && sv2.value?.saved.placeKind === 'almacen' && sv2.value.saved.placeId === 'ALM-001' && !sv2.value.saved.isMain && s1.asg[0].isMain);
+  check('Crear una asignación: el código lo asigna la base, el siguiente de TODAS (ASG-002; y ASG-013 si la tabla tiene 12 aunque la pantalla no vea ninguna)', sv2.ok && sv2.value?.saved.id === 'ASG-002'
+    && (await saveAssignment(fakeRepo([base], Array.from({ length: 12 }, (_, i) => ({ ...a1, id: `ASG-${String(i + 1).padStart(3, '0')}`, isMain: false, placeId: 'FIL-001', area: 'Ventas' }))).repo, [], [base], FIL, asgForm(), today)).value?.saved.id === 'ASG-013');
   const sv3 = await saveAssignment(s1.repo, s1.asg, [base], FIL, asgForm({ branch: 'Los Olivos', area: 'Ventas', isMain: true }), today);
   check('Marcar otra como principal la desplaza (la base lo hace; aquí se manda la nueva como principal)', sv3.ok && sv3.value?.saved.isMain === true && s1.asg.filter(a => a.isMain).length === 1);
 

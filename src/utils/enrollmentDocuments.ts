@@ -14,7 +14,7 @@
 import type {
   Branch, Company, ContractClause, ContractTemplate, Enrollment, EnrollmentDocuments, Guardian, IssuedDocument, Level, Plan, Program, Schedule, Student,
 } from '../context/DataContext';
-import { nextSequentialId } from './ids';
+import { draftId } from './draftIds';
 import { ageText, studentAge } from './identity';
 import { escapeHtml } from './printTable';
 import { to12h } from './schedule';
@@ -23,7 +23,7 @@ import type { Validity } from './validity';
 
 export type DocKind = 'contract' | 'ficha';
 export const DOC_LABEL: Record<DocKind, string> = { contract: 'Contrato de servicios educativos', ficha: 'Ficha de matrícula' };
-export const DOC_PREFIX: Record<DocKind, string> = { contract: 'CTR', ficha: 'FIC' };
+export const DOC_PREFIX: Record<DocKind, 'CTR' | 'FIC'> = { contract: 'CTR', ficha: 'FIC' };
 
 const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export const longDate = (iso: string): string => {
@@ -258,23 +258,24 @@ export const buildDocument = (kind: DocKind, ctx: DocContext): BuiltDocument => 
 export type DocState = 'sin-generar' | 'vigente' | 'desactualizado';
 export const docState = (issued: IssuedDocument | undefined, fingerprint: string): DocState => (!issued ? 'sin-generar' : issued.fingerprint === fingerprint ? 'vigente' : 'desactualizado');
 
-/** Documento a guardar al generar: si no cambió nada se conserva; si cambió, número igual y versión siguiente (sin firma). */
+/**
+ * Documento a guardar al generar: si no cambió nada se conserva; si cambió, número igual y versión siguiente (sin firma).
+ * Un documento nuevo lleva un número BORRADOR (`CTR-2026-~1~`): la base asigna el definitivo al guardar, con el más alto de TODAS las sedes
+ * (`utils/draftIds.ts`), y lo protege con un índice único (dos sedes no emiten el mismo contrato ni la misma ficha).
+ */
 export function issueDocument(
-  kind: DocKind, existing: IssuedDocument | undefined, built: BuiltDocument, by: string, at: string, allNumbers: string[]
+  kind: DocKind, existing: IssuedDocument | undefined, built: BuiltDocument, by: string, at: string
 ): IssuedDocument {
   if (existing && existing.fingerprint === built.fingerprint) return existing;
   const year = parseInt(at.slice(0, 4), 10);
   return {
-    number: existing?.number ?? nextSequentialId(DOC_PREFIX[kind], allNumbers, { year }),
+    number: existing?.number ?? draftId(DOC_PREFIX[kind], year),
     version: existing ? existing.version + 1 : 1,
     generatedAt: at,
     generatedBy: by,
     fingerprint: built.fingerprint,
   };
 }
-
-export const issuedNumbers = (enrollments: Pick<Enrollment, 'documents'>[], kind: DocKind): string[] =>
-  enrollments.map(e => e.documents?.[kind]?.number).filter((n): n is string => !!n);
 
 export function validateSignature(issued: IssuedDocument | undefined, state: DocState, input: { date: string; file: string }, today: string): string[] {
   const e: string[] = [];

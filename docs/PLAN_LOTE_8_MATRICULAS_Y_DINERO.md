@@ -36,7 +36,7 @@ El cliente calcula los cambios con un **comparador** genérico (`diffMoney(antes
 | `notas_credito` | id `NC-NNN`, serie, correlativo, origen, pago, constancia del alumno, comprobante original, monto, moneda, motivo, detalle, quién y cuándo | Solo se agrega |
 | `grupos_promocionales` | id `PGR-NNN`, promoción, moneda, precio total, reparto por alumno (jsonb), pago | |
 
-Los códigos los sigue asignando el cliente (`máximo + 1`): si dos personas registran a la vez, la base rechaza el repetido y el sistema pide intentar de nuevo (no se reparte mal: se rechaza). Es una limitación conocida, anotada para cuando haya más de una persona matriculando a la vez.
+Los códigos los asignaba el cliente (`máximo + 1`) y se resolvió el 2026-11-13: ahora los asigna la base (migración 0019, `docs/REGLAS_DE_NEGOCIO.md`, «Códigos que asigna la base»).
 
 ## 4. Invariantes del dinero que la base vigila (por plan, pago y movimiento tocados)
 

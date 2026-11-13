@@ -28,6 +28,7 @@ import type {
   Tariff,
 } from '../context/DataContext';
 import { ageOn } from './dates';
+import { draftId } from './draftIds';
 import { nextNumericId, nextSequentialId } from './ids';
 import {
   buildPaymentRecord,
@@ -643,7 +644,8 @@ export interface BatchResult {
 
 /**
  * Convierte el borrador validado en filas listas para guardar. No modifica nada.
- * El correlativo definitivo de matrícula se asigna aquí, al confirmar (nunca en borrador).
+ * Los códigos de la matrícula, el plan, el pago y el grupo promocional son BORRADORES (`draftId`): la base asigna los definitivos al guardar, con el
+ * más alto de TODAS las sedes (`utils/draftIds.ts`). Quien use el resultado después de guardar debe traducirlos con la lista que devuelve el guardado.
  */
 export function buildEnrollmentBatch(
   draft: EnrollmentDraft,
@@ -695,8 +697,6 @@ export function buildEnrollmentBatch(
   const enrollments: Enrollment[] = [];
   const plans: Plan[] = [];
   const studentIdPool = state.students.map(s => s.id);
-  const enrollmentIdPool = state.enrollments.map(e => e.id);
-  const planIdPool = state.plans.map(p => p.id);
   const enrollmentByKey: Record<string, string> = {};
   const planByKey: Record<string, string> = {};
   const studentIds: string[] = [];
@@ -731,9 +731,10 @@ export function buildEnrollmentBatch(
     }
 
     studentIds[i] = studentId!;
-    const enrollmentId = nextSequentialId('MAT', [...enrollmentIdPool, ...enrollments.map(e => e.id)], { year });
+    // Los códigos de la matrícula y del plan son borradores: la base asigna los definitivos al guardar (`utils/draftIds.ts`)
+    const enrollmentId = draftId('MAT', year);
     enrollmentByKey[ds.key] = enrollmentId;
-    const planId = nextSequentialId('PLN', [...planIdPool, ...plans.map(p => p.id)]);
+    const planId = draftId('PLN');
     planByKey[ds.key] = planId;
 
     // Plan
@@ -806,12 +807,10 @@ export function buildEnrollmentBatch(
   const promotionGroups: PromotionGroup[] = [];
   const payments: Payment[] = [];
   const cashMovements: Omit<CashMovement, 'id' | 'user'>[] = [];
-  const groupIdPool = state.promotionGroups.map(g => g.id);
-  const paymentIdPool = state.payments.map(p => p.id);
 
   quote.units.forEach(u => {
     const parts = draft.payments[u.key] ?? [];
-    const paymentId = nextSequentialId('PAG', [...paymentIdPool, ...payments.map(p => p.id)]);
+    const paymentId = draftId('PAG');
     const enrollmentIds = u.studentKeys.map(k => enrollmentByKey[k]);
     const names = u.studentKeys.map(k => {
       const idx = draft.students.findIndex(s => s.key === k);
@@ -821,7 +820,7 @@ export function buildEnrollmentBatch(
     let groupId: string | undefined;
     if (u.kind === 'group') {
       const g = quote.groups[u.groupIndex!];
-      groupId = nextSequentialId('PGR', [...groupIdPool, ...promotionGroups.map(x => x.id)]);
+      groupId = draftId('PGR');
       const promo = c.promotions.find(p => p.id === g.promotionId)!;
       promotionGroups.push({
         id: groupId, promotionId: g.promotionId, currency: promo.currency, totalPrice: g.totalPrice,

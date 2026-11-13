@@ -120,7 +120,7 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const r = build(d);
   check('Caso 1: se guarda', r.ok, r.error);
   const b = r.batch!;
-  check('Caso 1: matrícula MAT-2026-001 con verificación Pendiente', b.enrollments[0].id === 'MAT-2026-001' && b.enrollments[0].verificationStatus === 'Pendiente');
+  check('Caso 1: matrícula con código BORRADOR del año (la base asigna el definitivo) y verificación Pendiente', /^MAT-2026-~\d+~$/.test(b.enrollments[0].id) && b.enrollments[0].verificationStatus === 'Pendiente');
   check('Caso 1: guarda programId, levelId y branchId (compatible con Verificación)',
     b.enrollments[0].programId === 'KIDS' && b.enrollments[0].levelId === 'K1' && b.enrollments[0].branchId === 'FIL-AYA');
   check('Caso 1: un pago, un movimiento de caja y plan de contado en saldo 0',
@@ -283,7 +283,11 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   const existing: ExistingState = { ...empty, enrollments: [{ id: 'MAT-2026-007' } as any] };
   const dd = draftWith([{ program: 'KIDS', level: 'K1', type: 'CONT' }]);
   dd.payments[quoteEnrollment(dd, catalogs()).units[0].key] = [usdPart(500)];
-  check('Correlativo continúa desde el máximo existente (MAT-2026-008)', build(dd, catalogs(), existing).batch?.enrollments[0].id === 'MAT-2026-008');
+  // Ya no se calcula con lo que ve la pantalla (solo ve su sede): el código es un borrador y la base asigna el siguiente al más alto de TODAS las sedes
+  const withExisting = build(dd, catalogs(), existing).batch;
+  check('El código de la matrícula, del plan y del pago no sale de lo que ve la pantalla: son borradores distintos entre sí',
+    /^MAT-2026-~\d+~$/.test(withExisting?.enrollments[0].id ?? '') && /^PLN-~\d+~$/.test(withExisting?.plans[0].id ?? '') && /^PAG-~\d+~$/.test(withExisting?.payments[0].id ?? '')
+    && withExisting?.plans[0].mat === withExisting?.enrollments[0].id && withExisting?.payments[0].enrollmentIds?.[0] === withExisting?.enrollments[0].id);
 }
 
 // ---------- Tarjeta de alumno: existente / nuevo, situación, horario
