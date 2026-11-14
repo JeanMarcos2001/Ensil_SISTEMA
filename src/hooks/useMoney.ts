@@ -43,8 +43,8 @@ export function useMoney(initial: MoneyRows, lists: EnrollmentLists, onStockMove
    * Guarda lo que cambió entre el estado de ahora y el borrador, con la acción dada y los movimientos de stock que la acción pida (los aplica la misma
    * llamada de la base). Devuelve el estado como quedó guardado (para que quien llama siga trabajando con él).
    */
-  const commit = useCallback(async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<OpResult<MoneyState> & { codes?: Record<string, string> }> => {
-    const res = await applyMoney(repo, action, stateRef.current, next, stock);
+  const commit = useCallback(async (action: MoneyAction, next: MoneyState, stock: StockOp[] = [], agenda?: Record<string, unknown>): Promise<OpResult<MoneyState> & { codes?: Record<string, string> }> => {
+    const res = await applyMoney(repo, action, stateRef.current, next, stock, agenda);
     if (!res.ok || !res.value) return { ok: false, error: res.error };
     const merged = mergeMoneyRows(rowsRef.current, res.value.fresh);
     rowsRef.current = merged;

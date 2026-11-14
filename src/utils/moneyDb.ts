@@ -315,6 +315,8 @@ export type StockOp =
 export interface MoneyPayload {
   grupos: Record<string, unknown>[]; matriculas: Record<string, unknown>[]; planes: Record<string, unknown>[]; pagos: Record<string, unknown>[];
   movimientos: Record<string, unknown>[]; notas: Record<string, unknown>[]; solicitudes: Record<string, unknown>[]; correcciones: Record<string, unknown>[]; stock?: StockOp[];
+  /** Lo que la operación cambia en la agenda de Psicopedagogía (la primera asesoría al matricular, las cancelaciones al caer o trasladarse): se guarda en la MISMA operación. */
+  agenda?: Record<string, unknown>;
 }
 
 /** Los códigos de las filas tocadas (para volver a leerlas después de guardar). */

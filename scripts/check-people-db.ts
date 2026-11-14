@@ -286,9 +286,9 @@ check('Esas acciones ya no están entre las que lanzan error al negar el permiso
 check('Matricular guarda primero las personas en la base (todo o nada) y después matricula a esas personas ya registradas; antes de guardar a nadie comprueba todo el borrador',
   /planEnrollmentPeople\(draft\)/.test(ctxSrc) && /people\.saveForEnrollment\(plan\.payload\)/.test(ctxSrc) && /withCreatedPeople\(draft, saved\.value\.created\)/.test(ctxSrc)
   && ctxSrc.indexOf('const checked = buildEnrollmentBatch') < ctxSrc.indexOf('people.saveForEnrollment'));
-check('Cambiar el nombre de un alumno sigue corrigiendo la copia en matrículas y agenda (una sola puerta)', /syncStudentName\(id, res\.value\.name, enrollments, schedules\)/.test(ctxSrc));
+check('El nombre del alumno en las matrículas y en la agenda se deriva de su id: cambiarlo no deja copias que corregir', !/syncStudentName/.test(ctxSrc) && /return people\.updateStudent\(id, studentData\)/.test(ctxSrc));
 const gate = read('src/components/auth/AccessGate.tsx');
-check('Titulares y alumnos se leen de la base al iniciar sesión, junto con lo demás', /loadPeople\(peopleRepo\)/.test(gate) && /loaded\.logistics, loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /people=\{people\}/.test(read('src/App.tsx')));
+check('Titulares y alumnos se leen de la base al iniciar sesión, junto con lo demás', /loadPeople\(peopleRepo\)/.test(gate) && /loaded\.logistics, loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection, loaded\.agenda\)/.test(gate) && /people=\{people\}/.test(read('src/App.tsx')));
 check('Las pantallas esperan la respuesta de la base antes de seguir (formularios y asistente) y apagan el botón mientras guardan',
   /await data\.registerEnrollments\(draft\)/.test(read('src/pages/NewEnrollmentWizard.tsx')) && /await (updateStudent|addStudent)/.test(read('src/pages/people/StudentFormModal.tsx'))
   && /await (updateGuardian|addGuardian)/.test(read('src/pages/people/GuardianFormModal.tsx')) && /disabled=\{saving\}/.test(read('src/pages/people/GuardianFormModal.tsx')) && /disabled=\{saving\}/.test(read('src/pages/people/StudentFormModal.tsx')));

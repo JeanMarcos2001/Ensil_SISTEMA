@@ -400,9 +400,9 @@ const build = (d: EnrollmentDraft, c = catalogs(), s = empty) => buildEnrollment
   check('Asesoría con la fecha y hora de cada alumno',
     b.batch!.schedules[0].date === '2026-10-12' && b.batch!.schedules[0].time === '15:00' &&
     b.batch!.schedules[1].date === '2026-10-13' && b.batch!.schedules[1].time === '17:00');
-  check('Asesoría: Reservado, primera, 60 min, programa/nivel y correlativo continuo',
+  check('Asesoría: Reservado, primera, 60 min, programa/nivel y código de borrador (lo asigna la base)',
     b.batch!.schedules.every(x => x.status === 'Reservado' && x.isFirst === true && x.duration === 60) &&
-    b.batch!.schedules[0].program === 'Pre-Kids' && b.batch!.schedules[1].level === 'Kids 2' && b.batch!.schedules.map(x => x.id).join() === 'SES-006,SES-007');
+    b.batch!.schedules[0].program === 'Pre-Kids' && b.batch!.schedules[1].level === 'Kids 2' && b.batch!.schedules.every(x => /^SES-~\d+~$/.test(x.id)) && new Set(b.batch!.schedules.map(x => x.id)).size === 2);
   check('Asesoría: sede de la matrícula, alumno vinculado y responsable = quien entrevistó',
     b.batch!.schedules.every(x => x.branchId === 'FIL-AYA') &&
     b.batch!.schedules[0].studentId === b.batch!.newStudents[0].id && b.batch!.schedules[1].studentId === b.batch!.newStudents[1].id &&

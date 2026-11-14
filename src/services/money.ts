@@ -45,12 +45,12 @@ export interface MoneyApplied {
  * volver a leerlo. Si no hay nada que guardar, devuelve ok sin llamar a la base.
  */
 export async function applyMoney(
-  repo: MoneyRepository, action: MoneyAction, before: MoneyState, after: MoneyState, stock: StockOp[] = [],
+  repo: MoneyRepository, action: MoneyAction, before: MoneyState, after: MoneyState, stock: StockOp[] = [], agenda?: Record<string, unknown>,
 ): Promise<OpResult<MoneyApplied>> {
   const diff = diffMoney(before, after, stock);
   if (diff.error) return fail(diff.error);
-  if (diff.empty) return { ok: true, value: { fresh: emptyMoneyRows(), touched: diff.touched, codes: {} } };
-  const saved = await repo.apply(action, diff.payload);
+  if (diff.empty && !agenda) return { ok: true, value: { fresh: emptyMoneyRows(), touched: diff.touched, codes: {} } };
+  const saved = await repo.apply(action, agenda ? { ...diff.payload, agenda } : diff.payload);
   if (!saved.ok) return fail(saved.error ?? 'No se pudo guardar.');
   const codes = saved.data?.codes ?? {};
   const touched = replaceDraftIds(diff.touched, codes);

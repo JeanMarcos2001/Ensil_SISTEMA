@@ -216,7 +216,7 @@ async function run() {
     && /addPettyCashMovement: \(branchId: string, input: PettyInput\) => Promise<StockResult>/.test(ctxSrc) && /updatePettyFund: \(branchId: string, fund: \{ assigned: string; maxExpense: string \}\) => Promise<StockResult>/.test(ctxSrc) && /pettyFundOf: \(branchId: string\) => PettyFund/.test(ctxSrc));
   check('Venta, reversa y depósito respetan el cierre de SU sede', /closedMessage\(cashClosures, 'caja', input\.currency, todayLocalISO\(\), input\.branchId\)/.test(ctxSrc) && /closedMessage\(cashClosures, 'caja', movement\.currency, localDateOf\(movement\.date\), movement\.branchId\)/.test(ctxSrc));
   const gate = read('src/components/auth/AccessGate.tsx');
-  check('Los cierres y la caja chica se leen al iniciar sesión (antes de montar el sistema)', /loadCashBoxes\(cashBoxesRepo\)/.test(gate) && /loaded\.money, loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /cashBoxes=\{cashBoxes\}/.test(read('src/App.tsx')));
+  check('Los cierres y la caja chica se leen al iniciar sesión (antes de montar el sistema)', /loadCashBoxes\(cashBoxesRepo\)/.test(gate) && /loaded\.money, loaded\.cashBoxes, loaded\.collection, loaded\.agenda\)/.test(gate) && /cashBoxes=\{cashBoxes\}/.test(read('src/App.tsx')));
   const hook = read('src/hooks/useCashBoxes.ts');
   check('El gancho arranca con lo ya leído, valida contra lo último que se vio y vuelve a leer después de cada operación', /useCashBoxes\(initial: CashBoxesData/.test(hook) && /useState<CashClosure\[\]>\(initial\.closures\)/.test(hook) && /closuresRef\.current = closures/.test(hook) && /if \(res\.ok\) await refresh\(\)/.test(hook));
   const modal = read('src/components/cash/CloseCashModal.tsx');

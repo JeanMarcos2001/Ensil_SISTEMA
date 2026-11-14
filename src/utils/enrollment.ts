@@ -779,13 +779,13 @@ export function buildEnrollmentBatch(
     });
   });
 
-  // ---- Primera asesoría de cada alumno: asesoría real de la agenda (sede de la matrícula; responsable = quien entrevistó)
+  // ---- Primera asesoría de cada alumno: asesoría real de la agenda (sede de la matrícula; responsable = quien entrevistó).
+  // Su código es un borrador (`SES-~n~`): la base lo asigna al guardar, en la misma operación que la matrícula (`utils/agendaDb.ts`).
   const newSchedules: Schedule[] = [];
-  const scheduleIdPool = state.schedules.map(x => x.id);
   draft.students.forEach((ds, i) => {
     const q = quote.students[i];
     newSchedules.push({
-      id: nextSequentialId('SES', [...scheduleIdPool, ...newSchedules.map(x => x.id)]),
+      id: draftId('SES'),
       student: fullName(studentPerson(draft, i)),
       studentId: studentIds[i],
       branchId: draft.context.branchId,
@@ -795,6 +795,7 @@ export function buildEnrollmentBatch(
       time: ds.counselingTime,
       duration: SLOT_DURATION,
       responsible: interviewerName,
+      responsibleId: interviewer.id,
       status: 'Reservado',
       isFirst: true,
       // Los alumnos del mismo registro comparten el horario; el registro se identifica con la primera matrícula del lote

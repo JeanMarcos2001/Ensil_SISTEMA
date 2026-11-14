@@ -232,7 +232,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Operación
   f('op-matriculas', 'Matrículas', 'mod-operacion', [
-    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'guardian', 'plan', 'program', 'level'], note: 'Muestra, en la lista y en la ficha, las solicitudes pendientes de cada matrícula y su historial.' },
+    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'guardian', 'plan', 'program', 'level', 'schedule'], note: 'Muestra, en la lista y en la ficha, las solicitudes pendientes de cada matrícula y su historial.' },
     {
       action: 'create', label: 'Crear matrícula', kind: 'crear', requires: ['view'], sensitive: 'dinero',
       reads: ['program', 'level', 'tariff', 'promotion', 'paymentType'], writes: ['enrollment', 'student', 'guardian', 'plan', 'payment', 'cashMovement', 'verification', 'schedule'],
@@ -295,7 +295,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'credit_note', label: 'Emitir nota de crédito', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['creditNote'], actions: ['reversePayment'] },
   ]),
   f('op-verificacion', 'Verificación de materiales', 'mod-operacion', [
-    { action: 'view', label: 'Ver verificación', kind: 'ver', menu: menu(OP, 'Verificación'), reads: ['verification', 'enrollment', 'recipe', 'stock'] },
+    { action: 'view', label: 'Ver verificación', kind: 'ver', menu: menu(OP, 'Verificación'), reads: ['verification', 'enrollment', 'recipe', 'stock', 'schedule'] },
     {
       action: 'deliver', label: 'Registrar la entrega de materiales', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['recipe', 'stock'],
       writes: ['verification', 'stock', 'kardex'], actions: ['updateEnrollmentVerification'],
@@ -397,7 +397,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Psicopedagogía
   f('psi-prog', 'Programación', 'mod-psico', [
-    { action: 'view', label: 'Ver programación', kind: 'ver', menu: menu('psicopedagogia', 'Programación'), reads: ['schedule', 'student', 'enrollment', 'verification'] },
+    { action: 'view', label: 'Ver programación', kind: 'ver', menu: menu('psicopedagogia', 'Programación'), reads: ['schedule', 'student', 'enrollment', 'verification', 'tracking', 'capacity'] },
     {
       action: 'create', label: 'Crear programación (agendar asesorías)', kind: 'crear', requires: ['view'], reads: ['student', 'enrollment', 'verification', 'capacity'], writes: ['schedule'], actions: ['addSchedule'],
       counterparts: [cp('psi-prog:mark_attendance', 'same-branch', 'advisory', 'Sin Psicopedagogía en la sede nadie marcará la asistencia de las asesorías.')],
@@ -433,7 +433,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Personas
   f('per-alumnos', 'Alumnos', 'mod-personas', crud({
-    entity: 'student', one: 'alumno', many: 'alumnos', menu: menu('personas', 'Alumnos'), reads: ['guardian', 'enrollment'],
+    entity: 'student', one: 'alumno', many: 'alumnos', menu: menu('personas', 'Alumnos'), reads: ['guardian', 'enrollment', 'schedule'],
     create: ['addStudent'], edit: ['updateStudent'], remove: ['deleteStudent'],
   })),
   f('per-titulares', 'Titulares', 'mod-personas', crud({
@@ -441,14 +441,14 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     create: ['addGuardian'], edit: ['updateGuardian'], remove: ['deleteGuardian'],
   })),
   f('per-personal', 'Personal', 'mod-personas', [
-    { action: 'view', label: 'Ver el personal', kind: 'ver', menu: menu('personas', 'Personal'), reads: ['staff', 'contract', 'assignment', 'user'] },
+    { action: 'view', label: 'Ver el personal', kind: 'ver', menu: menu('personas', 'Personal'), reads: ['staff', 'contract', 'assignment', 'user', 'schedule'] },
     { action: 'create', label: 'Crear ficha de personal', kind: 'crear', requires: ['view'], writes: ['staff', 'user'], actions: ['addStaff'] },
     { action: 'edit', label: 'Editar ficha de personal', kind: 'editar', requires: ['view'], writes: ['staff', 'user'], actions: ['updateStaff'] },
     { action: 'inactivate', label: 'Inactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user', 'assignment'], actions: ['inactivateStaff'], note: 'Su cuenta de usuario se desactiva sola.' },
     { action: 'reactivate', label: 'Reactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user'], actions: ['reactivateStaff'] },
   ]),
   f('per-contratos', 'Contratos', 'mod-personas', [
-    { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll'] },
+    { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll', 'schedule'] },
     { action: 'create', label: 'Crear contrato', kind: 'crear', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['addContract'],
       counterparts: [cp('per-planilla:generate', 'any', 'advisory', 'Sin quien arme la planilla, el contrato no se pagará.')] },
     { action: 'edit', label: 'Editar contrato (cambio de condiciones con motivo)', kind: 'editar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['editContract'] },
@@ -456,7 +456,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'renew', label: 'Renovar contrato', kind: 'operar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['renewContract'] },
   ]),
   f('per-asignaciones', 'Asignaciones', 'mod-personas', [
-    { action: 'view', label: 'Ver asignaciones', kind: 'ver', menu: menu('personas', 'Asignaciones'), reads: ['assignment', 'staff', 'branch'] },
+    { action: 'view', label: 'Ver asignaciones', kind: 'ver', menu: menu('personas', 'Asignaciones'), reads: ['assignment', 'staff', 'branch', 'schedule'] },
     { action: 'save', label: 'Crear o editar una asignación', kind: 'crear', requires: ['view'], writes: ['assignment'], actions: ['saveAssignment'] },
     { action: 'close', label: 'Cerrar una asignación', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['assignment'], actions: ['closeAssignment'] },
   ]),
@@ -543,7 +543,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'save_views', label: 'Guardar vistas', kind: 'configurar', requires: ['view'], reserved: true, note: 'Reservada: hoy no existen vistas guardadas.' },
   ]),
   f('rep-matriculas', 'Reporte de matrículas', 'mod-reportes', [
-    { action: 'view', label: 'Ver el reporte de matrículas', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'program', 'branch'] },
+    { action: 'view', label: 'Ver el reporte de matrículas', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'program', 'branch', 'schedule'] },
   ]),
   f('rep-cartera', 'Reporte de cartera', 'mod-reportes', [
     { action: 'view', label: 'Ver el reporte de cartera', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Cartera'), reads: ['plan', 'installment', 'enrollment', 'guardian'], sensitive: 'dinero' },
@@ -552,7 +552,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'view', label: 'Ver el reporte de caja', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Caja'), reads: ['cashMovement', 'deposit', 'cashClosure', 'pettyCash'], sensitive: 'dinero' },
   ]),
   f('rep-verificacion', 'Reporte de verificación', 'mod-reportes', [
-    { action: 'view', label: 'Ver el reporte de verificación', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Verificación'), reads: ['verification', 'enrollment', 'recipe', 'stock'] },
+    { action: 'view', label: 'Ver el reporte de verificación', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Verificación'), reads: ['verification', 'enrollment', 'recipe', 'stock', 'schedule'] },
   ]),
   f('rep-stock', 'Reporte de stock', 'mod-reportes', [
     { action: 'view', label: 'Ver el reporte de stock', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Stock'), reads: ['stock', 'kardex', 'recipe', 'enrollment'] },
@@ -566,7 +566,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Sistema
   f('sis-auditoria', 'Auditoría', 'mod-sistema', [
-    { action: 'view', label: 'Ver la auditoría', kind: 'ver', menu: menu('sistema', 'Auditoría'), reads: ['audit'], note: 'Los sueldos del detalle solo se muestran con «Ver remuneraciones».' },
+    { action: 'view', label: 'Ver la auditoría', kind: 'ver', menu: menu('sistema', 'Auditoría'), reads: ['audit', 'schedule'], note: 'Los sueldos del detalle solo se muestran con «Ver remuneraciones».' },
   ]),
   f('sis-solicitudes', 'Solicitudes pendientes', 'mod-sistema', [
     { action: 'view', label: 'Ver solicitudes pendientes', kind: 'ver', menu: menu('sistema', 'Solicitudes pendientes'), reads: ['enrollmentRequest', 'enrollment'], note: 'Resolver cada solicitud pide la función «Aprobar» del tipo correspondiente.' },

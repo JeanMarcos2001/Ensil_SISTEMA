@@ -136,11 +136,12 @@ export function Schedule() {
   };
 
   // Acciones sobre una asesoría (Reservado y Reprogramado son automáticos)
-  const runAction = (action: ScheduleAction, s: ScheduleItem) => {
+  const runAction = async (action: ScheduleAction, s: ScheduleItem) => {
     setDayDetail(null);
     if (action === 'reprogramar') openForm(s);
     else if (action === 'asistio' || action === 'falta') {
-      const r = updateSchedule(s.id, { status: action === 'asistio' ? 'Asistió' : 'Faltó' });
+      // La asistencia se guarda en la base: se espera su respuesta (rechaza, por ejemplo, la primera asesoría sin materiales entregados)
+      const r = await updateSchedule(s.id, { status: action === 'asistio' ? 'Asistió' : 'Faltó' });
       if (!r.ok) setNotice(r.reason ?? 'No se pudo registrar.');
     }
     else if (action === 'sesion') setSessionOf(s);
@@ -156,7 +157,7 @@ export function Schedule() {
         : a === 'reprogramar' && gate.blocked ? 'Reprogramar (matrícula sin verificar)'
         : (a === 'reprogramar' || a === 'cancelar') && late ? `${ACTION_LABEL[a]} (cambio de la institución)`
         : ACTION_LABEL[a],
-      onClick: () => runAction(a, s),
+      onClick: () => { void runAction(a, s); },
       danger: a === 'falta' || a === 'cancelar',
       disabled: false,
     }));
@@ -499,9 +500,9 @@ export function Schedule() {
         detailOptional
         confirmLabel="Cancelar asesoría"
         danger
-        onSubmit={({ reason, detail }) => {
+        onSubmit={async ({ reason, detail }) => {
           if (!toCancel) return null;
-          const r = updateSchedule(toCancel.id, { status: 'Cancelado' }, { reason, detail });
+          const r = await updateSchedule(toCancel.id, { status: 'Cancelado' }, { reason, detail });
           return r.ok ? null : r.reason ?? 'No se pudo cancelar.';
         }}
       >

@@ -192,8 +192,8 @@ check('Cada acción arma sus registros nuevos con borrador (movimiento de caja, 
   (ctx.match(/draftId\('CJ'\)/g) ?? []).length >= 4 && /draftId\('PAG'\)/.test(ctx) && (ctx.match(/draftId\('COR'\)/g) ?? []).length === 2 && /draftId\('NC'\)/.test(ctx) && /draftId\('CAI'\)/.test(ctx) && /draftId\('SOL'\)/.test(ctx)
   && /enrollmentId = draftId\('MAT', year\)/.test(read('src/utils/enrollment.ts')) && /planId = draftId\('PLN'\)/.test(read('src/utils/enrollment.ts')) && /paymentId = draftId\('PAG'\)/.test(read('src/utils/enrollment.ts')) && /groupId = draftId\('PGR'\)/.test(read('src/utils/enrollment.ts'))
   && /draftId\('DEP'\)/.test(read('src/utils/cash.ts')) && /draftId\(series as 'BC01' \| 'FC01'\)/.test(read('src/utils/creditNotes.ts')) && /draftId\(DOC_PREFIX\[kind\], year\)/.test(read('src/utils/enrollmentDocuments.ts')));
-check('Lo que sigue en memoria (la primera asesoría de una matrícula) y lo que se devuelve a la pantalla (matrículas creadas, código del lote) usan los códigos reales',
-  /setSchedules\(prev => \[\.\.\.prev, \.\.\.replaceDraftIds\(b\.schedules, codes\)\]\)/.test(ctx) && /enrollmentIds: b\.enrollments\.map\(e => codes\[e\.id\] \?\? e\.id\)/.test(ctx)
+check('La primera asesoría de una matrícula viaja con ella (la base asigna su código) y lo que se devuelve a la pantalla (matrículas creadas, código del lote) usa los códigos reales',
+  /await agenda\.refreshFor\(realCodes\(b\.schedules\.map\(sc => sc\.id\), codes\)\)/.test(ctx) && /enrollmentIds: b\.enrollments\.map\(e => codes\[e\.id\] \?\? e\.id\)/.test(ctx)
   && /code: saved\.codes\?\.\[built\.code\] \?\? built\.code/.test(ctx));
 check('El hook devuelve los códigos asignados y la pantalla de reversa ya no promete un número de nota (lo asigna la base)',
   /codes: res\.value\.codes/.test(read('src/hooks/useMoney.ts')) && !/nextNoteNumber|nextLabel/.test(read('src/components/payments/ReversePaymentModal.tsx')) && /el siguiente número de la serie/.test(read('src/components/payments/ReversePaymentModal.tsx')));

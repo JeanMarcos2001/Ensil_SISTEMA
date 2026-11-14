@@ -75,6 +75,7 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
   const [error, setError] = useState<string | null>(null);
   const [reasonSel, setReasonSel] = useState('');
   const [reasonDetail, setReasonDetail] = useState('');
+  const [saving, setSaving] = useState(false);
   const isReschedule = !!schedule;
   // Primera asesoría sin materiales: se reprograma aunque falten menos de 24 horas (el cambio es de la institución)
   const gate = schedule ? gateOfSchedule(schedule) : undefined;
@@ -166,7 +167,8 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
   };
   const chosen = form.time && form.branchId ? optionOf(form.time).text : undefined;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     const slotChanged = !schedule || schedule.date !== form.date || schedule.time !== form.time;
     // Regla de 24 horas: una asesoría activa solo se reprograma con anticipación
     if (schedule && late && !mayChangeLate) { setError(noticeMessage(schedule.date, schedule.time)); return; }
@@ -196,10 +198,16 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
       // Si se movió por falta de verificación, queda constancia en las observaciones
       const note = gate?.blocked && slotChanged ? gateRescheduleNote(schedule.date, schedule.time) : '';
       const observations = [base.observations, note].filter(Boolean).join('\n') || undefined;
-      const res = updateSchedule(schedule.id, { ...base, observations, status: moved ? 'Reprogramado' : schedule.status }, moved ? { reason: reasonSel, detail: reasonDetail } : undefined);
+      // Se guarda en la base: se espera su respuesta y el botón se apaga mientras tanto
+      setSaving(true);
+      const res = await updateSchedule(schedule.id, { ...base, observations, status: moved ? 'Reprogramado' : schedule.status }, moved ? { reason: reasonSel, detail: reasonDetail } : undefined);
+      setSaving(false);
       if (!res.ok) { setError(res.reason ?? 'No se pudo guardar la reprogramación.'); return; }
     } else {
-      addSchedule({ ...base, status: 'Reservado' });
+      setSaving(true);
+      const res = await addSchedule({ ...base, status: 'Reservado' });
+      setSaving(false);
+      if (!res.ok) { setError(res.error ?? 'No se pudo guardar la reserva.'); return; }
     }
     onClose();
   };
@@ -217,7 +225,7 @@ export function ScheduleFormModal({ isOpen, onClose, schedule, defaultDate, defa
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Descartar Cambios</Button>
-          <Button variant="primary" onClick={handleSave}>{isReschedule ? 'Guardar Reprogramación' : 'Guardar y Confirmar Reserva'}</Button>
+          <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>{saving ? 'Guardando…' : isReschedule ? 'Guardar Reprogramación' : 'Guardar y Confirmar Reserva'}</Button>
         </div>
       }
     >

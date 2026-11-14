@@ -89,7 +89,7 @@ La función de la base de la matrícula y el dinero (Lote 8) pasa a poder tocar 
 
 ## 9C — Cobranza y plantilla del contrato (migración 0021)
 
-**Estado (2026-11-13): hecho y verificado en el código** (`tsc`, `vite build`, los 44 `check-*`, la migración probada contra Postgres en memoria con cuentas de dos sedes y los envíos que arma el propio cliente, y su «deshacer»). **Falta que el usuario pegue la migración (no hay carga de partida) y probar en el navegador; no se sube a `main` antes** (la aplicación lee las tablas nuevas al iniciar sesión).
+**Estado (2026-11-13): hecho y verificado en el código** (`tsc`, `vite build`, los 44 `check-*`, la migración probada contra Postgres en memoria con cuentas de dos sedes y los envíos que arma el propio cliente, y su «deshacer»). **La migración ya está aplicada a la base real (verificada por SQL el 2026-11-13) y el código está subido a `main` (commit 78b26c8); falta probarlo en el navegador.**
 
 **Decisión del usuario (2026-11-13): UNA sola política de cobranza para todo el grupo.**
 

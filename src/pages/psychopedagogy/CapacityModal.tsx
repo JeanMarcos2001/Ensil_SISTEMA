@@ -38,6 +38,7 @@ export function CapacityModal({ isOpen, onClose }: Props) {
   const activeBranches = branches.filter(b => b.status === 'Activo');
   const [cfg, setCfg] = useState<CapacityConfig>(capacityConfig);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [exc, setExc] = useState({ branchId: '', date: '', time: '', capacity: DEFAULT_CAPACITY as number | null });
 
   useEffect(() => {
@@ -70,9 +71,14 @@ export function CapacityModal({ isOpen, onClose }: Props) {
     setExc({ ...exc, time: '' });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     if (!isValidCapacity(cfg.defaultCapacity)) { setError('El cupo general debe estar entre 1 y 50, o sin límite.'); return; }
-    setCapacityConfig(cfg);
+    // Se guarda en la base (solo lo que cambió): se espera su respuesta
+    setSaving(true);
+    const res = await setCapacityConfig(cfg);
+    setSaving(false);
+    if (!res.ok) { setError(res.error ?? 'No se pudieron guardar los cupos.'); return; }
     onClose();
   };
 
@@ -87,7 +93,7 @@ export function CapacityModal({ isOpen, onClose }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Descartar Cambios</Button>
-          <Button variant="primary" onClick={handleSave}>Guardar Cupos</Button>
+          <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Cupos'}</Button>
         </div>
       }
     >

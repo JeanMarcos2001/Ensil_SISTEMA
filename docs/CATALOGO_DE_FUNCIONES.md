@@ -34,7 +34,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Solicitud sobre una matrícula, Alumno, Titular, Plan de pago, Programa, Nivel → — | — |
+| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Solicitud sobre una matrícula, Alumno, Titular, Plan de pago, Programa, Nivel, Asesoría → — | — |
 | **Crear matrícula** 💲<br><code>op-matriculas:create</code> | crear | Ver matrículas | Registrar la entrega de materiales en la misma sede (recomendada)<br>Crear programación (agendar asesorías) en la misma sede (recomendada) | Programa, Nivel, Tarifario, Promoción, Tipo de pago → Matrícula, Alumno, Titular, Plan de pago, Pago, Movimiento de caja, Verificación de materiales, Asesoría | — |
 | **Editar borrador** _(reservada)_<br><code>op-matriculas:edit_draft</code> | editar | Ver matrículas | — | — → — | — |
 | **Confirmar matrícula** _(reservada)_<br><code>op-matriculas:confirm</code> | operar | Ver matrículas | — | — → — | — |
@@ -64,7 +64,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver verificación** · menú «Verificación»<br><code>op-verificacion:view</code> | ver | — | — | Verificación de materiales, Matrícula, Receta de materiales, Stock → — | — |
+| **Ver verificación** · menú «Verificación»<br><code>op-verificacion:view</code> | ver | — | — | Verificación de materiales, Matrícula, Receta de materiales, Stock, Asesoría → — | — |
 | **Registrar la entrega de materiales**<br><code>op-verificacion:deliver</code> | operar | Ver verificación, Ver el stock | Confirmar la recepción de un envío en la misma sede (recomendada) | Receta de materiales, Stock → Verificación de materiales, Stock, Kardex | — |
 
 ### Caja `op-caja`
@@ -168,7 +168,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver programación** · menú «Programación»<br><code>psi-prog:view</code> | ver | — | — | Asesoría, Alumno, Matrícula, Verificación de materiales → — | — |
+| **Ver programación** · menú «Programación»<br><code>psi-prog:view</code> | ver | — | — | Asesoría, Alumno, Matrícula, Verificación de materiales, Seguimiento de la sesión, Cupos → — | — |
 | **Crear programación (agendar asesorías)**<br><code>psi-prog:create</code> | crear | Ver programación | Marcar la asistencia de la asesoría en la misma sede (recomendada) | Alumno, Matrícula, Verificación de materiales, Cupos → Asesoría | — |
 | **Reprogramar o cancelar con 24 horas o más**<br><code>psi-prog:reschedule</code> | editar | Ver programación | — | — → Asesoría | — |
 | **Marcar la asistencia de la asesoría**<br><code>psi-prog:mark_attendance</code> | operar | Ver programación | — | Verificación de materiales → Asesoría | — |
@@ -209,7 +209,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver alumnos** · menú «Alumnos»<br><code>per-alumnos:view</code> | ver | — | — | Alumno, Titular, Matrícula → — | — |
+| **Ver alumnos** · menú «Alumnos»<br><code>per-alumnos:view</code> | ver | — | — | Alumno, Titular, Matrícula, Asesoría → — | — |
 | **Crear alumno**<br><code>per-alumnos:create</code> | crear | Ver alumnos | — | — → Alumno | — |
 | **Editar alumno**<br><code>per-alumnos:edit</code> | editar | Ver alumnos | — | — → Alumno | — |
 | **Eliminar alumno** 🛡 control<br><code>per-alumnos:delete</code> | eliminar | Ver alumnos | — | — → Alumno | — |
@@ -227,7 +227,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver el personal** · menú «Personal»<br><code>per-personal:view</code> | ver | — | — | Personal, Contrato de trabajo, Asignación, Cuenta de usuario → — | — |
+| **Ver el personal** · menú «Personal»<br><code>per-personal:view</code> | ver | — | — | Personal, Contrato de trabajo, Asignación, Cuenta de usuario, Asesoría → — | — |
 | **Crear ficha de personal**<br><code>per-personal:create</code> | crear | Ver el personal | — | — → Personal, Cuenta de usuario | — |
 | **Editar ficha de personal**<br><code>per-personal:edit</code> | editar | Ver el personal | — | — → Personal, Cuenta de usuario | — |
 | **Inactivar a un trabajador** 🛡 control<br><code>per-personal:inactivate</code> | operar | Ver el personal | — | — → Personal, Cuenta de usuario, Asignación | — |
@@ -237,7 +237,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver contratos** · menú «Contratos»<br><code>per-contratos:view</code> | ver | — | — | Contrato de trabajo, Personal, Planilla → — | — |
+| **Ver contratos** · menú «Contratos»<br><code>per-contratos:view</code> | ver | — | — | Contrato de trabajo, Personal, Planilla, Asesoría → — | — |
 | **Crear contrato** 👁‍🗨 sueldos<br><code>per-contratos:create</code> | crear | Ver contratos, Ver remuneraciones y costo de planilla | Generar y eliminar borradores de planilla en cualquier sede (recomendada) | — → Contrato de trabajo | — |
 | **Editar contrato (cambio de condiciones con motivo)** 👁‍🗨 sueldos<br><code>per-contratos:edit</code> | editar | Ver contratos, Ver remuneraciones y costo de planilla | — | — → Contrato de trabajo | — |
 | **Cerrar contrato** 🛡 control<br><code>per-contratos:close</code> | operar | Ver contratos | — | — → Contrato de trabajo, Asignación | — |
@@ -247,7 +247,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver asignaciones** · menú «Asignaciones»<br><code>per-asignaciones:view</code> | ver | — | — | Asignación, Personal, Filial → — | — |
+| **Ver asignaciones** · menú «Asignaciones»<br><code>per-asignaciones:view</code> | ver | — | — | Asignación, Personal, Filial, Asesoría → — | — |
 | **Crear o editar una asignación**<br><code>per-asignaciones:save</code> | crear | Ver asignaciones | — | — → Asignación | — |
 | **Cerrar una asignación** 🛡 control<br><code>per-asignaciones:close</code> | operar | Ver asignaciones | — | — → Asignación | — |
 
@@ -393,7 +393,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver el reporte de matrículas** · menú «Matrículas»<br><code>rep-matriculas:view</code> | ver | Ver reportes | — | Matrícula, Solicitud sobre una matrícula, Alumno, Programa, Filial → — | — |
+| **Ver el reporte de matrículas** · menú «Matrículas»<br><code>rep-matriculas:view</code> | ver | Ver reportes | — | Matrícula, Solicitud sobre una matrícula, Alumno, Programa, Filial, Asesoría → — | — |
 
 ### Reporte de cartera `rep-cartera`
 
@@ -411,7 +411,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver el reporte de verificación** · menú «Verificación»<br><code>rep-verificacion:view</code> | ver | Ver reportes | — | Verificación de materiales, Matrícula, Receta de materiales, Stock → — | — |
+| **Ver el reporte de verificación** · menú «Verificación»<br><code>rep-verificacion:view</code> | ver | Ver reportes | — | Verificación de materiales, Matrícula, Receta de materiales, Stock, Asesoría → — | — |
 
 ### Reporte de stock `rep-stock`
 
@@ -437,7 +437,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver la auditoría** · menú «Auditoría»<br><code>sis-auditoria:view</code> | ver | — | — | Auditoría → — | — |
+| **Ver la auditoría** · menú «Auditoría»<br><code>sis-auditoria:view</code> | ver | — | — | Auditoría, Asesoría → — | — |
 
 ### Solicitudes pendientes `sis-solicitudes`
 

@@ -296,10 +296,10 @@ check('Venta, reversa de una venta y entrega de materiales mueven el stock en la
   /op: 'vender'/.test(ctxSrc) && /op: 'reponer'/.test(ctxSrc) && /op: 'entregar'/.test(ctxSrc) && !/log\.sellFromStock|log\.restockReversedSale|log\.deliverFromStock/.test(ctxSrc) && /\(\) => log\.refreshStock\(\)/.test(ctxSrc));
 check('Cada acción valida con las reglas puras ANTES de llamar a la base y no se guarda nada si falla (el estado nuevo solo se entrega al final)',
   ctxSrc.indexOf("validatePaymentInput({ parts: input.parts") < ctxSrc.indexOf("saveMoney('cobrar'") && ctxSrc.indexOf('validateReversal(payment, input, ctx)') < ctxSrc.indexOf("saveMoney('reversar_pago'") && ctxSrc.indexOf('validateRefinance(plan, installmentId') < ctxSrc.indexOf("saveMoney('refinanciar'"));
-check('En una aprobación (caída, reactivación, cambio de programa, traslado) lo que sigue en memoria (la agenda) se aplica solo DESPUÉS de que la base guardó; la solicitud y la corrección viajan CON la matrícula',
-  ctxSrc.indexOf("saveMoney('caida', d)") < ctxSrc.indexOf("Cancelada por la caída de la matrícula") && ctxSrc.indexOf('const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d);') < ctxSrc.indexOf('afterSave();')
+check('En una aprobación (caída, reactivación, cambio de programa, traslado) las asesorías viajan CON la operación (todo o nada), lo que sigue en memoria (las actividades) se aplica solo DESPUÉS de que la base guardó, y la solicitud y la corrección viajan CON la matrícula',
+  ctxSrc.indexOf("saveMoney('caida', d, [], ") < ctxSrc.indexOf('await agenda.refreshFor(preview.scheduleIds)') && ctxSrc.indexOf('const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d, [], agendaPayload);') < ctxSrc.indexOf('afterSave();')
   && /d\.changeRequests = d\.changeRequests\.map\(r => \(r\.id === requestId \? \{ \.\.\.r, \.\.\.base, effects \} : r\)\);\s*d\.enrollmentChanges = \[log, \.\.\.d\.enrollmentChanges\];/.test(ctxSrc)
-  && /d\.dropRequests = d\.dropRequests\.map\(r => \(r\.id === requestId \? \{ \.\.\.r, \.\.\.resolution, effects \} : r\)\);\s*const saved = await saveMoney\('caida', d\)/.test(ctxSrc));
+  && /d\.dropRequests = d\.dropRequests\.map\(r => \(r\.id === requestId \? \{ \.\.\.r, \.\.\.resolution, effects \} : r\)\);[\s\S]{0,500}const saved = await saveMoney\('caida', d, \[\], /.test(ctxSrc));
 check('Matricular guarda matrícula, plan, pago, caja y grupo juntos y avisa que las personas ya se guardaron si eso falla',
   /d\.promotionGroups = \[\.\.\.d\.promotionGroups, \.\.\.b\.promotionGroups\]/.test(ctxSrc) && /Las personas se guardaron, pero no se pudo matricular: \$\{saved\.error\}/.test(ctxSrc));
 check('Reversar un pago guarda el plan, el pago anulado, la nota de crédito y la caja en UNA operación', /d\.creditNotes = \[note, \.\.\.d\.creditNotes\]/.test(ctxSrc) && (ctxSrc.match(/saveMoney\('reversar_pago'/g) ?? []).length === 1);
@@ -312,7 +312,7 @@ check('Las acciones del dinero son asíncronas y devuelven { ok, error }', async
 check('Esas acciones no están entre las que lanzan error al negar el permiso (devuelven resultado)', asyncActions.every(a => !THROWS_ON_DENIAL.has(a)));
 
 const gate = read('src/components/auth/AccessGate.tsx');
-check('Las matrículas y el dinero se leen de la base al iniciar sesión, junto con lo demás', /loadMoney\(moneyRepo\)/.test(gate) && /loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /money=\{money\}/.test(read('src/App.tsx')) && /money: moneyData/.test(ctxSrc));
+check('Las matrículas y el dinero se leen de la base al iniciar sesión, junto con lo demás', /loadMoney\(moneyRepo\)/.test(gate) && /loaded\.people, loaded\.money, loaded\.cashBoxes, loaded\.collection, loaded\.agenda\)/.test(gate) && /money=\{money\}/.test(read('src/App.tsx')) && /money: moneyData/.test(ctxSrc));
 const awaits = (file: string, re: RegExp) => re.test(read(file));
 check('Las pantallas esperan la respuesta de la base antes de seguir y apagan el botón mientras guardan',
   awaits('src/components/payments/RegisterPaymentModal.tsx', /await registerPayment\(/) && awaits('src/components/payments/RegisterPaymentModal.tsx', /disabled=\{saving\}/)

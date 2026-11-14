@@ -41,6 +41,15 @@ export const STAFF_CODE_KINDS = {
 } as const;
 export type StaffCodeKind = keyof typeof STAFF_CODE_KINDS;
 
+/**
+ * Los códigos de la agenda de Psicopedagogía que asigna la base (migración 0022): asesoría (`SES-NNN`), evento del historial (`EVT-NNNN`) y seguimiento
+ * (`TRK-NNN`). Viajan dentro de `aplicar_cambios_agenda` o de la clave `agenda` de una operación del dinero; la base los rechaza si no son borradores.
+ */
+export const AGENDA_CODE_KINDS = {
+  SES: { year: false, pad: 3 }, EVT: { year: false, pad: 4 }, TRK: { year: false, pad: 3 },
+} as const;
+export type AgendaCodeKind = keyof typeof AGENDA_CODE_KINDS;
+
 /** El borrador tiene el mismo aspecto que el código, con el número entre `~` (`~1~` no es parte de `~10~`: se cierra con el mismo signo). */
 const TOKEN = /([A-Z][A-Z0-9]{1,3})-(?:(\d{4})-)?~(\d+)~/g;
 const DRAFT_ONLY = /^[A-Z][A-Z0-9]{1,3}-(?:\d{4}-)?~\d+~$/;
@@ -48,8 +57,9 @@ const DRAFT_ONLY = /^[A-Z][A-Z0-9]{1,3}-(?:\d{4}-)?~\d+~$/;
 let sequence = 0;
 
 /** Un código de borrador nuevo (el número solo ordena: la base entrega los códigos reales en ese orden). */
-export function draftId(kind: CodeKind | StaffCodeKind, year?: number): string {
-  const k: { year: boolean } | undefined = (CODE_KINDS as Record<string, { year: boolean }>)[kind] ?? (STAFF_CODE_KINDS as Record<string, { year: boolean }>)[kind];
+export function draftId(kind: CodeKind | StaffCodeKind | AgendaCodeKind, year?: number): string {
+  const k: { year: boolean } | undefined = (CODE_KINDS as Record<string, { year: boolean }>)[kind] ?? (STAFF_CODE_KINDS as Record<string, { year: boolean }>)[kind]
+    ?? (AGENDA_CODE_KINDS as Record<string, { year: boolean }>)[kind];
   if (!k) throw new Error(`El código «${kind}» no lo asigna la base.`);
   if (k.year && (year === undefined || !Number.isInteger(year))) throw new Error(`El código «${kind}» lleva año.`);
   if (!k.year && year !== undefined) throw new Error(`El código «${kind}» no lleva año.`);

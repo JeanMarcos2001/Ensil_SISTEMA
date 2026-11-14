@@ -49,9 +49,11 @@ import { useCollectionConfig } from '../hooks/useCollectionConfig';
 import { applyRefinance, validateRefinance, type RefinanceInput } from '../utils/refinance';
 import type { ContractStatus, EnrollmentStatus, InstallmentStatus, LaborRegime, PaymentStatus, PlanStatus } from '../utils/statuses';
 import { recomputePlan } from '../utils/planState';
-import { buildPeopleSeed, buildScheduleSeed, buildTrackingSeed, seedDay } from '../data/seedPeople';
+import { seedDay } from '../data/seedPeople';
+import { useAgenda } from '../hooks/useAgenda';
+import { realCodes } from '../services/agenda';
+import { eventRow, newEventId, resolveResponsibleId, scheduleActionOf, scheduleChangeRow, scheduleInsertRow, trackingChangeRow, trackingInsertRow, type AgendaRows } from '../utils/agendaDb';
 import { seedUsers } from '../data/seedCatalog';
-import { syncCatalogLabels, syncStudentName } from '../utils/identity';
 import type { PettyInput } from '../utils/pettyCash';
 import { buildPaymentRecord, documentLabel, totalUSD, validatePaymentInput, type PaymentDocument } from '../utils/payments';
 import { availability, buildHolders, type Availability } from '../utils/capabilities';
@@ -139,9 +141,9 @@ export interface Enrollment {
   dateISO: string;
   /** Alumno de la matrícula (por id). */
   studentId: string;
-  /** Copia del nombre para listar y buscar; se corrige con `syncStudentName` (utils/identity.ts). */
+  /** Nombre del alumno para listar y buscar: se deriva de su id al mostrar (nunca se guarda). */
   student: string;
-  /** Programa, nivel y sede: el id manda; el texto es una copia que se corrige con `syncCatalogLabels`. */
+  /** Programa, nivel y sede: el id manda; el texto se deriva de él al mostrar (nunca se guarda). */
   programId: string;
   program: string;
   levelId?: string;
@@ -811,7 +813,10 @@ export interface Schedule {
   time: string;
   /** Siempre 60 (las asesorías duran 1 hora exacta). */
   duration: number;
+  /** Nombre del responsable (sale de su ficha de Personal; se guarda por su id). */
   responsible: string;
+  /** Id del responsable en Personal (la base guarda el id; el nombre se deriva). */
+  responsibleId?: string;
   /** @deprecated No existe modalidad virtual. */
   modality?: string;
   status: string; // Reservado | Reprogramado | Asistió | Faltó | Cancelado
@@ -1368,9 +1373,10 @@ interface DataContextType {
   /** Un ajuste, una merma, una devolución o una regularización del stock elegido (el lugar y el artículo salen de ese registro). La cantidad ya lleva el signo de su tipo. */
   addAdjustment: (adjustment: Omit<Adjustment, 'id' | 'date' | 'user' | 'branch' | 'material'>, stockId: string) => Promise<StockResult>;
   schedules: Schedule[];
-  addSchedule: (data: Omit<Schedule, 'id'>) => Schedule;
+  /** Agenda una asesoría (a mano; la primera la crea la matrícula). La base asigna el código; el responsable se guarda por su id de Personal. */
+  addSchedule: (data: Omit<Schedule, 'id'>) => Promise<StockResult & { schedule?: Schedule }>;
   /** Una primera asesoría con la matrícula sin verificar no admite «Asistió» ni «Faltó» (ver `utils/verificationGate.ts`). */
-  updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>, meta?: Partial<ChangeMeta>) => { ok: boolean; reason?: string };
+  updateSchedule: (id: string, data: Partial<Omit<Schedule, 'id'>>, meta?: Partial<ChangeMeta>) => Promise<{ ok: boolean; reason?: string }>;
   /** Historial de Psicopedagogía: cada cambio de una asesoría o actividad (quién, cuándo, por qué y quién lo pidió). */
   psyEvents: PsyEvent[];
   /** Asigna (o quita, con `null`) el responsable de una actividad especial (`cronograma:actividad`). */
@@ -1395,7 +1401,8 @@ interface DataContextType {
   updateMonthlySchedule: (id: string, data: Partial<Omit<MonthlySchedule, 'id'>>) => void;
   deleteMonthlySchedule: (id: string) => void;
   capacityConfig: CapacityConfig;
-  setCapacityConfig: (config: CapacityConfig) => void;
+  /** Guarda los cupos de los horarios (general, por sede y excepciones); la base guarda solo lo que cambió. */
+  setCapacityConfig: (config: CapacityConfig) => Promise<StockResult>;
   /** Personal guardado en la base de datos (Personas → Personal; de ahí salen las cuentas de usuario). UN solo personal: la agenda, la verificación y las matrículas leen a estas mismas personas. */
   staff: Staff[];
   /** Sedes y almacén como lugares de trabajo (para las asignaciones). */
@@ -1552,8 +1559,10 @@ interface DataContextType {
   can: (permission: string) => boolean;
   /** ¿Se ofrece la función? Depende de sus contrapartes (p. ej. despachar un envío exige quien lo reciba en la sede destino). */
   availabilityOf: (capabilityId: string, target?: { branchId: string; branchName: string }) => Availability;
-  addTracking: (tracking: Omit<Tracking, 'id'>) => Tracking;
-  updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => void;
+  /** Registra la sesión de una asesoría (y la marca como «Asistió» en la misma operación). Una sesión por asesoría; no se registra la de una primera asesoría sin verificar. */
+  addTracking: (tracking: Omit<Tracking, 'id'>) => Promise<StockResult & { tracking?: Tracking }>;
+  /** Corrige el seguimiento de una sesión (queda quién y cuándo). */
+  updateTracking: (id: string, data: Partial<Omit<Tracking, 'id'>>) => Promise<StockResult>;
   /** Cobra una cuota: una o varias partes (medios) y un comprobante. Valida y deja el pago, la cuota y la caja consistentes. */
   registerPayment: (planId: string, installmentId: string, input: RegisterPaymentInput) => Promise<StockResult>;
   /** Traslada el saldo pendiente de una cuota a una cuota nueva con otro vencimiento (con motivo). */
@@ -1622,7 +1631,6 @@ interface DataContextType {
 export const DataContext = createContext<DataContextType | undefined>(undefined);
 
 /** Semilla de personas, matrículas, planes, pagos y caja (se arma una vez al abrir la página, con fechas relativas a hoy). */
-const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
 
 /**
  * `access` = los roles, funciones y cuentas leídos de la base antes de montar el sistema (`AccessGate`); `org` = las empresas, sedes y
@@ -1630,7 +1638,7 @@ const PEOPLE_SEED = buildPeopleSeed(todayLocalISO());
  * los titulares y los alumnos, y `money` = las matrículas con su plan, cuotas, pagos, caja, notas de crédito y grupos promocionales (todo de la base);
  * `accountId` = la cuenta con la que se ingresó.
  */
-export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData, collection: collectionData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData; collection: CollectionConfigData }) {
+export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData, collection: collectionData, agenda: agendaData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData; collection: CollectionConfigData; agenda: AgendaRows }) {
   const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
@@ -1651,8 +1659,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
    * Los registros nuevos se arman con códigos de BORRADOR (`draftId`): la base asigna los definitivos al guardar (el más alto de todas las sedes) y
    * `codes` trae «borrador → código real» para completar lo que sigue en memoria (agenda, avisos) y lo que se devuelve a la pantalla.
    */
-  const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = []): Promise<StockResult & { codes?: Record<string, string> }> => {
-    const res = await money.commit(action, next, stock);
+  const saveMoney = async (action: MoneyAction, next: MoneyState, stock: StockOp[] = [], agendaPayload?: Record<string, unknown>): Promise<StockResult & { codes?: Record<string, string> }> => {
+    const res = await money.commit(action, next, stock, agendaPayload);
     return res.ok ? { ok: true, codes: res.codes } : { ok: false, error: res.error };
   };
 
@@ -1670,25 +1678,12 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // El stock, el kardex, los ajustes, los envíos, las transferencias, las incidencias de recepción, los couriers y los métodos de envío viven en la
   // base de datos (`useLogistics`, más abajo): ya no hay datos de ejemplo en memoria.
 
-  // Reservas de ejemplo con fechas relativas a hoy (siempre en días con atención y en horarios permitidos): `data/seedPeople.ts`
-  // Diego Torres: su primera asesoría fue hace casi 3 meses, así que su duración base está por vencer (ejemplo de la alerta)
-  const expiringStart = PEOPLE_SEED.expiringStart;
-  const [schedules, setSchedules] = useState<Schedule[]>(() => buildScheduleSeed(PEOPLE_SEED));
-
-  // Historial de Psicopedagogía: cada cambio de la agenda deja un evento
-  const [psyEvents, setPsyEvents] = useState<PsyEvent[]>([
-    { id: 'EVT-0001', at: new Date(Date.now() - 86400000).toISOString(), by: 'Superadmin', subject: 'asesoria', refId: 'SES-003', studentId: 'ALU-003', type: 'Cancelada', initiator: 'Alumno o titular', reason: 'Enfermedad del alumno', detail: 'Avisó la mañana anterior.', from: { date: seedDay(1), time: '16:00', responsible: 'Lic. María Torres' } },
-  ]);
-  const eventSeq = useRef(2);
-  const nextEventId = () => `EVT-${String(eventSeq.current++).padStart(4, '0')}`;
-  const pushEvents = (events: PsyEvent[]) => { if (events.length > 0) setPsyEvents(prev => [...prev, ...events]); };
-  /** Cancelaciones que hace el sistema por otra causa (caída de la matrícula, traslado de sede). */
-  const logSystemCancel = (scheduleIds: string[], reason: string) => pushEvents(
-    schedules.filter(s => scheduleIds.includes(s.id)).map(s => ({
-      id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'asesoria' as const, refId: s.id, studentId: s.studentId,
-      type: 'Cancelada' as const, initiator: 'Institución' as const, reason, from: { date: s.date, time: s.time, responsible: s.responsible },
-    }))
-  );
+  // Las asesorías, el historial, el seguimiento y los cupos viven en la base de datos (`useAgenda`, más abajo, junto al dinero de donde salen el alumno y
+  // su matrícula). El historial de las ACTIVIDADES especiales sigue en memoria (llega a la base con su propia entrega): lleva un código local aparte.
+  const [activityEvents, setActivityEvents] = useState<PsyEvent[]>([]);
+  const eventSeq = useRef(1);
+  const nextEventId = () => `EVT-L-${String(eventSeq.current++).padStart(4, '0')}`;
+  const pushEvents = (events: PsyEvent[]) => { if (events.length > 0) setActivityEvents(prev => [...prev, ...events]); };
   const logActivityRemovals = (removals: { monthlyId: string; activityId: string; studentId: string }[], reason: string) => pushEvents(
     removals.map(r => ({
       id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'actividad' as const, refId: `${r.monthlyId}:${r.activityId}`, studentId: r.studentId,
@@ -1696,11 +1691,17 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     }))
   );
 
-  const addSchedule = (data: Omit<Schedule, 'id'>): Schedule => {
-    const created: Schedule = { ...data, id: allocId('SES', schedules.map(x => x.id)) };
-    setSchedules(prev => [...prev, created]);
-    pushEvents(buildScheduleEvents(undefined, created, undefined, currentUser.name, new Date().toISOString(), nextEventId));
-    return created;
+  const branchNameOf = (branchId?: string) => branches.find(b => b.id === branchId)?.name;
+  /** Quién es el responsable que nombra un texto (entre el personal de Psicopedagogía de esa sede primero). */
+  const responsibleIdOf = (text: string, branchId?: string) => resolveResponsibleId(text, staff, assignments, branchNameOf(branchId));
+
+  const addSchedule: DataContextType['addSchedule'] = async data => {
+    const responsibleId = data.responsibleId ?? responsibleIdOf(data.responsible, data.branchId);
+    const created: Schedule = { ...data, id: draftId('SES'), responsibleId };
+    const events = buildScheduleEvents(undefined, created, undefined, currentUser.name, new Date().toISOString(), newEventId);
+    const res = await agenda.apply('reservar', { asesorias: [scheduleInsertRow(created, responsibleId)], eventos: events.map(eventRow) });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, schedule: { ...created, id: res.value?.codes[created.id] ?? created.id } };
   };
 
   const gateContext = () => ({ schedules, plans, recipes, today: todayLocalISO(), now: new Date() });
@@ -1708,7 +1709,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const attendanceBlockOf: DataContextType['attendanceBlockOf'] = s => attendanceBlock(s, enrollments, gateContext());
   const pendingFirstSessions = () => blockedFirstSessions(enrollments, gateContext());
 
-  const updateSchedule: DataContextType['updateSchedule'] = (id, data, meta) => {
+  const updateSchedule: DataContextType['updateSchedule'] = async (id, data, meta) => {
     const target = schedules.find(x => x.id === id);
     if (!target) return { ok: false, reason: 'No se encontró la asesoría.' };
     const next: Schedule = { ...target, ...data };
@@ -1733,12 +1734,31 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       });
       if (problems.length > 0) return { ok: false, reason: problems[0] };
     }
-    pushEvents(buildScheduleEvents(target, next, meta, currentUser.name, new Date().toISOString(), nextEventId));
-    setSchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
-    return { ok: true };
+    // El responsable se guarda por su id: el mismo si el nombre no cambió; si no, el de la persona que nombra el texto
+    const responsibleId = next.responsible.trim() === target.responsible.trim() ? target.responsibleId : (data.responsibleId ?? responsibleIdOf(next.responsible, target.branchId));
+    const after: Schedule = { ...next, responsibleId };
+    const change = scheduleChangeRow(target, after, responsibleId);
+    if (!change) return { ok: true };
+    const events = buildScheduleEvents(target, after, meta, currentUser.name, new Date().toISOString(), newEventId);
+    const res = await agenda.apply(scheduleActionOf(target, after), { asesorias: [change], eventos: events.map(eventRow) });
+    return res.ok ? { ok: true } : { ok: false, reason: res.error };
   };
 
-  const [trackings, setTrackings] = useState<Tracking[]>(() => buildTrackingSeed(PEOPLE_SEED));
+  /**
+   * Lo que la agenda cambia cuando el sistema cancela asesorías por otra causa (caída de la matrícula, traslado de sede): se cancelan y cada una deja su evento
+   * (de la institución). Viaja en la MISMA operación del dinero (todo o nada).
+   */
+  const systemCancelAgenda = (scheduleIds: string[], reason: string, note: string) => {
+    const now = new Date().toISOString();
+    const targets = schedules.filter(s => scheduleIds.includes(s.id));
+    return {
+      rows: targets.map(s => ({ id: s.id, estado: 'Cancelado', observaciones: note })),
+      events: targets.map(s => eventRow({
+        id: newEventId(), at: now, by: currentUser.name, subject: 'asesoria', refId: s.id, studentId: s.studentId, type: 'Cancelada', initiator: 'Institución', reason,
+        from: { date: s.date, time: s.time, responsible: s.responsible },
+      })),
+    };
+  };
 
   const seedMonth = (iso: string) => ({ mes: MONTHS[Number(iso.split('-')[1]) - 1], anio: Number(iso.split('-')[0]) });
   const [monthlySchedules, setMonthlySchedules] = useState<MonthlySchedule[]>([
@@ -1879,7 +1899,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return { ok: true };
   };
 
-  const [capacityConfig, setCapacityConfig] = useState<CapacityConfig>({ defaultCapacity: 6, byBranch: {}, overrides: [] });
+  const setCapacityConfig: DataContextType['setCapacityConfig'] = async config => {
+    const res = await agenda.saveCapacity(config);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  };
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
@@ -2013,6 +2036,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // Cierres de caja y caja chica: cada sede cierra la suya y tiene su fondo; la base calcula el saldo esperado y bloquea los días cerrados.
   const cashBoxes = useCashBoxes(cashBoxesData, cashMovements);
   const { closures: cashClosures, pettyMovements: pettyCashMovements, pettyFunds } = cashBoxes;
+  // Asesorías, historial, seguimiento y cupos: de la base de datos. El alumno, su programa y el responsable salen de las listas al mostrar (nunca se guardan).
+  const agenda = useAgenda(agendaData, { students, enrollments, staff });
+  const { schedules, trackings, capacityConfig } = agenda;
+  const psyEvents = useMemo(() => [...agenda.psyEvents, ...activityEvents].sort((a, b) => a.at.localeCompare(b.at)), [agenda.psyEvents, activityEvents]);
 
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
@@ -2285,17 +2312,12 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const addStudent: DataContextType['addStudent'] = async studentData => people.addStudent(studentData);
 
   /**
-   * Edita al alumno. Si cambia su nombre, se corrige también la copia que guardan sus matrículas y su agenda (una sola puerta:
-   * `syncStudentName`); los comprobantes ya emitidos conservan el nombre de ese día.
+   * Edita al alumno. Su nombre en las matrículas y en la agenda se deriva de su id (no hay copias que corregir); los comprobantes ya emitidos
+   * conservan el nombre de ese día.
    */
   const updateStudent: DataContextType['updateStudent'] = async (id, studentData) => {
-    const res = await people.updateStudent(id, studentData);
-    if (res.ok && res.value) {
-      // El nombre del alumno en las matrículas se deriva de su id; solo la agenda (en memoria) conserva una copia
-      const synced = syncStudentName(id, res.value.name, enrollments, schedules);
-      if (synced.changed) setSchedules(synced.schedules);
-    }
-    return res;
+    // El nombre del alumno en las matrículas y en la agenda se deriva de su id: nada que corregir
+    return people.updateStudent(id, studentData);
   };
 
   /** Un alumno con matrículas, asesorías o seguimiento no se elimina: es historial (ya no tendría a quién mostrar). */
@@ -2360,11 +2382,13 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     d.payments = [...b.payments, ...d.payments];
     d.promotionGroups = [...d.promotionGroups, ...b.promotionGroups];
     d.cashMovements = [...newCashMovements(b.cashMovements), ...d.cashMovements];
-    const saved = await saveMoney('matricular', d);
+    // La primera asesoría de cada alumno viaja en la MISMA operación que la matrícula (todo o nada): la base asigna su código y el de su evento
+    const now = new Date().toISOString();
+    const firstEvents = b.schedules.flatMap(sc => buildScheduleEvents(undefined, sc, undefined, currentUser.name, now, newEventId));
+    const saved = await saveMoney('matricular', d, [], { asesorias: b.schedules.map(sc => scheduleInsertRow(sc, sc.responsibleId)), eventos: firstEvents.map(eventRow) });
     if (!saved.ok) return { ok: false, error: `Las personas se guardaron, pero no se pudo matricular: ${saved.error}` };
-    // La agenda (la primera asesoría) sigue en memoria y nombra a la matrícula: se completa con el código que asignó la base
     const codes = saved.codes ?? {};
-    setSchedules(prev => [...prev, ...replaceDraftIds(b.schedules, codes)]);
+    await agenda.refreshFor(realCodes(b.schedules.map(sc => sc.id), codes));
 
     return { ok: true, enrollmentIds: b.enrollments.map(e => codes[e.id] ?? e.id) };
   };
@@ -2427,14 +2451,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e));
     if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p));
     d.dropRequests = d.dropRequests.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r));
-    const saved = await saveMoney('caida', d);
+    // Sus asesorías futuras se cancelan en la MISMA operación (todo o nada); las actividades especiales siguen en memoria
+    const cancel = systemCancelAgenda(preview.scheduleIds, 'Caída de la matrícula', 'Cancelada por la caída de la matrícula');
+    const saved = await saveMoney('caida', d, [], cancel.rows.length > 0 ? { asesorias: cancel.rows, eventos: cancel.events } : undefined);
     if (!saved.ok) return saved;
-
-    // La agenda sigue en memoria
-    if (preview.scheduleIds.length > 0) {
-      setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: 'Cancelada por la caída de la matrícula' } : sc)));
-      logSystemCancel(preview.scheduleIds, 'Caída de la matrícula');
-    }
+    await agenda.refreshFor(preview.scheduleIds);
     logActivityRemovals(preview.activityRemovals, 'Caída de la matrícula');
     if (preview.activityRemovals.length > 0) {
       setMonthlySchedules(prev => prev.map(m => ({
@@ -2783,8 +2804,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     const plan = plans.find(p => p.mat === enrollment.id);
     const effects: string[] = [];
     let log: EnrollmentChange;
-    /** Lo que sigue en memoria (la agenda): se aplica solo si la base guardó. */
+    /** Lo que sigue en memoria (las actividades especiales): se aplica solo si la base guardó. */
     let afterSave: () => void = () => {};
+    /** Lo que la operación cambia en la agenda de asesorías: viaja en la MISMA operación del dinero (todo o nada). */
+    let agendaPayload: Record<string, unknown> | undefined;
+    let agendaTouched: string[] = [];
 
     // En cada caso se arma TODO antes de guardar: lo que cambia en la matrícula y su plan, el historial de la solicitud (`effects`) y la corrección que queda
     // en el registro. La base los guarda juntos (todo o nada) y recién entonces se aplica lo que sigue en memoria (agenda).
@@ -2817,14 +2841,6 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       log = entry('program', 'Cambio de programa o nivel', preview.fromLabel, toLabel);
       effects.push(`${preview.fromLabel} → ${toLabel}.`, `Precio: USD ${preview.oldTotal.toFixed(2)} → USD ${preview.newTotal.toFixed(2)}; cobrado USD ${preview.paidUSD.toFixed(2)}; saldo USD ${preview.remaining.toFixed(2)}.`);
       if (preview.verificationReset) effects.push('La verificación vuelve a «Pendiente» para entregar los materiales del programa nuevo.');
-      afterSave = () => {
-        const otherActive = enrollments.some(o => o.id !== enrollment.id && o.status === 'Activa' && o.studentId === enrollment.studentId);
-        setSchedules(prev => prev.map(sc => {
-          const mine = sc.studentId === enrollment.studentId;
-          const target = otherActive ? sc.isFirst && sc.enrollmentId === enrollment.id : mine;
-          return target && sc.date >= today && ['Reservado', 'Reprogramado'].includes(sc.status) ? { ...sc, program: preview.program.name, level: preview.level?.name ?? 'Sin nivel' } : sc;
-        }));
-      };
     } else {
       const input = { branchId: request.payload.branchId, firstDate: request.payload.firstDate ?? '', firstTime: request.payload.firstTime ?? '' };
       const problems = transferProblems(enrollment, input, c);
@@ -2838,31 +2854,39 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       if (preview.newFirst) effects.push(`Nueva primera asesoría en ${preview.toName}: ${preview.newFirst.date} a las ${preview.newFirst.time}${responsible ? ` con ${responsible}` : ''}.`);
       log = entry('branch', 'Traslado de sede', fromName, preview.toName);
       effects.push(`Sede: ${fromName} → ${preview.toName}.`, `${preview.scheduleIds.length} asesoría(s) y ${preview.activityRemovals.length} inscripción(es) de la sede anterior canceladas.`);
+      const why = `Traslado de sede (${fromName} → ${preview.toName})`;
+      const cancel = systemCancelAgenda(preview.scheduleIds, why, `Cancelada por el traslado de sede (${fromName} → ${preview.toName})`);
+      const rows: Record<string, unknown>[] = [...cancel.rows];
+      const events: Record<string, unknown>[] = [...cancel.events];
+      agendaTouched = [...preview.scheduleIds];
+      if (preview.newFirst) {
+        const responsibleId = responsible ? responsibleIdOf(responsible, input.branchId) : undefined;
+        const created: Schedule = {
+          id: draftId('SES'), student: enrollment.student, studentId: enrollment.studentId, branchId: input.branchId, program: enrollment.program, level: enrollment.level,
+          date: preview.newFirst.date, time: preview.newFirst.time, duration: SLOT_DURATION, responsible, responsibleId, status: 'Reservado',
+          isFirst: true, registrationId: enrollment.id, enrollmentId: enrollment.id,
+        };
+        rows.push(scheduleInsertRow(created, responsibleId));
+        events.push(...buildScheduleEvents(undefined, created, undefined, currentUser.name, at, newEventId).map(eventRow));
+        agendaTouched.push(created.id);
+      }
+      if (rows.length > 0) agendaPayload = { asesorias: rows, eventos: events };
+      // Las inscripciones a actividades especiales de la sede anterior siguen en memoria
       afterSave = () => {
-        if (preview.scheduleIds.length > 0) {
-          setSchedules(prev => prev.map(sc => (preview.scheduleIds.includes(sc.id) ? { ...sc, status: 'Cancelado', observations: `Cancelada por el traslado de sede (${fromName} → ${preview.toName})` } : sc)));
-          logSystemCancel(preview.scheduleIds, `Traslado de sede (${fromName} → ${preview.toName})`);
-        }
-        logActivityRemovals(preview.activityRemovals, `Traslado de sede (${fromName} → ${preview.toName})`);
+        logActivityRemovals(preview.activityRemovals, why);
         if (preview.activityRemovals.length > 0) {
           setMonthlySchedules(prev => prev.map(m => ({
             ...m,
             actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
           })));
         }
-        if (preview.newFirst) {
-          addSchedule({
-            student: enrollment.student, studentId: enrollment.studentId, branchId: input.branchId, program: enrollment.program, level: enrollment.level,
-            date: preview.newFirst.date, time: preview.newFirst.time, duration: SLOT_DURATION, responsible, status: 'Reservado',
-            isFirst: true, registrationId: enrollment.id, enrollmentId: enrollment.id,
-          });
-        }
       };
     }
     d.changeRequests = d.changeRequests.map(r => (r.id === requestId ? { ...r, ...base, effects } : r));
     d.enrollmentChanges = [log, ...d.enrollmentChanges];
-    const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d);
+    const saved = await saveMoney(CHANGE_ACTIONS[request.kind].approve, d, [], agendaPayload);
     if (!saved.ok) return saved;
+    if (agendaTouched.length > 0) await agenda.refreshFor(realCodes(agendaTouched, saved.codes ?? {}));
     afterSave();
     notify('request_resolved', { title: `Solicitud de ${request.kind.toLowerCase()} aprobada`, message: `${currentUser.name} aprobó la solicitud ${request.id} de la matrícula ${enrollment.id}.`, type: 'info', scope: { subjectBranchId: enrollment.branchId, requesterName: request.requestedBy } });
     return { ok: true };
@@ -2965,27 +2989,33 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return saveMoney('extension', d);
   };
 
-  const addTracking = (trackingData: Omit<Tracking, 'id'>): Tracking => {
-    const newTracking: Tracking = {
-      ...trackingData,
-      id: allocId('TRK', trackings.map(t => t.id))
-    };
-    setTrackings(prev => [newTracking, ...prev]);
-    if (newTracking.scheduleId) {
-      pushEvents([{ id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'asesoria', refId: newTracking.scheduleId, studentId: newTracking.studentId, type: 'Sesión registrada' }]);
-    }
-    return newTracking;
+  const addTracking: DataContextType['addTracking'] = async trackingData => {
+    const sched = trackingData.scheduleId ? schedules.find(s => s.id === trackingData.scheduleId) : undefined;
+    if (!sched) return { ok: false, error: 'La sesión debe ser de una asesoría de la agenda.' };
+    // Sin materiales entregados no se registra la primera asesoría
+    const block = attendanceBlockOf(sched);
+    if (block) return { ok: false, error: block };
+    const now = new Date().toISOString();
+    // Registrar la sesión deja la asesoría como «Asistió» en la MISMA operación (todo o nada)
+    const attended: Schedule = { ...sched, status: 'Asistió' };
+    const change = sched.status === 'Asistió' ? null : scheduleChangeRow(sched, attended, sched.responsibleId);
+    const events: PsyEvent[] = [
+      ...(change ? buildScheduleEvents(sched, attended, undefined, currentUser.name, now, newEventId) : []),
+      { id: newEventId(), at: now, by: currentUser.name, subject: 'asesoria', refId: sched.id, studentId: sched.studentId, type: 'Sesión registrada' },
+    ];
+    const row = trackingInsertRow(trackingData);
+    const res = await agenda.apply('registrar_sesion', { asesorias: change ? [change] : [], seguimientos: [row], eventos: events.map(eventRow) });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, tracking: { ...trackingData, id: res.value?.codes[String(row.id)] ?? String(row.id) } };
   };
 
-  const updateTracking = (id: string, data: Partial<Omit<Tracking, 'id'>>) => {
-    setTrackings(prev => prev.map(t => (t.id === id ? { ...t, ...data } : t)));
-  };
-
-  /** Las matrículas y la agenda copian el nombre del programa, del nivel y de la sede: al renombrar un catálogo se corrigen (syncCatalogLabels). */
-  const relabelFrom = (catalogs: { branches: Branch[]; programs: Program[]; levels: Level[] }) => {
-    // Las matrículas derivan estos nombres de sus ids; solo la agenda (en memoria) conserva una copia
-    const synced = syncCatalogLabels(enrollments, schedules, catalogs);
-    setSchedules(synced.schedules);
+  const updateTracking: DataContextType['updateTracking'] = async (id, data) => {
+    const before = trackings.find(t => t.id === id);
+    if (!before) return { ok: false, error: 'No se encontró el seguimiento.' };
+    const row = trackingChangeRow(before, data);
+    if (!row) return { ok: true };
+    const res = await agenda.apply('editar_sesion', { seguimientos: [row] });
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
   /** Lo que sigue en memoria y apunta al catálogo (matrículas, recetas, grupos promocionales): impide eliminar lo que ya se usa. */
@@ -2993,17 +3023,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const addProgram: DataContextType['addProgram'] = program => catalog.add('program', program);
   const updateProgram: DataContextType['updateProgram'] = async (id, programData) => {
-    const res = await catalog.edit('program', id, programData);
-    if (res.ok && res.value && programData.name !== undefined) relabelFrom({ branches, programs: programs.map(p => (p.id === id ? res.value! : p)), levels });
-    return res;
+    // El programa de una matrícula y de la agenda se deriva de su id: al renombrarlo no hay nada que corregir
+    return catalog.edit('program', id, programData);
   };
   const deleteProgram: DataContextType['deleteProgram'] = id => catalog.remove('program', id, catalogLinks());
 
   const addLevel: DataContextType['addLevel'] = level => catalog.add('level', level);
   const updateLevel: DataContextType['updateLevel'] = async (id, levelData) => {
-    const res = await catalog.edit('level', id, levelData);
-    if (res.ok && res.value && levelData.name !== undefined) relabelFrom({ branches, programs, levels: levels.map(l => (l.id === id ? res.value! : l)) });
-    return res;
+    return catalog.edit('level', id, levelData);
   };
   const deleteLevel: DataContextType['deleteLevel'] = id => catalog.remove('level', id, catalogLinks());
 

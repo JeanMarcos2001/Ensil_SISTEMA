@@ -254,7 +254,7 @@ const ctxSrc = read('src/context/DataContext.tsx');
 const repoSrc = read('src/services/collectionConfigRepository.ts');
 const hook = read('src/hooks/useCollectionConfig.ts');
 check('La política, los recordatorios y la plantilla se leen al iniciar sesión (antes de montar el sistema), junto con lo demás',
-  /loadCollectionConfig\(collectionRepo\)/.test(gate) && /loaded\.cashBoxes, loaded\.collection\)/.test(gate) && /collection=\{collection\}/.test(read('src/App.tsx')) && /collection: collectionData/.test(ctxSrc) && /useCollectionConfig\(collectionData\)/.test(ctxSrc));
+  /loadCollectionConfig\(collectionRepo\)/.test(gate) && /loaded\.cashBoxes, loaded\.collection, loaded\.agenda\)/.test(gate) && /collection=\{collection\}/.test(read('src/App.tsx')) && /collection: collectionData/.test(ctxSrc) && /useCollectionConfig\(collectionData\)/.test(ctxSrc));
 check('El repositorio de Supabase llama a las tres funciones de la base y lee las tres tablas',
   ["'guardar_politica_cobranza'", "'registrar_recordatorio'", "'guardar_plantilla_contrato'"].every(fn => repoSrc.includes(fn)) && ["'cobranza_politicas'", "'recordatorios_cobranza'", "'plantilla_contrato_versiones'"].every(t => repoSrc.includes(t))
   && /p_clausulas: t\.clauses\.map\(c => \(\{ id: c\.id, title: c\.title, body: c\.body \}\)\)/.test(repoSrc));

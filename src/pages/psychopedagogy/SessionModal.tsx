@@ -28,12 +28,13 @@ const CHECKS: { key: keyof FirstSessionChecklist; label: string; required: boole
  * incluye el checklist de cierre. Guardar marca la asesoría como «Asistió».
  */
 export function SessionModal({ schedule, onClose }: Props) {
-  const { students, trackings, addTracking, updateTracking, updateSchedule, attendanceBlockOf, programs, levels } = useData();
+  const { students, trackings, addTracking, updateTracking, attendanceBlockOf, programs, levels } = useData();
   const existing = schedule ? trackings.find(t => t.scheduleId === schedule.id) : undefined;
   const [metrics, setMetrics] = useState<Record<string, any>>({});
   const [observations, setObservations] = useState('');
   const [checklist, setChecklist] = useState<FirstSessionChecklist>(emptyChecklist());
   const [error, setError] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!schedule) return;
@@ -55,7 +56,8 @@ export function SessionModal({ schedule, onClose }: Props) {
   const previous = student ? previousMetrics(trackings, student.id, schedule.date, schedule.id) : null;
   const check = validateMetrics(schedule.program, metrics, { previous, levels: levelNames, enrollmentLevel: schedule.level });
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     // La verificación (entrega de materiales) va antes de la primera asesoría
     const blocked = attendanceBlockOf(schedule);
     if (blocked) { setError([blocked]); return; }
@@ -70,9 +72,11 @@ export function SessionModal({ schedule, onClose }: Props) {
       studentId: student.id, scheduleId: schedule.id, date: schedule.date, status: 'Asistió',
       metrics: check.clean, observations: observations.trim(), checklist: schedule.isFirst ? checklist : undefined,
     };
-    if (existing) updateTracking(existing.id, record);
-    else addTracking(record);
-    if (schedule.status !== 'Asistió') updateSchedule(schedule.id, { status: 'Asistió' });
+    // Registrar la sesión también deja la asesoría como «Asistió»: lo hace la base en la misma operación (todo o nada)
+    setSaving(true);
+    const res = existing ? await updateTracking(existing.id, record) : await addTracking(record);
+    setSaving(false);
+    if (!res.ok) { setError([res.error ?? 'No se pudo guardar la sesión.']); return; }
     onClose();
   };
 
@@ -93,7 +97,7 @@ export function SessionModal({ schedule, onClose }: Props) {
       footer={
         <div className="flex justify-end gap-3 w-full">
           <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>{existing ? 'Guardar Cambios' : 'Guardar Sesión'}</Button>
+          <Button variant="primary" onClick={() => void handleSave()} disabled={saving}>{saving ? 'Guardando…' : existing ? 'Guardar Cambios' : 'Guardar Sesión'}</Button>
         </div>
       }
     >
