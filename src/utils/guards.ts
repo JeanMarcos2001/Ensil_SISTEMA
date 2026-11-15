@@ -106,12 +106,8 @@ export function denialMessage(clause: string[]): string {
  * ofrece sin la función, así que solo se llega aquí por un error de programación). `check-guards.ts` la compara con las firmas del contexto.
  */
 export const THROWS_ON_DENIAL: ReadonlySet<string> = new Set([
-  // devuelven la entidad creada
-  'addMonthlySchedule',
   // no devuelven nada
   'markNotificationAsRead',
-  'deleteMonthlySchedule',
-  'updateMonthlySchedule',
 ]);
 
 /**

@@ -155,7 +155,8 @@ export function previewDrop(ctx: DropContext, effectiveDate: string): DropPrevie
   if (otherActive.length === 0 && studentId) {
     for (const m of ctx.monthly) {
       for (const a of m.actividades) {
-        if (a.fecha >= effectiveDate && a.inscritos.includes(studentId)) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId });
+        // Lo que ya tiene la asistencia del alumno es historial: no se quita (la base tampoco lo permite)
+        if (a.fecha >= effectiveDate && a.inscritos.includes(studentId) && !a.asistencia?.[studentId]) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId });
       }
     }
   }

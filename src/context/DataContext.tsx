@@ -2,15 +2,15 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState,
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { draftId, replaceDraftIds } from '../utils/draftIds';
-import { createIdAllocator, ID_PREFIX, nextNumericId, nextSequentialId } from '../utils/ids';
-import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, withEnrollment, withoutEnrollment, type FlatActivity } from '../utils/schedule';
+import { createIdAllocator, ID_PREFIX, nextSequentialId } from '../utils/ids';
+import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
-import { buildScheduleEvents, initiatorOfReason, validateChangeMeta } from '../utils/psyHistory';
+import { buildScheduleEvents, validateChangeMeta } from '../utils/psyHistory';
 import { staffDisplayName } from '../utils/staffAccess';
 import { linesOf, type BuiltPayroll, type PayrollContext } from '../utils/payrollRun';
 import { type LineCalc } from '../utils/payrollEngine';
-import { canRemoveEnrollment, staffLabel, validateAttendance, validateResponsible, withAttendance, withoutAttendance } from '../utils/psyActivities';
+import { canRemoveEnrollment, validateAttendance, validateResponsible } from '../utils/psyActivities';
 import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
 import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
 import { applyReversalToPlan, reversalTargets, validateReversal, type ReversalInput } from '../utils/paymentReversal';
@@ -52,6 +52,7 @@ import { recomputePlan } from '../utils/planState';
 import { seedDay } from '../data/seedPeople';
 import { useAgenda } from '../hooks/useAgenda';
 import { realCodes } from '../services/agenda';
+import { attendanceChange, createMonthlyChange, deleteMonthlyChange, editMonthlyChange, enrollChange, monthliesOf, responsibleChange, unenrollChange, activityRemovalsPayload } from '../utils/activitiesDb';
 import { eventRow, newEventId, resolveResponsibleId, scheduleActionOf, scheduleChangeRow, scheduleInsertRow, trackingChangeRow, trackingInsertRow, type AgendaRows } from '../utils/agendaDb';
 import { seedUsers } from '../data/seedCatalog';
 import type { PettyInput } from '../utils/pettyCash';
@@ -1380,11 +1381,11 @@ interface DataContextType {
   /** Historial de Psicopedagogía: cada cambio de una asesoría o actividad (quién, cuándo, por qué y quién lo pidió). */
   psyEvents: PsyEvent[];
   /** Asigna (o quita, con `null`) el responsable de una actividad especial (`cronograma:actividad`). */
-  setActivityResponsible: (flatId: string, staffId: string | null) => StockResult;
-  enrollInActivity: (flatId: string, studentId: string) => StockResult;
-  unenrollFromActivity: (flatId: string, studentId: string, meta: Partial<ChangeMeta>) => StockResult;
-  /** Registra la asistencia de un inscrito (`null` quita la marca; pide una nota). */
-  markActivityAttendance: (flatId: string, studentId: string, status: 'Asistió' | 'Faltó' | null, note?: string) => StockResult;
+  setActivityResponsible: (flatId: string, staffId: string | null) => Promise<StockResult>;
+  enrollInActivity: (flatId: string, studentId: string) => Promise<StockResult>;
+  unenrollFromActivity: (flatId: string, studentId: string, meta: Partial<ChangeMeta>) => Promise<StockResult>;
+  /** Registra la asistencia de uno o varios inscritos en UNA operación (`null` quita la marca; pide una nota). */
+  markActivityAttendance: (flatId: string, studentId: string | string[], status: 'Asistió' | 'Faltó' | null, note?: string) => Promise<StockResult>;
   psyReminderPolicy: PsyReminderPolicy;
   savePsyReminderPolicy: (policy: PsyReminderPolicy) => StockResult;
   psyReminderLogs: PsyReminderLog[];
@@ -1397,9 +1398,12 @@ interface DataContextType {
   pendingFirstSessions: () => Record<string, FirstSessionGate>;
   trackings: Tracking[];
   monthlySchedules: MonthlySchedule[];
-  addMonthlySchedule: (data: Omit<MonthlySchedule, 'id'>) => MonthlySchedule;
-  updateMonthlySchedule: (id: string, data: Partial<Omit<MonthlySchedule, 'id'>>) => void;
-  deleteMonthlySchedule: (id: string) => void;
+  /** Crea un cronograma con sus actividades. La base asigna los códigos; las actividades nacen sin responsable. */
+  addMonthlySchedule: (data: Omit<MonthlySchedule, 'id'>) => Promise<StockResult>;
+  /** Guarda lo que cambió en un cronograma (la sede no cambia). Solo viaja lo que cambió. */
+  updateMonthlySchedule: (id: string, data: Omit<MonthlySchedule, 'id'>) => Promise<StockResult>;
+  /** Elimina un cronograma con sus actividades; no si alguna ya tiene asistencia registrada. */
+  deleteMonthlySchedule: (id: string) => Promise<StockResult>;
   capacityConfig: CapacityConfig;
   /** Guarda los cupos de los horarios (general, por sede y excepciones); la base guarda solo lo que cambió. */
   setCapacityConfig: (config: CapacityConfig) => Promise<StockResult>;
@@ -1678,18 +1682,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // El stock, el kardex, los ajustes, los envíos, las transferencias, las incidencias de recepción, los couriers y los métodos de envío viven en la
   // base de datos (`useLogistics`, más abajo): ya no hay datos de ejemplo en memoria.
 
-  // Las asesorías, el historial, el seguimiento y los cupos viven en la base de datos (`useAgenda`, más abajo, junto al dinero de donde salen el alumno y
-  // su matrícula). El historial de las ACTIVIDADES especiales sigue en memoria (llega a la base con su propia entrega): lleva un código local aparte.
-  const [activityEvents, setActivityEvents] = useState<PsyEvent[]>([]);
-  const eventSeq = useRef(1);
-  const nextEventId = () => `EVT-L-${String(eventSeq.current++).padStart(4, '0')}`;
-  const pushEvents = (events: PsyEvent[]) => { if (events.length > 0) setActivityEvents(prev => [...prev, ...events]); };
-  const logActivityRemovals = (removals: { monthlyId: string; activityId: string; studentId: string }[], reason: string) => pushEvents(
-    removals.map(r => ({
-      id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'actividad' as const, refId: `${r.monthlyId}:${r.activityId}`, studentId: r.studentId,
-      type: 'Inscripción quitada' as const, initiator: 'Institución' as const, reason,
-    }))
-  );
+  // Las asesorías, el historial (también el de las actividades), el seguimiento, los cupos, los cronogramas mensuales y las actividades especiales viven en la base de
+  // datos (`useAgenda`, más abajo, junto al dinero de donde salen el alumno y su matrícula).
 
   const branchNameOf = (branchId?: string) => branches.find(b => b.id === branchId)?.name;
   /** Quién es el responsable que nombra un texto (entre el personal de Psicopedagogía de esa sede primero). */
@@ -1760,77 +1754,46 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     };
   };
 
-  const seedMonth = (iso: string) => ({ mes: MONTHS[Number(iso.split('-')[1]) - 1], anio: Number(iso.split('-')[0]) });
-  const [monthlySchedules, setMonthlySchedules] = useState<MonthlySchedule[]>([
-    {
-      id: '1',
-      branchId: 'FIL-002',
-      sede: 'Piura',
-      ...seedMonth(seedDay(5)),
-      titulo: 'Cronograma de Actividades - Piura',
-      actividades: [
-        { id: 'a1', actividad: 'Taller de Ortografía', fecha: seedDay(2), horaInicio: '16:00', horaFin: '18:00', responsable: '', orden: 1, cupo: 12, inscritos: [] },
-        { id: 'a2', actividad: 'Maratón de Lectura', fecha: seedDay(5), horaInicio: '17:00', horaFin: '19:00', responsable: '', orden: 2, cupo: null, inscritos: ['ALU-001', 'ALU-005'] },
-        {
-          id: 'a0', actividad: 'Taller de Velocidad Lectora', fecha: seedDay(-3), horaInicio: '15:00', horaFin: '17:00', responsable: 'Juan Pérez', responsableId: '1', orden: 3, cupo: 10,
-          inscritos: ['ALU-001', 'ALU-003', 'ALU-005'],
-          asistencia: {
-            'ALU-001': { status: 'Asistió', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin' },
-            'ALU-003': { status: 'Faltó', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin', note: 'No avisó.' },
-            'ALU-005': { status: 'Asistió', at: new Date(Date.now() - 3 * 86400000).toISOString(), by: 'Superadmin' },
-          },
-        },
-      ],
-      observaciones: 'Mes con enfoque en comprensión lectora.'
-    },
-    {
-      id: '2',
-      branchId: 'FIL-003',
-      sede: 'Chiclayo',
-      ...seedMonth(seedDay(3)),
-      titulo: 'Actividades Psicopedagógicas Chiclayo',
-      actividades: [
-        { id: 'b1', actividad: 'Taller para Padres', fecha: seedDay(3), horaInicio: '18:00', horaFin: '20:00', responsable: '', orden: 1, cupo: 20, inscritos: [] },
-        { id: 'b2', actividad: 'Evaluación de Avance', fecha: seedDay(6), horaInicio: '16:00', horaFin: '19:00', responsable: '', orden: 2, cupo: null, inscritos: [] },
-      ],
-      observaciones: ''
-    }
-  ]);
-
-  const addMonthlySchedule = (data: Omit<MonthlySchedule, 'id'>): MonthlySchedule => {
-    const created: MonthlySchedule = { ...data, id: nextNumericId(monthlySchedules.map(x => x.id)) };
-    setMonthlySchedules(prev => [...prev, created]);
-    return created;
-  };
-
-  const updateMonthlySchedule = (id: string, data: Partial<Omit<MonthlySchedule, 'id'>>) => {
-    setMonthlySchedules(prev => prev.map(x => (x.id === id ? { ...x, ...data } : x)));
-  };
-
-  const deleteMonthlySchedule = (id: string) => {
-    setMonthlySchedules(prev => prev.filter(x => x.id !== id));
-  };
-
-  // ---- Actividades especiales: responsable, inscripción y asistencia (cada acción deja su evento)
+  // ---- Cronogramas mensuales y actividades especiales: de la base de datos (`useAgenda`). Cada cambio viaja con su evento del historial y se guarda todo o nada.
   const flatActivityOf = (flatId: string) => allActivities(monthlySchedules).find(a => a.id === flatId);
-  const patchActivity = (a: FlatActivity, fn: (x: ScheduleActivity) => ScheduleActivity) =>
-    setMonthlySchedules(prev => prev.map(m => (m.id === a.monthlyId ? { ...m, actividades: m.actividades.map(x => (x.id === a.activityId ? fn(x) : x)) } : m)));
-  const activityEvent = (a: FlatActivity, type: PsyEventType, extra: Partial<PsyEvent> = {}): PsyEvent =>
-    ({ id: nextEventId(), at: new Date().toISOString(), by: currentUser.name, subject: 'actividad', refId: a.id, type, ...extra });
+  const activityResult = (res: { ok: boolean; error?: string }): StockResult => (res.ok ? { ok: true } : { ok: false, error: res.error });
 
-  const setActivityResponsible: DataContextType['setActivityResponsible'] = (flatId, staffId) => {
+  const addMonthlySchedule: DataContextType['addMonthlySchedule'] = async data => {
+    const change = createMonthlyChange(data);
+    return activityResult(await agenda.applyActivity('crear_cronograma', change.payload, [change.cronogramaId]));
+  };
+
+  const updateMonthlySchedule: DataContextType['updateMonthlySchedule'] = async (id, data) => {
+    const before = monthlySchedules.find(x => x.id === id);
+    if (!before) return { ok: false, error: 'No se encontró el cronograma.' };
+    const built = editMonthlyChange(before, data);
+    if (built.error) return { ok: false, error: built.error };
+    if (!built.change) return { ok: true };
+    return activityResult(await agenda.applyActivity('editar_cronograma', built.change.payload, [built.change.cronogramaId]));
+  };
+
+  const deleteMonthlySchedule: DataContextType['deleteMonthlySchedule'] = async id => {
+    const before = monthlySchedules.find(x => x.id === id);
+    if (!before) return { ok: false, error: 'No se encontró el cronograma.' };
+    if (before.actividades.some(a => Object.keys(a.asistencia ?? {}).length > 0)) return { ok: false, error: 'No se elimina un cronograma con asistencia registrada: ya es parte del historial.' };
+    const change = deleteMonthlyChange(before);
+    return activityResult(await agenda.applyActivity('eliminar_cronograma', change.payload, [change.cronogramaId]));
+  };
+
+  // ---- Actividades especiales: responsable, inscripción y asistencia (cada acción deja su evento en el historial, que guarda la base con el cambio)
+  const setActivityResponsible: DataContextType['setActivityResponsible'] = async (flatId, staffId) => {
     if (!can(PERM.psiActivityLead)) return { ok: false, error: 'Su rol no puede asignar el responsable de una actividad.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
     const problems = validateResponsible(a, staffId, { schedules, activities: allActivities(monthlySchedules), staff, assignments, branches, unavailable: (sid, date) => unavailableOn(sid, date, contracts) });
     if (problems.length > 0) return { ok: false, error: problems[0] };
     const member = staffId ? staff.find(s => s.id === staffId) : undefined;
-    patchActivity(a, x => ({ ...x, responsable: member ? staffLabel(member) : '', responsableId: member?.id }));
-    pushEvents([activityEvent(a, 'Responsable asignado', { detail: member ? staffLabel(member) : 'Se quitó el responsable' })]);
-    return { ok: true };
+    if ((member?.id ?? null) === (a.responsibleId ?? null)) return { ok: true };
+    const change = responsibleChange(a, member);
+    return activityResult(await agenda.applyActivity('responsable', change.payload, [change.cronogramaId]));
   };
 
-  const enrollInActivity: DataContextType['enrollInActivity'] = (flatId, studentId) => {
+  const enrollInActivity: DataContextType['enrollInActivity'] = async (flatId, studentId) => {
     if (!can(PERM.psiSchedule)) return { ok: false, error: 'Su rol no puede inscribir alumnos en actividades.' };
     const a = flatActivityOf(flatId);
     const student = students.find(s => s.id === studentId);
@@ -1838,12 +1801,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (a.date < todayLocalISO()) return { ok: false, error: 'La actividad ya pasó: no admite inscripciones.' };
     const problem = validateActivityEnrollment({ activity: a, studentId, studentName: student.name, studentBranchId: branchOfStudent(student, enrollments), schedules });
     if (problem) return { ok: false, error: problem };
-    patchActivity(a, x => withEnrollment(x, studentId));
-    pushEvents([activityEvent(a, 'Inscripción', { studentId })]);
-    return { ok: true };
+    const change = enrollChange(a, studentId);
+    return activityResult(await agenda.applyActivity('inscribir', change.payload, [change.cronogramaId]));
   };
 
-  const unenrollFromActivity: DataContextType['unenrollFromActivity'] = (flatId, studentId, meta) => {
+  const unenrollFromActivity: DataContextType['unenrollFromActivity'] = async (flatId, studentId, meta) => {
     if (!can(PERM.psiSchedule)) return { ok: false, error: 'Su rol no puede quitar inscripciones.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
@@ -1851,28 +1813,28 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     if (!canRemoveEnrollment(a, studentId)) return { ok: false, error: 'Ya tiene asistencia registrada: no se puede quitar la inscripción.' };
     const problems = validateChangeMeta('cancelar', meta, { withNotice: canChangeWithNotice(a.date, a.start, new Date()), canInstitutional: can(PERM.psiInstitutionalChange) });
     if (problems.length > 0) return { ok: false, error: problems[0] };
-    patchActivity(a, x => withoutEnrollment(x, studentId));
-    pushEvents([activityEvent(a, 'Inscripción quitada', { studentId, reason: meta.reason, detail: meta.detail?.trim() || undefined, initiator: initiatorOfReason(meta.reason ?? '') })]);
-    return { ok: true };
+    const change = unenrollChange(a, studentId, meta);
+    return activityResult(await agenda.applyActivity('quitar_inscripcion', change.payload, [change.cronogramaId]));
   };
 
-  const markActivityAttendance: DataContextType['markActivityAttendance'] = (flatId, studentId, status, note) => {
+  const markActivityAttendance: DataContextType['markActivityAttendance'] = async (flatId, studentId, status, note) => {
     if (!can(PERM.psiActivityAttendance)) return { ok: false, error: 'Su rol no puede registrar la asistencia a actividades.' };
     const a = flatActivityOf(flatId);
     if (!a) return { ok: false, error: 'No se encontró la actividad.' };
+    const ids = Array.isArray(studentId) ? studentId : [studentId];
+    if (ids.length === 0) return { ok: true };
     const text = (note ?? '').trim();
     if (status === null) {
-      if (!a.attendance[studentId]) return { ok: false, error: 'El alumno no tiene marca de asistencia.' };
+      if (ids.some(id => !a.attendance[id])) return { ok: false, error: 'El alumno no tiene marca de asistencia.' };
       if (text.length < 5) return { ok: false, error: 'Explique por qué se quita la marca: queda en el historial.' };
-      patchActivity(a, x => ({ ...x, asistencia: withoutAttendance(x.asistencia ?? {}, studentId) }));
-      pushEvents([activityEvent(a, 'Asistencia a actividad', { studentId, detail: 'Marca quitada', reason: text })]);
-      return { ok: true };
+    } else {
+      for (const id of ids) {
+        const problems = validateAttendance(a, id, status, todayLocalISO());
+        if (problems.length > 0) return { ok: false, error: problems[0] };
+      }
     }
-    const problems = validateAttendance(a, studentId, status, todayLocalISO());
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    patchActivity(a, x => ({ ...x, asistencia: withAttendance(x.asistencia ?? {}, studentId, { status, at: new Date().toISOString(), by: currentUser.name, note: text || undefined }) }));
-    pushEvents([activityEvent(a, 'Asistencia a actividad', { studentId, detail: status, reason: text || undefined })]);
-    return { ok: true };
+    const change = attendanceChange(a, ids, status, text);
+    return activityResult(await agenda.applyActivity('asistencia', change.payload, [change.cronogramaId]));
   };
 
   // ---- Recordatorios de Psicopedagogía (el sistema prepara el texto; aquí queda el registro de lo enviado u omitido)
@@ -2037,9 +1999,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const cashBoxes = useCashBoxes(cashBoxesData, cashMovements);
   const { closures: cashClosures, pettyMovements: pettyCashMovements, pettyFunds } = cashBoxes;
   // Asesorías, historial, seguimiento y cupos: de la base de datos. El alumno, su programa y el responsable salen de las listas al mostrar (nunca se guardan).
-  const agenda = useAgenda(agendaData, { students, enrollments, staff });
-  const { schedules, trackings, capacityConfig } = agenda;
-  const psyEvents = useMemo(() => [...agenda.psyEvents, ...activityEvents].sort((a, b) => a.at.localeCompare(b.at)), [agenda.psyEvents, activityEvents]);
+  const agenda = useAgenda(agendaData, { students, enrollments, staff, branches });
+  const { schedules, trackings, capacityConfig, monthlySchedules, psyEvents } = agenda;
 
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
@@ -2451,20 +2412,14 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     d.enrollments = d.enrollments.map(e => (e.id === enrollment.id ? { ...e, status: 'Caída' as const, dropDate: request.effectiveDate, dropRequestId: request.id } : e));
     if (plan) d.plans = d.plans.map(p => (p.id === plan.id ? applyDropToPlan(p, preview, forgive, todayLocalISO()) : p));
     d.dropRequests = d.dropRequests.map(r => (r.id === requestId ? { ...r, ...resolution, effects } : r));
-    // Sus asesorías futuras se cancelan en la MISMA operación (todo o nada); las actividades especiales siguen en memoria
+    // Sus asesorías futuras se cancelan y sus inscripciones en actividades salen en la MISMA operación (todo o nada)
     const cancel = systemCancelAgenda(preview.scheduleIds, 'Caída de la matrícula', 'Cancelada por la caída de la matrícula');
-    const saved = await saveMoney('caida', d, [], cancel.rows.length > 0 ? { asesorias: cancel.rows, eventos: cancel.events } : undefined);
+    const leaving = activityRemovalsPayload(preview.activityRemovals, 'Caída de la matrícula');
+    const dropAgenda = cancel.rows.length > 0 || leaving ? { ...(cancel.rows.length > 0 ? { asesorias: cancel.rows, eventos: cancel.events } : {}), ...(leaving ? { actividades: leaving } : {}) } : undefined;
+    const saved = await saveMoney('caida', d, [], dropAgenda);
     if (!saved.ok) return saved;
     await agenda.refreshFor(preview.scheduleIds);
-    logActivityRemovals(preview.activityRemovals, 'Caída de la matrícula');
-    if (preview.activityRemovals.length > 0) {
-      setMonthlySchedules(prev => prev.map(m => ({
-        ...m,
-        actividades: m.actividades.map(a =>
-          preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)
-        ),
-      })));
-    }
+    await agenda.refreshActivitiesFor(monthliesOf(preview.activityRemovals));
     // El estado del alumno no se guarda: pasa a «Inactivo» solo, porque ya no le queda ninguna matrícula activa (utils/identity.ts)
     return { ok: true };
   };
@@ -2870,17 +2825,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
         events.push(...buildScheduleEvents(undefined, created, undefined, currentUser.name, at, newEventId).map(eventRow));
         agendaTouched.push(created.id);
       }
-      if (rows.length > 0) agendaPayload = { asesorias: rows, eventos: events };
-      // Las inscripciones a actividades especiales de la sede anterior siguen en memoria
-      afterSave = () => {
-        logActivityRemovals(preview.activityRemovals, why);
-        if (preview.activityRemovals.length > 0) {
-          setMonthlySchedules(prev => prev.map(m => ({
-            ...m,
-            actividades: m.actividades.map(a => preview.activityRemovals.filter(r => r.monthlyId === m.id && r.activityId === a.id).reduce((acc, r) => withoutEnrollment(acc, r.studentId), a)),
-          })));
-        }
-      };
+      // Las inscripciones en actividades especiales de la sede anterior salen en la MISMA operación (todo o nada)
+      const leaving = activityRemovalsPayload(preview.activityRemovals, why);
+      if (rows.length > 0 || leaving) agendaPayload = { ...(rows.length > 0 ? { asesorias: rows, eventos: events } : {}), ...(leaving ? { actividades: leaving } : {}) };
+      afterSave = () => { void agenda.refreshActivitiesFor(monthliesOf(preview.activityRemovals)); };
     }
     d.changeRequests = d.changeRequests.map(r => (r.id === requestId ? { ...r, ...base, effects } : r));
     d.enrollmentChanges = [log, ...d.enrollmentChanges];

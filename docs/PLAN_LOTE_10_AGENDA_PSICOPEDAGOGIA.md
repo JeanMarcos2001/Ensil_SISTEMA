@@ -42,7 +42,13 @@ Lo que la base vuelve a comprobar (las reglas siguen siendo funciones puras de `
 
 ## 10B — Cronogramas mensuales y actividades (migración 0023)
 
-Tablas: cronogramas por sede y mes, sus actividades (bloquean los horarios de asesoría de la sede), inscritos con su cupo y asistencia (quién y cuándo). La base comprueba cupo, que el responsable sea de Psicopedagogía de la sede y que la actividad no pise asesorías ya reservadas.
+**Estado (2026-11-14): hecho y verificado en el código** (`tsc`, `vite build`, los 46 `check-*`; la migración 0023 probada contra una copia de la base con unos 180 casos y con los envíos que arma el propio sistema, y su «deshacer»). **La migración 0023 ya está aplicada a la base real (la pegó el usuario; verificada por SQL el 2026-11-14) y el código se subió a `main` después, porque la aplicación lee las tablas nuevas al iniciar sesión.** Falta probar en el navegador con la sesión del usuario (sin guardar nada hasta que él lo pida).
+- ✅ **Migración 0023** (`supabase/migrations/20261114160000_cronogramas_y_actividades.sql`, con su «deshacer» en `supabase/deshacer/`).
+- ✅ **Sistema:** `utils/activitiesDb.ts`, `services/agenda.ts` + `services/agendaRepository.ts` (operaciones de las actividades), `useAgenda` (aplica y reemplaza los cronogramas tocados), el contexto sin cronogramas ni historial de actividades en memoria (las acciones son asíncronas), la clave `agenda.actividades` dentro de la caída y el traslado del dinero, las pantallas de Cronogramas mensuales y Actividades especiales con `await`, el registro de funciones y `check-activities-db.ts`.
+- Tablas: `cronogramas` (uno por sede y mes; la sede no cambia), `actividades` (nace sin responsable; 1 a 3 horas consecutivas; cupo 1–50 o sin límite) y `actividad_inscripciones` (inscritos y su asistencia). El historial va a `psy_eventos` con `tema = 'actividad'`.
+- Lo que la base vigila: sede alcanzable; la función del registro de cada acción; fecha dentro del mes y no en domingo; horas válidas; cupo sin bajar de lo inscrito; actividad nueva o movida no en el pasado; responsable de Psicopedagogía sin cruces ni vacaciones; inscripción de un alumno de esa sede sin cruce con una asesoría suya; 24 horas al retirar; asistencia desde el día y con responsable; con asistencia no se cambia nada de lo que la sostiene; cada cambio trae su evento; **y ahora el bloqueo de horarios por una actividad al reservar o mover una asesoría**.
+- **Reglas nuevas (avisadas):** no se elimina un cronograma con asistencia; la sede de un cronograma no cambia; la caída y el traslado no sacan al alumno de una actividad donde ya tiene asistencia; un código de cronograma o actividad no se reutiliza mientras el historial lo nombre.
+- Anotado: crear una actividad sobre asesorías ya reservadas solo avisa (las asesorías no se cancelan solas).
 
 ## 10C — Recordatorios de Psicopedagogía (migración 0024)
 

@@ -45,6 +45,8 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   const [selectedId, setSelectedId] = useState<string>('');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Mientras la base guarda, los botones quedan apagados (una operación a la vez)
+  const [busy, setBusy] = useState(false);
   const [showPast, setShowPast] = useState(false);
   // Quitar una inscripción pide confirmación (id del alumno a quitar)
   const [toRemove, setToRemove] = useState<string | null>(null);
@@ -76,9 +78,11 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
         .slice(0, 6)
     : [];
 
-  const enroll = (studentId: string) => {
-    if (!selected) return;
-    const res = enrollInActivity(selected.id, studentId);
+  const enroll = async (studentId: string) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    const res = await enrollInActivity(selected.id, studentId);
+    setBusy(false);
     if (!res.ok) { setError(res.error ?? 'No se pudo inscribir.'); return; }
     setError(null);
     setQuery('');
@@ -100,20 +104,27 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
   const summary = selected ? attendanceSummary(selected) : null;
   const attendanceReason = selected ? attendanceBlock(selected, today) : null;
 
-  const changeLead = (staffId: string) => {
-    if (!selected) return;
-    const res = setActivityResponsible(selected.id, staffId || null);
+  const changeLead = async (staffId: string) => {
+    if (!selected || busy) return;
+    setBusy(true);
+    const res = await setActivityResponsible(selected.id, staffId || null);
+    setBusy(false);
     setError(res.ok ? null : res.error ?? 'No se pudo asignar.');
   };
-  const mark = (studentId: string, status: 'Asistió' | 'Faltó') => {
-    if (!selected) return;
-    const res = markActivityAttendance(selected.id, studentId, status);
+  const mark = async (studentId: string, status: 'Asistió' | 'Faltó') => {
+    if (!selected || busy) return;
+    setBusy(true);
+    const res = await markActivityAttendance(selected.id, studentId, status);
+    setBusy(false);
     setError(res.ok ? null : res.error ?? 'No se pudo registrar.');
   };
-  const markAll = () => {
-    if (!selected) return;
-    selected.enrolled.filter(id => !selected.attendance[id]).forEach(id => markActivityAttendance(selected.id, id, 'Asistió'));
-    setError(null);
+  // Todos los pendientes se marcan en UNA sola operación (todo o nada)
+  const markAll = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    const res = await markActivityAttendance(selected.id, selected.enrolled.filter(id => !selected.attendance[id]), 'Asistió');
+    setBusy(false);
+    setError(res.ok ? null : res.error ?? 'No se pudo registrar.');
   };
 
   return (
@@ -189,7 +200,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                 <select
                   className={nativeFieldCls}
                   value={leadValue}
-                  disabled={!mayAssign || locked}
+                  disabled={!mayAssign || locked || busy}
                   onChange={e => changeLead(e.target.value)}
                 >
                   <option value="">{selected.responsible && !leadValue ? `${selected.responsible} (sin ficha de personal)` : 'Sin responsable'}</option>
@@ -230,8 +241,9 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                         <button
                           key={s.id}
                           type="button"
+                          disabled={busy}
                           onClick={() => enroll(s.id)}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0"
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-surface-muted border-b border-border-soft last:border-0 disabled:opacity-50"
                         >
                           <span className="font-medium text-text-primary">{s.name}</span>
                           <span className="text-text-muted"> · {s.doc} · {studentProgramLabel(s, enrollments)}</span>
@@ -258,7 +270,7 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                   <p className="text-xs text-text-muted bg-surface-muted rounded-lg px-3 py-2">{attendanceReason}</p>
                 )}
                 {selected.enrolled.length > 0 && !attendanceReason && mayMark && summary && summary.pending > 0 && (
-                  <button type="button" onClick={markAll} className="text-xs font-medium text-primary-accent hover:underline">Marcar a todos los pendientes como «Asistió»</button>
+                  <button type="button" disabled={busy} onClick={markAll} className="text-xs font-medium text-primary-accent hover:underline disabled:opacity-50">Marcar a todos los pendientes como «Asistió»</button>
                 )}
                 {selected.enrolled.length === 0 ? (
                   <p className="text-sm text-text-muted py-4 text-center border border-dashed border-border-soft rounded-xl">Aún no hay alumnos inscritos.</p>
@@ -274,8 +286,8 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
                         <div className="flex items-center gap-2 shrink-0">
                           {!attendanceReason && mayMark && (
                             <>
-                              <button type="button" onClick={() => mark(id, 'Asistió')} className={`h-7 px-2.5 rounded-lg border text-xs font-medium transition-colors ${mark_?.status === 'Asistió' ? 'bg-success-tint border-success-text/30 text-success-text' : 'border-border-soft text-text-secondary hover:bg-surface-muted'}`}>Asistió</button>
-                              <button type="button" onClick={() => mark(id, 'Faltó')} className={`h-7 px-2.5 rounded-lg border text-xs font-medium transition-colors ${mark_?.status === 'Faltó' ? 'bg-danger-tint border-danger-text/30 text-danger-text' : 'border-border-soft text-text-secondary hover:bg-surface-muted'}`}>Faltó</button>
+                              <button type="button" disabled={busy} onClick={() => mark(id, 'Asistió')} className={`h-7 px-2.5 rounded-lg border text-xs font-medium transition-colors ${mark_?.status === 'Asistió' ? 'bg-success-tint border-success-text/30 text-success-text' : 'border-border-soft text-text-secondary hover:bg-surface-muted'}`}>Asistió</button>
+                              <button type="button" disabled={busy} onClick={() => mark(id, 'Faltó')} className={`h-7 px-2.5 rounded-lg border text-xs font-medium transition-colors ${mark_?.status === 'Faltó' ? 'bg-danger-tint border-danger-text/30 text-danger-text' : 'border-border-soft text-text-secondary hover:bg-surface-muted'}`}>Faltó</button>
                               {mark_ && <button type="button" onClick={() => setToUnmark(id)} className="text-xs text-text-muted hover:underline">Quitar</button>}
                             </>
                           )}
@@ -312,9 +324,9 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
       detailLabel="Detalle"
       confirmLabel="Quitar inscripción"
       danger
-      onSubmit={({ reason, detail }) => {
+      onSubmit={async ({ reason, detail }) => {
         if (!toRemove || !selected) return null;
-        const res = unenrollFromActivity(selected.id, toRemove, { reason, detail });
+        const res = await unenrollFromActivity(selected.id, toRemove, { reason, detail });
         return res.ok ? null : res.error ?? 'No se pudo quitar la inscripción.';
       }}
     >
@@ -333,9 +345,9 @@ export function ActivityEnrollModal({ isOpen, onClose, activityId, branchId }: P
       detailPlaceholder="Por ejemplo: se marcó al alumno equivocado."
       confirmLabel="Quitar marca"
       danger
-      onSubmit={({ detail }) => {
+      onSubmit={async ({ detail }) => {
         if (!toUnmark || !selected) return null;
-        const res = markActivityAttendance(selected.id, toUnmark, null, detail);
+        const res = await markActivityAttendance(selected.id, toUnmark, null, detail);
         return res.ok ? null : res.error ?? 'No se pudo quitar la marca.';
       }}
     >

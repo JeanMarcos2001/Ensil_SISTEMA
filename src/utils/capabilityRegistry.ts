@@ -232,7 +232,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Operación
   f('op-matriculas', 'Matrículas', 'mod-operacion', [
-    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'guardian', 'plan', 'program', 'level', 'schedule'], note: 'Muestra, en la lista y en la ficha, las solicitudes pendientes de cada matrícula y su historial.' },
+    { action: 'view', label: 'Ver matrículas', kind: 'ver', menu: menu(OP, 'Matrículas'), reads: ['enrollment', 'enrollmentRequest', 'student', 'guardian', 'plan', 'program', 'level', 'schedule', 'monthlySchedule', 'activity'], note: 'Muestra, en la lista y en la ficha, las solicitudes pendientes de cada matrícula y su historial.' },
     {
       action: 'create', label: 'Crear matrícula', kind: 'crear', requires: ['view'], sensitive: 'dinero',
       reads: ['program', 'level', 'tariff', 'promotion', 'paymentType'], writes: ['enrollment', 'student', 'guardian', 'plan', 'payment', 'cashMovement', 'verification', 'schedule'],
@@ -397,7 +397,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Psicopedagogía
   f('psi-prog', 'Programación', 'mod-psico', [
-    { action: 'view', label: 'Ver programación', kind: 'ver', menu: menu('psicopedagogia', 'Programación'), reads: ['schedule', 'student', 'enrollment', 'verification', 'tracking', 'capacity'] },
+    { action: 'view', label: 'Ver programación', kind: 'ver', menu: menu('psicopedagogia', 'Programación'), reads: ['schedule', 'student', 'enrollment', 'verification', 'tracking', 'capacity', 'monthlySchedule', 'activity'] },
     {
       action: 'create', label: 'Crear programación (agendar asesorías)', kind: 'crear', requires: ['view'], reads: ['student', 'enrollment', 'verification', 'capacity'], writes: ['schedule'], actions: ['addSchedule'],
       counterparts: [cp('psi-prog:mark_attendance', 'same-branch', 'advisory', 'Sin Psicopedagogía en la sede nadie marcará la asistencia de las asesorías.')],
@@ -408,7 +408,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
       note: 'Sin materiales entregados no se marca asistencia (verificación antes de la primera asesoría).',
     },
     { action: 'reg_tracking', label: 'Registrar seguimiento de la sesión', kind: 'operar', requires: ['view'], writes: ['tracking', 'schedule'], actions: ['addTracking', 'updateTracking', 'updateSchedule'] },
-    { action: 'export_schedule', label: 'Exportar cronograma mensual', kind: 'exportar', requires: ['view'], reads: ['monthlySchedule'] },
+    { action: 'export_schedule', label: 'Exportar cronograma mensual', kind: 'exportar', requires: ['view'], reads: ['monthlySchedule', 'activity'] },
     { action: 'activity_lead', label: 'Asignar el responsable de una actividad especial', kind: 'operar', requires: ['view'], writes: ['activity'], actions: ['setActivityResponsible'] },
     { action: 'activity_enroll', label: 'Inscribir o retirar alumnos de una actividad especial', kind: 'operar', requires: ['view'], reads: ['capacity'], writes: ['activity'], actions: ['enrollInActivity', 'unenrollFromActivity'] },
     { action: 'activity_attendance', label: 'Registrar asistencia a actividades especiales', kind: 'operar', requires: ['view'], writes: ['activity'], actions: ['markActivityAttendance'] },
@@ -426,7 +426,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     create: ['addMonthlySchedule'], edit: ['updateMonthlySchedule'], remove: ['deleteMonthlySchedule'],
   })),
   f('psi-recordatorios', 'Recordatorios de Psicopedagogía', 'mod-psico', [
-    { action: 'view', label: 'Ver recordatorios', kind: 'ver', menu: menu('psicopedagogia', 'Recordatorios'), reads: ['psyReminder', 'schedule'] },
+    { action: 'view', label: 'Ver recordatorios', kind: 'ver', menu: menu('psicopedagogia', 'Recordatorios'), reads: ['psyReminder', 'schedule', 'monthlySchedule', 'activity'] },
     { action: 'remind', label: 'Enviar y registrar recordatorios', kind: 'operar', requires: ['view'], writes: ['psyReminder'], actions: ['logPsyReminder'] },
     { action: 'config', label: 'Configurar los días de recordatorio', kind: 'configurar', requires: ['view'], writes: ['psyReminder'], actions: ['savePsyReminderPolicy'] },
   ]),
@@ -441,14 +441,14 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     create: ['addGuardian'], edit: ['updateGuardian'], remove: ['deleteGuardian'],
   })),
   f('per-personal', 'Personal', 'mod-personas', [
-    { action: 'view', label: 'Ver el personal', kind: 'ver', menu: menu('personas', 'Personal'), reads: ['staff', 'contract', 'assignment', 'user', 'schedule'] },
+    { action: 'view', label: 'Ver el personal', kind: 'ver', menu: menu('personas', 'Personal'), reads: ['staff', 'contract', 'assignment', 'user', 'schedule', 'monthlySchedule', 'activity'] },
     { action: 'create', label: 'Crear ficha de personal', kind: 'crear', requires: ['view'], writes: ['staff', 'user'], actions: ['addStaff'] },
     { action: 'edit', label: 'Editar ficha de personal', kind: 'editar', requires: ['view'], writes: ['staff', 'user'], actions: ['updateStaff'] },
     { action: 'inactivate', label: 'Inactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user', 'assignment'], actions: ['inactivateStaff'], note: 'Su cuenta de usuario se desactiva sola.' },
     { action: 'reactivate', label: 'Reactivar a un trabajador', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['staff', 'user'], actions: ['reactivateStaff'] },
   ]),
   f('per-contratos', 'Contratos', 'mod-personas', [
-    { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll', 'schedule'] },
+    { action: 'view', label: 'Ver contratos', kind: 'ver', menu: menu('personas', 'Contratos'), reads: ['contract', 'staff', 'payroll', 'schedule', 'monthlySchedule', 'activity'] },
     { action: 'create', label: 'Crear contrato', kind: 'crear', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['addContract'],
       counterparts: [cp('per-planilla:generate', 'any', 'advisory', 'Sin quien arme la planilla, el contrato no se pagará.')] },
     { action: 'edit', label: 'Editar contrato (cambio de condiciones con motivo)', kind: 'editar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['editContract'] },
@@ -456,7 +456,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'renew', label: 'Renovar contrato', kind: 'operar', requires: ['view', 'per-remuneracion:view'], sensitive: 'remuneracion', writes: ['contract'], actions: ['renewContract'] },
   ]),
   f('per-asignaciones', 'Asignaciones', 'mod-personas', [
-    { action: 'view', label: 'Ver asignaciones', kind: 'ver', menu: menu('personas', 'Asignaciones'), reads: ['assignment', 'staff', 'branch', 'schedule'] },
+    { action: 'view', label: 'Ver asignaciones', kind: 'ver', menu: menu('personas', 'Asignaciones'), reads: ['assignment', 'staff', 'branch', 'schedule', 'monthlySchedule', 'activity'] },
     { action: 'save', label: 'Crear o editar una asignación', kind: 'crear', requires: ['view'], writes: ['assignment'], actions: ['saveAssignment'] },
     { action: 'close', label: 'Cerrar una asignación', kind: 'operar', requires: ['view'], sensitive: 'control', writes: ['assignment'], actions: ['closeAssignment'] },
   ]),
@@ -558,7 +558,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'view', label: 'Ver el reporte de stock', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Stock'), reads: ['stock', 'kardex', 'recipe', 'enrollment'] },
   ]),
   f('rep-psicopedagogia', 'Reporte de Psicopedagogía', 'mod-reportes', [
-    { action: 'view', label: 'Ver el reporte de Psicopedagogía', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Psicopedagogía'), reads: ['schedule', 'tracking', 'activity', 'student'] },
+    { action: 'view', label: 'Ver el reporte de Psicopedagogía', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Psicopedagogía'), reads: ['schedule', 'tracking', 'activity', 'monthlySchedule', 'student'] },
   ]),
   f('rep-personal', 'Reporte de personal', 'mod-reportes', [
     { action: 'view', label: 'Ver el reporte de personal', kind: 'ver', requires: ['rep-general:view'], menu: menu('reportes', 'Personal'), reads: ['staff', 'contract', 'assignment', 'user'] },

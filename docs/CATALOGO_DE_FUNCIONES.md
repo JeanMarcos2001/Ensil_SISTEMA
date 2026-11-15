@@ -34,7 +34,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Solicitud sobre una matrícula, Alumno, Titular, Plan de pago, Programa, Nivel, Asesoría → — | — |
+| **Ver matrículas** · menú «Matrículas»<br><code>op-matriculas:view</code> | ver | — | — | Matrícula, Solicitud sobre una matrícula, Alumno, Titular, Plan de pago, Programa, Nivel, Asesoría, Cronograma mensual, Actividad especial → — | — |
 | **Crear matrícula** 💲<br><code>op-matriculas:create</code> | crear | Ver matrículas | Registrar la entrega de materiales en la misma sede (recomendada)<br>Crear programación (agendar asesorías) en la misma sede (recomendada) | Programa, Nivel, Tarifario, Promoción, Tipo de pago → Matrícula, Alumno, Titular, Plan de pago, Pago, Movimiento de caja, Verificación de materiales, Asesoría | — |
 | **Editar borrador** _(reservada)_<br><code>op-matriculas:edit_draft</code> | editar | Ver matrículas | — | — → — | — |
 | **Confirmar matrícula** _(reservada)_<br><code>op-matriculas:confirm</code> | operar | Ver matrículas | — | — → — | — |
@@ -168,12 +168,12 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver programación** · menú «Programación»<br><code>psi-prog:view</code> | ver | — | — | Asesoría, Alumno, Matrícula, Verificación de materiales, Seguimiento de la sesión, Cupos → — | — |
+| **Ver programación** · menú «Programación»<br><code>psi-prog:view</code> | ver | — | — | Asesoría, Alumno, Matrícula, Verificación de materiales, Seguimiento de la sesión, Cupos, Cronograma mensual, Actividad especial → — | — |
 | **Crear programación (agendar asesorías)**<br><code>psi-prog:create</code> | crear | Ver programación | Marcar la asistencia de la asesoría en la misma sede (recomendada) | Alumno, Matrícula, Verificación de materiales, Cupos → Asesoría | — |
 | **Reprogramar o cancelar con 24 horas o más**<br><code>psi-prog:reschedule</code> | editar | Ver programación | — | — → Asesoría | — |
 | **Marcar la asistencia de la asesoría**<br><code>psi-prog:mark_attendance</code> | operar | Ver programación | — | Verificación de materiales → Asesoría | — |
 | **Registrar seguimiento de la sesión**<br><code>psi-prog:reg_tracking</code> | operar | Ver programación | — | — → Seguimiento de la sesión, Asesoría | — |
-| **Exportar cronograma mensual**<br><code>psi-prog:export_schedule</code> | exportar | Ver programación | — | Cronograma mensual → — | — |
+| **Exportar cronograma mensual**<br><code>psi-prog:export_schedule</code> | exportar | Ver programación | — | Cronograma mensual, Actividad especial → — | — |
 | **Asignar el responsable de una actividad especial**<br><code>psi-prog:activity_lead</code> | operar | Ver programación | — | — → Actividad especial | — |
 | **Inscribir o retirar alumnos de una actividad especial**<br><code>psi-prog:activity_enroll</code> | operar | Ver programación | — | Cupos → Actividad especial | — |
 | **Registrar asistencia a actividades especiales**<br><code>psi-prog:activity_attendance</code> | operar | Ver programación | — | — → Actividad especial | — |
@@ -199,7 +199,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver recordatorios** · menú «Recordatorios»<br><code>psi-recordatorios:view</code> | ver | — | — | Recordatorio de Psicopedagogía, Asesoría → — | — |
+| **Ver recordatorios** · menú «Recordatorios»<br><code>psi-recordatorios:view</code> | ver | — | — | Recordatorio de Psicopedagogía, Asesoría, Cronograma mensual, Actividad especial → — | — |
 | **Enviar y registrar recordatorios**<br><code>psi-recordatorios:remind</code> | operar | Ver recordatorios | — | — → Recordatorio de Psicopedagogía | — |
 | **Configurar los días de recordatorio**<br><code>psi-recordatorios:config</code> | configurar | Ver recordatorios | — | — → Recordatorio de Psicopedagogía | — |
 
@@ -227,7 +227,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver el personal** · menú «Personal»<br><code>per-personal:view</code> | ver | — | — | Personal, Contrato de trabajo, Asignación, Cuenta de usuario, Asesoría → — | — |
+| **Ver el personal** · menú «Personal»<br><code>per-personal:view</code> | ver | — | — | Personal, Contrato de trabajo, Asignación, Cuenta de usuario, Asesoría, Cronograma mensual, Actividad especial → — | — |
 | **Crear ficha de personal**<br><code>per-personal:create</code> | crear | Ver el personal | — | — → Personal, Cuenta de usuario | — |
 | **Editar ficha de personal**<br><code>per-personal:edit</code> | editar | Ver el personal | — | — → Personal, Cuenta de usuario | — |
 | **Inactivar a un trabajador** 🛡 control<br><code>per-personal:inactivate</code> | operar | Ver el personal | — | — → Personal, Cuenta de usuario, Asignación | — |
@@ -237,7 +237,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver contratos** · menú «Contratos»<br><code>per-contratos:view</code> | ver | — | — | Contrato de trabajo, Personal, Planilla, Asesoría → — | — |
+| **Ver contratos** · menú «Contratos»<br><code>per-contratos:view</code> | ver | — | — | Contrato de trabajo, Personal, Planilla, Asesoría, Cronograma mensual, Actividad especial → — | — |
 | **Crear contrato** 👁‍🗨 sueldos<br><code>per-contratos:create</code> | crear | Ver contratos, Ver remuneraciones y costo de planilla | Generar y eliminar borradores de planilla en cualquier sede (recomendada) | — → Contrato de trabajo | — |
 | **Editar contrato (cambio de condiciones con motivo)** 👁‍🗨 sueldos<br><code>per-contratos:edit</code> | editar | Ver contratos, Ver remuneraciones y costo de planilla | — | — → Contrato de trabajo | — |
 | **Cerrar contrato** 🛡 control<br><code>per-contratos:close</code> | operar | Ver contratos | — | — → Contrato de trabajo, Asignación | — |
@@ -247,7 +247,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver asignaciones** · menú «Asignaciones»<br><code>per-asignaciones:view</code> | ver | — | — | Asignación, Personal, Filial, Asesoría → — | — |
+| **Ver asignaciones** · menú «Asignaciones»<br><code>per-asignaciones:view</code> | ver | — | — | Asignación, Personal, Filial, Asesoría, Cronograma mensual, Actividad especial → — | — |
 | **Crear o editar una asignación**<br><code>per-asignaciones:save</code> | crear | Ver asignaciones | — | — → Asignación | — |
 | **Cerrar una asignación** 🛡 control<br><code>per-asignaciones:close</code> | operar | Ver asignaciones | — | — → Asignación | — |
 
@@ -423,7 +423,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver el reporte de Psicopedagogía** · menú «Psicopedagogía»<br><code>rep-psicopedagogia:view</code> | ver | Ver reportes | — | Asesoría, Seguimiento de la sesión, Actividad especial, Alumno → — | — |
+| **Ver el reporte de Psicopedagogía** · menú «Psicopedagogía»<br><code>rep-psicopedagogia:view</code> | ver | Ver reportes | — | Asesoría, Seguimiento de la sesión, Actividad especial, Cronograma mensual, Alumno → — | — |
 
 ### Reporte de personal `rep-personal`
 

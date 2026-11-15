@@ -21,6 +21,7 @@ import {
   toggleActivitySlot,
   weekdayIndex,
   validateActivity,
+  activityPastProblem,
 } from '../../utils/schedule';
 import { CapacityInput } from './CapacityInput';
 import { ActivityEnrollModal } from './ActivityEnrollModal';
@@ -70,6 +71,9 @@ export function MonthlySchedules() {
   const [toDelete, setToDelete] = useState<MonthlySchedule | null>(null);
   const [enroll, setEnroll] = useState<{ open: boolean; activityId?: string; branchId?: string }>({ open: false });
   const [error, setError] = useState<string | null>(null);
+  // Mientras la base guarda, los botones quedan apagados
+  const [saving, setSaving] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [formState, setFormState] = useState<FormState>({
     branchId: '', mes: MONTHS[Number(today.split('-')[1]) - 1], anio: Number(today.split('-')[0]), titulo: '', observaciones: '', actividades: [],
@@ -104,6 +108,7 @@ export function MonthlySchedules() {
 
   const handleOpenDrawer = (schedule?: MonthlySchedule) => {
     setError(null);
+    setDeleteError(null);
     if (schedule) {
       setSelectedSchedule(schedule);
       setFormState({
@@ -130,7 +135,8 @@ export function MonthlySchedules() {
   const handleActivityChange = (id: string, patch: Partial<ScheduleActivity>) =>
     set({ actividades: formState.actividades.map(a => (a.id === id ? { ...a, ...patch } : a)) });
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     if (!formState.branchId) { setError('Seleccione la sede.'); return; }
     if (!formState.titulo.trim()) { setError('Indique el título del cuadro.'); return; }
     if (!Number.isInteger(formState.anio) || formState.anio < 2000) { setError('Indique un año válido.'); return; }
@@ -147,6 +153,9 @@ export function MonthlySchedules() {
         return;
       }
       if (a.cupo !== null && a.cupo < a.inscritos.length) { setError(`${a.actividad.trim()}: el cupo (${a.cupo}) es menor que los inscritos (${a.inscritos.length}).`); return; }
+      // Una actividad nueva, o una que cambia de fecha u horario, no puede quedar en el pasado (la base lo vuelve a comprobar)
+      const past = activityPastProblem(a, before, today);
+      if (past) { setError(past); return; }
     }
     const data = {
       branchId: formState.branchId,
@@ -157,8 +166,10 @@ export function MonthlySchedules() {
       observaciones: formState.observaciones.trim(),
       actividades: formState.actividades.map((a, i) => ({ ...a, actividad: a.actividad.trim(), orden: i + 1 })),
     };
-    if (selectedSchedule) updateMonthlySchedule(selectedSchedule.id, data);
-    else addMonthlySchedule(data);
+    setSaving(true);
+    const res = selectedSchedule ? await updateMonthlySchedule(selectedSchedule.id, data) : await addMonthlySchedule(data);
+    setSaving(false);
+    if (!res.ok) { setError(res.error ?? 'No se pudo guardar el cronograma.'); return; }
     setIsDrawerOpen(false);
   };
 
@@ -182,6 +193,13 @@ export function MonthlySchedules() {
           )}
         </div>
       </div>
+
+      {deleteError && (
+        <div className="bg-danger-tint border border-danger-text/20 rounded-xl p-3 flex gap-2 text-sm text-danger-text">
+          <AlertCircle size={16} className="shrink-0 mt-0.5" />
+          <p>{deleteError}</p>
+        </div>
+      )}
 
       <div className="bg-surface border border-border-soft rounded-xl overflow-hidden flex flex-col">
         <div className="p-4 border-b border-border-soft flex flex-col lg:flex-row gap-4 justify-between items-center bg-surface-50">
@@ -283,9 +301,15 @@ export function MonthlySchedules() {
       <ConfirmDialog
         isOpen={!!toDelete}
         onClose={() => setToDelete(null)}
-        onConfirm={() => { if (toDelete) deleteMonthlySchedule(toDelete.id); setToDelete(null); }}
+        onConfirm={async () => {
+          if (toDelete) {
+            const res = await deleteMonthlySchedule(toDelete.id);
+            setDeleteError(res.ok ? null : res.error ?? 'No se pudo eliminar el cronograma.');
+          }
+          setToDelete(null);
+        }}
         title="Eliminar cronograma"
-        description={toDelete ? `¿Eliminar «${toDelete.titulo}» (${toDelete.sede}, ${toDelete.mes} ${toDelete.anio})? Sus actividades e inscripciones se perderán y los horarios bloqueados quedarán libres.` : ''}
+        description={toDelete ? `¿Eliminar «${toDelete.titulo}» (${toDelete.sede}, ${toDelete.mes} ${toDelete.anio})? Sus actividades e inscripciones se quitarán (cada inscripción queda en el historial) y los horarios bloqueados quedarán libres. No se puede eliminar si alguna actividad ya tiene asistencia registrada.` : ''}
         variant="danger"
         confirmLabel="SÍ, ELIMINAR"
       />
@@ -302,8 +326,8 @@ export function MonthlySchedules() {
               Previsualizar PDF
             </Button>
             <div className="flex gap-3">
-              <Button variant="ghost" onClick={() => setIsDrawerOpen(false)}>Cancelar</Button>
-              {can(selectedSchedule ? 'psi-cronogramas:edit' : 'psi-cronogramas:create') && <Button variant="primary" onClick={handleSave}>Guardar Cronograma</Button>}
+              <Button variant="ghost" onClick={() => setIsDrawerOpen(false)} disabled={saving}>Cancelar</Button>
+              {can(selectedSchedule ? 'psi-cronogramas:edit' : 'psi-cronogramas:create') && <Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Cronograma'}</Button>}
             </div>
           </div>
         }
@@ -325,9 +349,10 @@ export function MonthlySchedules() {
                 <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label className={labelCls}>Sede</label>
-                    <select className={nativeFieldCls} value={formState.branchId} onChange={e => set({ branchId: e.target.value })}>
+                    <select className={nativeFieldCls} value={formState.branchId} disabled={!!selectedSchedule} onChange={e => set({ branchId: e.target.value })}>
                       {activeBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
+                    {selectedSchedule && <p className="text-xs text-text-muted mt-1">La sede de un cronograma no se cambia: para otra sede, cree otro cronograma.</p>}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">

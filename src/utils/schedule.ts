@@ -421,6 +421,19 @@ export function validateActivity(
   return null;
 }
 
+/**
+ * Una actividad nueva, o una que cambia de fecha u horario, no puede quedar en el pasado (la base lo vuelve a comprobar). Una actividad que no se mueve no se
+ * revisa: las ya realizadas siguen en su cronograma.
+ */
+export function activityPastProblem(
+  a: { actividad: string; fecha: string; horaInicio: string; horaFin: string },
+  before: { fecha: string; horaInicio: string; horaFin: string } | undefined,
+  today: string
+): string | null {
+  const moved = !before || before.fecha !== a.fecha || before.horaInicio !== a.horaInicio || before.horaFin !== a.horaFin;
+  return moved && a.fecha && a.fecha < today ? `${a.actividad.trim() || 'La actividad'}: la fecha no puede ser anterior a hoy.` : null;
+}
+
 /** Cupos libres de una actividad (null = sin límite). */
 export const seatsLeft = (a: Pick<FlatActivity, 'capacity' | 'enrolled'>): number | null =>
   a.capacity === null ? null : Math.max(0, a.capacity - a.enrolled.length);

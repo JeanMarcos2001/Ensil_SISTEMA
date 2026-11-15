@@ -33,8 +33,8 @@ const read = (p: string) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 const throws = (fn: () => unknown, re: RegExp) => { try { fn(); return false; } catch (e) { return re.test(String((e as Error).message)); } };
 
 // ------------------------------------------------------------------------------------------------------------------ Códigos de borrador
-check('Hay tres códigos de la agenda: asesoría (SES), evento del historial (EVT) y seguimiento (TRK), sin año; ninguno se mezcla con los del dinero ni los del personal',
-  Object.keys(AGENDA_CODE_KINDS).join() === 'SES,EVT,TRK' && Object.keys(AGENDA_CODE_KINDS).every(k => !(k in CODE_KINDS) && !(k in STAFF_CODE_KINDS)) && Object.values(AGENDA_CODE_KINDS).every(k => !k.year));
+check('Hay cinco códigos de la agenda: asesoría (SES), evento del historial (EVT), seguimiento (TRK), cronograma (CRO) y actividad (ACT), sin año; ninguno se mezcla con los del dinero ni los del personal',
+  Object.keys(AGENDA_CODE_KINDS).join() === 'SES,EVT,TRK,CRO,ACT' && Object.keys(AGENDA_CODE_KINDS).every(k => !(k in CODE_KINDS) && !(k in STAFF_CODE_KINDS)) && Object.values(AGENDA_CODE_KINDS).every(k => !k.year));
 {
   const ds = [draftId('SES'), draftId('EVT'), draftId('TRK'), draftId('SES')];
   check('Un borrador tiene el aspecto del código con el número entre «~» (SES-~1~), se reconoce y dos no se repiten',
@@ -57,12 +57,13 @@ const rows: AgendaRows = {
     { id: 'EVT-0002', en: '2026-11-13T16:00:00Z', por: 'Ana', tema: 'asesoria', ref_id: 'SES-002', alumno_id: 'ALU-001', sede_id: 'FIL-002', tipo: 'Cancelada', iniciador: 'Institución', motivo: 'Caída de la matrícula', detalle: null, desde: { date: '2026-11-21', time: '17:00', responsible: '' }, hasta: null },
   ],
   seguimientos: [{ id: 'TRK-001', alumno_id: 'ALU-001', asesoria_id: 'SES-001', sede_id: 'FIL-002', fecha: '2026-11-20', estado: 'Completada', metricas: { velocidad: 220 }, observaciones: 'Bien', checklist: null }],
+  cronogramas: [], actividades: [], inscripciones: [],
   capacidad: [
     { id: 'general', ambito: 'general', sede_id: null, fecha: null, hora: null, cupo: 8 }, { id: 'sede:FIL-002', ambito: 'sede', sede_id: 'FIL-002', fecha: null, hora: null, cupo: null },
     { id: 'exc:FIL-002:2026-11-20:16:00', ambito: 'excepcion', sede_id: 'FIL-002', fecha: '2026-11-20', hora: '16:00', cupo: 3 },
   ],
 };
-const state = agendaFromRows(rows, { students, enrollments, staff });
+const state = agendaFromRows(rows, { students, enrollments, staff, branches: [] });
 const s1 = state.schedules.find(s => s.id === 'SES-001')!, s2 = state.schedules.find(s => s.id === 'SES-002')!;
 check('La asesoría se muestra con el nombre del alumno y del responsable DERIVADOS de sus ids, una hora de duración y su sede (nada de eso se guarda)',
   s1.student === 'Mateo Ruiz' && s1.responsible === 'Ana Pérez' && s1.responsibleId === 'STF-001' && s1.duration === SLOT_DURATION && s1.branchId === 'FIL-002' && s1.date === '2026-11-20' && s1.time === '16:00' && s1.status === 'Reservado');
@@ -78,7 +79,7 @@ check('Los cupos: el general, el de una sede (sin límite) y la excepción de un
   && capacityFromRows([]).defaultCapacity === DEFAULT_CAPACITY && DEFAULT_CAPACITY === 6);
 check('El cupo que aplica a un horario sigue siendo excepción > sede > general (las reglas puras no cambian)',
   capacityFor(state.capacityConfig, 'FIL-002', '2026-11-20', '16:00') === 3 && capacityFor(state.capacityConfig, 'FIL-002', '2026-11-20', '17:00') === null && capacityFor(state.capacityConfig, 'FIL-003', '2026-11-20', '17:00') === 8);
-check('Si un alumno o una matrícula aún no se leyó, la asesoría no se pierde (nombre vacío)', agendaFromRows({ ...EMPTY_AGENDA, asesorias: rows.asesorias }, { students: [], enrollments: [], staff: [] }).schedules.length === 2);
+check('Si un alumno o una matrícula aún no se leyó, la asesoría no se pierde (nombre vacío)', agendaFromRows({ ...EMPTY_AGENDA, asesorias: rows.asesorias }, { students: [], enrollments: [], staff: [], branches: [] }).schedules.length === 2);
 check('Mezclar lo recién guardado: la fila más nueva de cada código gana, nada se pierde y los cupos se reemplazan',
   (() => {
     const merged = mergeAgendaRows(rows, { asesorias: [{ ...rows.asesorias[0]!, estado: 'Asistió' }, { ...rows.asesorias[0]!, id: 'SES-003' }], eventos: [], capacidad: [] });
@@ -150,6 +151,8 @@ function memoryRepo(opts: { fail?: string; failRead?: boolean; codes?: Record<st
     async apply(action, payload): Promise<RepoResult<{ codes: Record<string, string> }>> { calls.push({ fn: 'apply', args: [action, payload] }); return opts.fail ? { ok: false, error: opts.fail } : { ok: true, data: { codes: opts.codes ?? {} } }; },
     async loadTouched(ids, trackingIds) { calls.push({ fn: 'loadTouched', args: [ids, trackingIds] }); return opts.failRead ? { ok: false, error: 'sin conexión' } : { ok: true, data: { asesorias: rows.asesorias.filter(a => ids.includes(a.id)) } }; },
     async saveCapacity(changes) { calls.push({ fn: 'saveCapacity', args: [changes] }); return opts.fail ? { ok: false, error: opts.fail } : { ok: true, data: null }; },
+    async applyActivities() { return { ok: true, data: { codes: {} } }; },
+    async loadActivitiesTouched() { return { ok: true, data: { cronogramas: [], actividades: [], inscripciones: [], eventos: [] } }; },
   };
   return { repo, calls };
 }
@@ -266,17 +269,18 @@ const hook = read('src/hooks/useAgenda.ts');
 const repoSrc = read('src/services/agendaRepository.ts');
 const batch = read('src/utils/enrollment.ts');
 check('La agenda se lee al iniciar sesión (antes de montar el sistema), junto con lo demás',
-  /loadAgenda\(agendaRepo\)/.test(gate) && /loaded\.collection, loaded\.agenda\)/.test(gate) && /agenda=\{agenda\}/.test(read('src/App.tsx')) && /agenda: agendaData/.test(ctxSrc) && /useAgenda\(agendaData, \{ students, enrollments, staff \}\)/.test(ctxSrc));
+  /loadAgenda\(agendaRepo\)/.test(gate) && /loaded\.collection, loaded\.agenda\)/.test(gate) && /agenda=\{agenda\}/.test(read('src/App.tsx')) && /agenda: agendaData/.test(ctxSrc) && /useAgenda\(agendaData, \{ students, enrollments, staff, branches \}\)/.test(ctxSrc));
 check('El repositorio de Supabase llama a las dos funciones de la base y lee las cuatro tablas',
-  ["'aplicar_cambios_agenda'", "'guardar_capacidad'"].every(fn => repoSrc.includes(fn)) && ["'asesorias'", "'psy_eventos'", "'seguimientos'", "'capacidad_asesorias'"].every(t => repoSrc.includes(t)));
+  ["'aplicar_cambios_agenda'", "'guardar_capacidad'"].every(fn => repoSrc.includes(fn)) && ["'asesorias'", "'psy_eventos'", "'seguimientos'", "'capacidad_asesorias'", "'cronogramas'", "'actividades'", "'actividad_inscripciones'"].every(t => repoSrc.includes(t)));
 check('El gancho arranca con lo ya leído, deriva los nombres al mostrar y vuelve a leer lo tocado después de cada operación',
-  /useAgenda\(initial: AgendaRows, lists: AgendaLists\)/.test(hook) && /useState<AgendaRows>\(initial\)/.test(hook) && /agendaFromRows\(rows, \{ students, enrollments, staff \}\)/.test(hook) && /merge\(res\.value\.fresh\)/.test(hook) && !/useEffect/.test(hook));
+  /useAgenda\(initial: AgendaRows, lists: AgendaLists\)/.test(hook) && /useState<AgendaRows>\(initial\)/.test(hook) && /agendaFromRows\(rows, \{ students, enrollments, staff, branches \}\)/.test(hook) && /merge\(res\.value\.fresh\)/.test(hook) && !/useEffect/.test(hook));
 check('Las acciones de la agenda son asíncronas y devuelven { ok, error } (ya no lanzan error al negar el permiso)',
   /addSchedule: \(data: Omit<Schedule, 'id'>\) => Promise<StockResult/.test(ctxSrc) && /updateSchedule: \([^)]*\) => Promise<\{ ok: boolean; reason\?: string \}>/.test(ctxSrc) && /addTracking: \([^)]*\) => Promise<StockResult/.test(ctxSrc)
   && /updateTracking: \([^)]*\) => Promise<StockResult>/.test(ctxSrc) && /setCapacityConfig: \([^)]*\) => Promise<StockResult>/.test(ctxSrc)
   && !['addSchedule', 'addTracking', 'updateTracking', 'setCapacityConfig'].some(a => THROWS_ON_DENIAL.has(a)));
-check('El contexto ya no guarda en memoria las asesorías, el seguimiento ni los cupos, ni copia nombres en la agenda; el historial de las actividades sigue aparte hasta su entrega',
-  !/setSchedules|setTrackings|setCapacityConfig\] = useState|buildScheduleSeed|buildTrackingSeed|syncStudentName\(|syncCatalogLabels\(|relabelFrom/.test(ctxSrc) && /EVT-L-/.test(ctxSrc) && /\[\.\.\.agenda\.psyEvents, \.\.\.activityEvents\]/.test(ctxSrc));
+check('El contexto ya no guarda en memoria las asesorías, el seguimiento, los cupos, los cronogramas ni las actividades (ni su historial), ni copia nombres en la agenda',
+  !/setSchedules|setTrackings|setCapacityConfig\] = useState|buildScheduleSeed|buildTrackingSeed|syncStudentName\(|syncCatalogLabels\(|relabelFrom|setMonthlySchedules|activityEvents|EVT-L-|logActivityRemovals|nextNumericId/.test(ctxSrc)
+  && /const \{ schedules, trackings, capacityConfig, monthlySchedules, psyEvents \} = agenda;/.test(ctxSrc));
 check('Reservar guarda con la función de la base (la base asigna el código y el responsable va por su id); reprogramar, cancelar y marcar la asistencia mandan solo lo que cambió y su evento',
   /agenda\.apply\('reservar', \{ asesorias: \[scheduleInsertRow\(created, responsibleId\)\], eventos: events\.map\(eventRow\) \}\)/.test(ctxSrc) && /agenda\.apply\(scheduleActionOf\(target, after\), \{ asesorias: \[change\], eventos: events\.map\(eventRow\) \}\)/.test(ctxSrc)
   && /buildScheduleEvents\(undefined, created, undefined, currentUser\.name, new Date\(\)\.toISOString\(\), newEventId\)/.test(ctxSrc));
@@ -286,10 +290,11 @@ check('Registrar la sesión es UNA operación (marca la asistencia y guarda la s
 check('Matricular manda la primera asesoría de cada alumno DENTRO de la operación (el código de la asesoría es un borrador y su responsable va por su id), y después vuelve a leer lo tocado',
   /saveMoney\('matricular', d, \[\], \{ asesorias: b\.schedules\.map\(sc => scheduleInsertRow\(sc, sc\.responsibleId\)\), eventos: firstEvents\.map\(eventRow\) \}\)/.test(ctxSrc)
   && /await agenda\.refreshFor\(realCodes\(b\.schedules\.map\(sc => sc\.id\), codes\)\)/.test(ctxSrc) && /id: draftId\('SES'\)/.test(batch) && /responsibleId: interviewer\.id/.test(batch) && !/nextSequentialId\('SES'/.test(batch));
-check('La caída y el traslado cancelan las asesorías en la MISMA operación (con el evento de la institución) y el traslado crea la primera de la sede nueva; solo las actividades siguen en memoria',
-  /const cancel = systemCancelAgenda\(preview\.scheduleIds, 'Caída de la matrícula'/.test(ctxSrc) && /saveMoney\('caida', d, \[\], cancel\.rows\.length > 0 \? \{ asesorias: cancel\.rows, eventos: cancel\.events \} : undefined\)/.test(ctxSrc)
-  && /saveMoney\(CHANGE_ACTIONS\[request\.kind\]\.approve, d, \[\], agendaPayload\)/.test(ctxSrc) && /agendaPayload = \{ asesorias: rows, eventos: events \}/.test(ctxSrc) && /rows\.push\(scheduleInsertRow\(created, responsibleId\)\)/.test(ctxSrc)
-  && /initiator: 'Institución'/.test(ctxSrc));
+check('La caída y el traslado cancelan las asesorías y sacan al alumno de sus actividades en la MISMA operación (con el evento de la institución) y el traslado crea la primera de la sede nueva',
+  /const cancel = systemCancelAgenda\(preview\.scheduleIds, 'Caída de la matrícula'/.test(ctxSrc) && /const leaving = activityRemovalsPayload\(preview\.activityRemovals, 'Caída de la matrícula'\)/.test(ctxSrc)
+  && /saveMoney\('caida', d, \[\], dropAgenda\)/.test(ctxSrc) && /\.\.\.\(leaving \? \{ actividades: leaving \} : \{\}\)/.test(ctxSrc)
+  && /saveMoney\(CHANGE_ACTIONS\[request\.kind\]\.approve, d, \[\], agendaPayload\)/.test(ctxSrc) && /agendaPayload = \{ \.\.\.\(rows\.length > 0 \? \{ asesorias: rows, eventos: events \} : \{\}\), \.\.\.\(leaving \? \{ actividades: leaving \} : \{\}\) \}/.test(ctxSrc)
+  && /rows\.push\(scheduleInsertRow\(created, responsibleId\)\)/.test(ctxSrc) && /initiator: 'Institución'/.test(ctxSrc));
 const screens = { schedule: read('src/pages/psychopedagogy/Schedule.tsx'), form: read('src/pages/psychopedagogy/ScheduleFormModal.tsx'), session: read('src/pages/psychopedagogy/SessionModal.tsx'), capacity: read('src/pages/psychopedagogy/CapacityModal.tsx') };
 check('Las pantallas esperan la respuesta de la base antes de seguir y apagan el botón mientras guardan',
   /await updateSchedule\(s\.id, \{ status: action === 'asistio'/.test(screens.schedule) && /await updateSchedule\(toCancel\.id/.test(screens.schedule) && /await updateSchedule\(schedule\.id/.test(screens.form) && /await addSchedule\(/.test(screens.form) && /disabled=\{saving\}/.test(screens.form)

@@ -349,7 +349,8 @@ export function transferAgenda(e: Enrollment, c: ChangeContext) {
   if (!otherHere && student) {
     for (const m of c.monthly) {
       if (m.branchId !== e.branchId) continue;
-      for (const a of m.actividades) if (a.fecha >= c.today && a.inscritos.includes(student.id)) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId: student.id });
+      // Lo que ya tiene la asistencia del alumno es historial: no se quita (la base tampoco lo permite)
+      for (const a of m.actividades) if (a.fecha >= c.today && a.inscritos.includes(student.id) && !a.asistencia?.[student.id]) activityRemovals.push({ monthlyId: m.id, activityId: a.id, studentId: student.id });
     }
   }
   const firstSessionLost = c.schedules.some(s => scheduleIds.includes(s.id) && s.isFirst && s.enrollmentId === e.id);

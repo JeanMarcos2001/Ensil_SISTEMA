@@ -1,14 +1,15 @@
 /**
  * Traducción entre la agenda de Psicopedagogía del sistema (asesorías, historial, seguimiento y cupos) y las filas de la base (tablas `asesorias`,
- * `psy_eventos`, `seguimientos` y `capacidad_asesorias`), y de los errores de la base a mensajes claros. Funciones puras.
+ * `psy_eventos`, `seguimientos` y `capacidad_asesorias`; los cronogramas y las actividades, en `activitiesDb.ts`), y de los errores de la base a mensajes claros. Funciones puras.
  *
  * Lo derivable no se guarda: el nombre del alumno, el programa y el nivel de una asesoría salen del alumno y de su matrícula; el responsable se guarda por su
  * id de Personal y su nombre sale de la ficha (`staffLabel`). Una asesoría dura siempre una hora. El historial guarda el nombre del responsable de ESE día
  * (es una constancia). Lo que viaja a la base son **borradores de código** (`SES-~1~`, `EVT-~2~`, `TRK-~3~`): la base asigna los reales.
  */
 import type {
-  Assignment, CapacityConfig, CapacityOverride, ChangeInitiator, Enrollment, PsyEvent, PsyEventType, Schedule, Staff, Student, Tracking,
+  Assignment, CapacityConfig, CapacityOverride, ChangeInitiator, Enrollment, MonthlySchedule, PsyEvent, PsyEventType, Schedule, Staff, Student, Tracking,
 } from '../context/DataContext';
+import { monthlyFromRows, type ActivityLists, type ActivityRows, EMPTY_ACTIVITIES } from './activitiesDb';
 import { draftId } from './draftIds';
 import { latestEnrollmentOf } from './identity';
 import { dbErrorMessage, type DbErrorLike } from './orgDirectory';
@@ -31,13 +32,13 @@ export interface SeguimientoRow {
 export interface CapacidadRow { id: string; ambito: 'general' | 'sede' | 'excepcion'; sede_id: string | null; fecha: string | null; hora: string | null; cupo: number | null }
 export interface EventPlace { date: string; time: string; responsible: string }
 
-export interface AgendaRows { asesorias: AsesoriaRow[]; eventos: EventoRow[]; seguimientos: SeguimientoRow[]; capacidad: CapacidadRow[] }
-export const EMPTY_AGENDA: AgendaRows = { asesorias: [], eventos: [], seguimientos: [], capacidad: [] };
+export interface AgendaRows extends ActivityRows { asesorias: AsesoriaRow[]; eventos: EventoRow[]; seguimientos: SeguimientoRow[]; capacidad: CapacidadRow[] }
+export const EMPTY_AGENDA: AgendaRows = { asesorias: [], eventos: [], seguimientos: [], capacidad: [], ...EMPTY_ACTIVITIES };
 
 /** Con qué se derivan los nombres: los alumnos, las matrículas y el personal (las listas salen de la base, cada una con su gancho). */
-export interface AgendaLists { students: Pick<Student, 'id' | 'name'>[]; enrollments: Enrollment[]; staff: Pick<Staff, 'id' | 'names' | 'lastNameP'>[] }
+export interface AgendaLists extends ActivityLists { students: Pick<Student, 'id' | 'name'>[]; enrollments: Enrollment[] }
 
-export interface AgendaState { schedules: Schedule[]; psyEvents: PsyEvent[]; trackings: Tracking[]; capacityConfig: CapacityConfig }
+export interface AgendaState { schedules: Schedule[]; psyEvents: PsyEvent[]; trackings: Tracking[]; capacityConfig: CapacityConfig; monthlySchedules: MonthlySchedule[] }
 
 // ------------------------------------------------------------------------------------------------------------------ Filas → modelo
 
@@ -82,17 +83,21 @@ export function agendaFromRows(rows: AgendaRows, lists: AgendaLists): AgendaStat
     id: r.id, studentId: r.alumno_id, scheduleId: r.asesoria_id ?? undefined, date: r.fecha, status: r.estado, metrics: r.metricas ?? {}, observations: r.observaciones,
     checklist: (r.checklist ?? undefined) as Tracking['checklist'],
   }));
-  return { schedules, psyEvents, trackings, capacityConfig: capacityFromRows(rows.capacidad) };
+  return { schedules, psyEvents, trackings, capacityConfig: capacityFromRows(rows.capacidad), monthlySchedules: monthlyFromRows(rows, { staff: lists.staff, branches: lists.branches }) };
 }
 
 const byId = <T extends { id: string }>(a: T, b: T) => a.id.localeCompare(b.id);
 
-/** Mezcla las filas que acaban de guardarse (o de leerse de nuevo) con las que ya había: la más nueva de cada código gana. */
+/**
+ * Mezcla las filas que acaban de guardarse (o de leerse de nuevo) con las que ya había: la más nueva de cada código gana. Solo para lo que no se borra (asesorías, historial,
+ * seguimientos y cupos); los cronogramas, que sí pueden quitarse, se reemplazan completos con `replaceCronogramas` (`activitiesDb.ts`).
+ */
 export function mergeAgendaRows(current: AgendaRows, fresh: Partial<AgendaRows>): AgendaRows {
   const merge = <T extends { id: string }>(a: T[], b: T[] | undefined) => (b && b.length > 0 ? [...new Map([...a, ...b].map(r => [r.id, r])).values()].sort(byId) : a);
   return {
     asesorias: merge(current.asesorias, fresh.asesorias), eventos: merge(current.eventos, fresh.eventos), seguimientos: merge(current.seguimientos, fresh.seguimientos),
     capacidad: fresh.capacidad ?? current.capacidad,
+    cronogramas: current.cronogramas, actividades: current.actividades, inscripciones: current.inscripciones,
   };
 }
 

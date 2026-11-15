@@ -7,7 +7,8 @@
  * Lo que la agenda cambia dentro de una operación del dinero (la primera asesoría al matricular, las cancelaciones al caer o trasladarse) viaja en la clave
  * `agenda` de esa misma operación (`useMoney`): se guarda todo o nada, y aquí solo se vuelve a leer lo tocado (`refreshAgenda`).
  */
-import type { CapacityChanges, AgendaRows } from '../utils/agendaDb';
+import type { ActivityRows } from '../utils/activitiesDb';
+import type { CapacityChanges, AgendaRows, EventoRow } from '../utils/agendaDb';
 import type { OpResult, RepoResult } from './orgDirectory';
 
 /** Lo que viaja a la base: filas nuevas (completas, con `_nueva`) o con lo que cambió, y los eventos del historial. Los códigos son borradores. */
@@ -19,6 +20,20 @@ export interface AgendaPayload {
 
 export interface AgendaApplied { codes: Record<string, string>; fresh: Partial<AgendaRows> }
 
+/** Lo que viaja para cambiar cronogramas y actividades (migración 0023): filas nuevas completas (`_nueva`) o con lo que cambió, y los eventos del historial. */
+export interface ActivitiesPayload {
+  cronogramas?: Record<string, unknown>[];
+  actividades?: Record<string, unknown>[];
+  quitar_actividades?: string[];
+  inscripciones?: Record<string, unknown>[];
+  quitar_inscripciones?: Record<string, unknown>[];
+  eventos?: Record<string, unknown>[];
+}
+
+/** Lo que se vuelve a leer de unos cronogramas: ellos, sus actividades, sus inscritos y el historial de sus actividades. */
+export interface ActivitiesFresh extends ActivityRows { eventos: EventoRow[] }
+export interface ActivitiesApplied { codes: Record<string, string>; touched: string[]; fresh: ActivitiesFresh }
+
 export interface AgendaRepository {
   loadAll(): Promise<RepoResult<AgendaRows>>;
   /** Aplica una acción de la agenda y devuelve «borrador → código real». */
@@ -26,6 +41,10 @@ export interface AgendaRepository {
   /** Vuelve a leer las asesorías (con su historial y su seguimiento) de esos códigos reales. */
   loadTouched(scheduleIds: string[], trackingIds?: string[]): Promise<RepoResult<Partial<AgendaRows>>>;
   saveCapacity(changes: CapacityChanges): Promise<RepoResult<null>>;
+  /** Aplica una acción de las actividades (migración 0023) y devuelve «borrador → código real». */
+  applyActivities(action: string, payload: ActivitiesPayload): Promise<RepoResult<{ codes: Record<string, string> }>>;
+  /** Vuelve a leer esos cronogramas completos (con sus actividades, inscritos e historial). Los que ya no existen no vuelven. */
+  loadActivitiesTouched(cronogramaIds: string[]): Promise<RepoResult<ActivitiesFresh>>;
 }
 
 const fail = (error: string): OpResult<never> => ({ ok: false, error });
@@ -69,4 +88,29 @@ export async function applyCapacity(repo: AgendaRepository, changes: CapacityCha
   if (changes.guardar.length === 0 && changes.quitar.length === 0) return { ok: true };
   const saved = await repo.saveCapacity(changes);
   return saved.ok ? { ok: true } : fail(saved.error ?? 'No se pudo guardar el cupo.');
+}
+
+/** Vuelve a leer unos cronogramas (con todo lo suyo). Si la lectura falla, la operación ya se guardó: se avisa. */
+export async function refreshActivities(repo: AgendaRepository, cronogramaIds: string[]): Promise<OpResult<ActivitiesFresh>> {
+  const empty: ActivitiesFresh = { cronogramas: [], actividades: [], inscripciones: [], eventos: [] };
+  if (cronogramaIds.length === 0) return { ok: true, value: empty };
+  const fresh = await repo.loadActivitiesTouched(cronogramaIds);
+  return fresh.ok && fresh.data ? { ok: true, value: fresh.data } : fail('Se guardó, pero no se pudo volver a leer. Actualice la pantalla para ver lo que quedó.');
+}
+
+/**
+ * Aplica una acción de las actividades (crear, editar o eliminar un cronograma, asignar el responsable, inscribir, retirar la inscripción, registrar la asistencia):
+ * todo o nada, con la función del registro de esa acción y las reglas de la base. `touched` son los cronogramas que la acción toca (con su código real o de borrador):
+ * después de guardar se vuelven a leer completos. Sin nada que guardar no llama a la base.
+ */
+export async function applyActivities(repo: AgendaRepository, action: string, payload: ActivitiesPayload, touched: string[]): Promise<OpResult<ActivitiesApplied>> {
+  const hasChanges = Object.values(payload).some(v => Array.isArray(v) && v.length > 0);
+  if (!hasChanges) return { ok: true, value: { codes: {}, touched: [], fresh: { cronogramas: [], actividades: [], inscripciones: [], eventos: [] } } };
+  const saved = await repo.applyActivities(action, payload);
+  if (!saved.ok) return fail(saved.error ?? 'No se pudo guardar.');
+  const codes = saved.data?.codes ?? {};
+  const ids = realCodes(touched, codes);
+  const fresh = await refreshActivities(repo, ids);
+  if (!fresh.ok || !fresh.value) return fail(fresh.error ?? 'Se guardó, pero no se pudo volver a leer.');
+  return { ok: true, value: { codes, touched: ids, fresh: fresh.value } };
 }

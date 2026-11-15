@@ -1,9 +1,10 @@
 /**
  * Repositorio de la agenda de Psicopedagogía sobre Supabase (tablas `asesorias`, `psy_eventos`, `seguimientos` y `capacidad_asesorias`, y las funciones de la
- * migración 0022). Solo traduce: filas ↔ modelo y errores de la base ↔ mensajes claros. Las reglas viven en `utils/schedule.ts` y compañía; la seguridad no
+ * migración 0022; `cronogramas`, `actividades` y `actividad_inscripciones`, y la función de la migración 0023). Solo traduce: filas ↔ modelo y errores de la base ↔ mensajes claros. Las reglas viven en `utils/schedule.ts` y compañía; la seguridad no
  * está aquí: la deciden las políticas y las funciones de la base según la cuenta que inició sesión (quién ve y cambia la agenda de cada sede).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ActividadRow, CronogramaRow, InscripcionRow } from '../utils/activitiesDb';
 import { agendaErrorMessage, type AgendaRows, type AsesoriaRow, type CapacidadRow, type EventoRow, type SeguimientoRow } from '../utils/agendaDb';
 import type { AgendaRepository } from './agenda';
 import type { RepoResult } from './orgDirectory';
@@ -38,13 +39,20 @@ async function fetchIn<T>(client: SupabaseClient, table: string, column: string,
 export function createSupabaseAgendaRepository(client: SupabaseClient): AgendaRepository {
   return {
     async loadAll() {
-      const [a, e, s, c] = await Promise.all([
+      const [a, e, s, c, cr, ac, ins] = await Promise.all([
         fetchAll<AsesoriaRow>(client, 'asesorias', 'id'), fetchAll<EventoRow>(client, 'psy_eventos', 'id'), fetchAll<SeguimientoRow>(client, 'seguimientos', 'id'),
         client.from('capacidad_asesorias').select('*'),
+        fetchAll<CronogramaRow>(client, 'cronogramas', 'id'), fetchAll<ActividadRow>(client, 'actividades', 'id'), fetchAll<InscripcionRow>(client, 'actividad_inscripciones', 'actividad_id'),
       ]);
-      const error = a.error ?? e.error ?? s.error ?? c.error;
+      const error = a.error ?? e.error ?? s.error ?? c.error ?? cr.error ?? ac.error ?? ins.error;
       if (error) return failure(error);
-      return { ok: true, data: { asesorias: a.data as AsesoriaRow[], eventos: e.data as EventoRow[], seguimientos: s.data as SeguimientoRow[], capacidad: (c.data ?? []) as CapacidadRow[] } satisfies AgendaRows };
+      return {
+        ok: true,
+        data: {
+          asesorias: a.data as AsesoriaRow[], eventos: e.data as EventoRow[], seguimientos: s.data as SeguimientoRow[], capacidad: (c.data ?? []) as CapacidadRow[],
+          cronogramas: cr.data as CronogramaRow[], actividades: ac.data as ActividadRow[], inscripciones: ins.data as InscripcionRow[],
+        } satisfies AgendaRows,
+      };
     },
 
     async apply(action, payload) {
@@ -67,6 +75,30 @@ export function createSupabaseAgendaRepository(client: SupabaseClient): AgendaRe
     async saveCapacity(changes) {
       const { error } = await client.rpc('guardar_capacidad', { p_cambios: changes });
       return error ? failure(error) : { ok: true, data: null };
+    },
+
+    async applyActivities(action, payload) {
+      const { data, error } = await client.rpc('aplicar_cambios_actividades', { p_accion: action, p: payload });
+      if (error) return failure(error);
+      const codes = (data as { codigos?: Record<string, string> } | null)?.codigos ?? {};
+      return { ok: true, data: { codes } };
+    },
+
+    async loadActivitiesTouched(cronogramaIds) {
+      const [cr, ac, ev] = await Promise.all([
+        fetchIn<CronogramaRow>(client, 'cronogramas', 'id', cronogramaIds), fetchIn<ActividadRow>(client, 'actividades', 'cronograma_id', cronogramaIds),
+        Promise.all(cronogramaIds.map(id => client.from('psy_eventos').select('*').eq('tema', 'actividad').like('ref_id', `${id}:%`))),
+      ]);
+      const evError = ev.find(x => x.error)?.error ?? null;
+      const error = cr.error ?? ac.error ?? evError;
+      if (error) return failure(error);
+      const activityIds = (ac.data as ActividadRow[]).map(a => a.id);
+      const ins = await fetchIn<InscripcionRow>(client, 'actividad_inscripciones', 'actividad_id', activityIds);
+      if (ins.error) return failure(ins.error);
+      return {
+        ok: true,
+        data: { cronogramas: cr.data as CronogramaRow[], actividades: ac.data as ActividadRow[], inscripciones: ins.data as InscripcionRow[], eventos: ev.flatMap(x => (x.data ?? []) as EventoRow[]) },
+      };
     },
   };
 }

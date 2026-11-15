@@ -42,11 +42,12 @@ export const STAFF_CODE_KINDS = {
 export type StaffCodeKind = keyof typeof STAFF_CODE_KINDS;
 
 /**
- * Los códigos de la agenda de Psicopedagogía que asigna la base (migración 0022): asesoría (`SES-NNN`), evento del historial (`EVT-NNNN`) y seguimiento
- * (`TRK-NNN`). Viajan dentro de `aplicar_cambios_agenda` o de la clave `agenda` de una operación del dinero; la base los rechaza si no son borradores.
+ * Los códigos de la agenda de Psicopedagogía que asigna la base (migraciones 0022 y 0023): asesoría (`SES-NNN`), evento del historial (`EVT-NNNN`), seguimiento
+ * (`TRK-NNN`), cronograma mensual (`CRO-NNN`) y actividad especial (`ACT-NNN`). Viajan dentro de `aplicar_cambios_agenda`, de `aplicar_cambios_actividades` o de la
+ * clave `agenda` de una operación del dinero; la base los rechaza si no son borradores.
  */
 export const AGENDA_CODE_KINDS = {
-  SES: { year: false, pad: 3 }, EVT: { year: false, pad: 4 }, TRK: { year: false, pad: 3 },
+  SES: { year: false, pad: 3 }, EVT: { year: false, pad: 4 }, TRK: { year: false, pad: 3 }, CRO: { year: false, pad: 3 }, ACT: { year: false, pad: 3 },
 } as const;
 export type AgendaCodeKind = keyof typeof AGENDA_CODE_KINDS;
 
