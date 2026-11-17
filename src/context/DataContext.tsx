@@ -11,7 +11,8 @@ import { staffDisplayName } from '../utils/staffAccess';
 import { linesOf, type BuiltPayroll, type PayrollContext } from '../utils/payrollRun';
 import { type LineCalc } from '../utils/payrollEngine';
 import { canRemoveEnrollment, validateAttendance, validateResponsible } from '../utils/psyActivities';
-import { DEFAULT_PSY_POLICY, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
+import type { PsyReminder } from '../utils/psyReminders';
+import type { PsyPolicyVersion } from '../utils/psyRemindersDb';
 import { applyDropToPlan, previewDrop, summarizeDrop, validateDropRequest, validateDropResolution, type DropInput } from '../utils/enrollmentDrop';
 import { applyReversalToPlan, reversalTargets, validateReversal, type ReversalInput } from '../utils/paymentReversal';
 import { buildEnrollmentPatch, currentEditValues, diffEnrollmentEdit, validateEnrollmentEdit, type EnrollmentEditValues } from '../utils/enrollmentEdit';
@@ -1386,10 +1387,14 @@ interface DataContextType {
   unenrollFromActivity: (flatId: string, studentId: string, meta: Partial<ChangeMeta>) => Promise<StockResult>;
   /** Registra la asistencia de uno o varios inscritos en UNA operación (`null` quita la marca; pide una nota). */
   markActivityAttendance: (flatId: string, studentId: string | string[], status: 'Asistió' | 'Faltó' | null, note?: string) => Promise<StockResult>;
+  /** La política de recordatorios vigente (una para todo el grupo) y todas sus versiones, la más alta primero. */
   psyReminderPolicy: PsyReminderPolicy;
-  savePsyReminderPolicy: (policy: PsyReminderPolicy) => StockResult;
+  psyReminderPolicies: PsyPolicyVersion[];
+  /** Guarda la política (una versión nueva si cambió); la base vuelve a comprobar los rangos. */
+  savePsyReminderPolicy: (policy: PsyReminderPolicy) => Promise<StockResult>;
   psyReminderLogs: PsyReminderLog[];
-  logPsyReminder: (reminder: Pick<PsyReminder, 'key' | 'kind' | 'refId' | 'studentId' | 'offset'>, channel: PsyReminderLog['channel'], result: PsyReminderLog['result'], note: string) => StockResult;
+  /** Registra un recordatorio enviado u omitido (quién y cuándo los pone la base; un mismo recordatorio no se registra dos veces). */
+  logPsyReminder: (reminder: Pick<PsyReminder, 'key' | 'kind' | 'refId' | 'studentId' | 'offset'>, channel: PsyReminderLog['channel'], result: PsyReminderLog['result'], note: string) => Promise<StockResult>;
   /** Estado de la verificación frente a una primera asesoría (solo la primera asesoría vigente de una matrícula). */
   gateOfSchedule: (schedule: Pick<Schedule, 'id' | 'isFirst' | 'enrollmentId'>) => FirstSessionGate;
   /** Motivo por el que no se puede registrar la asistencia o la sesión de una asesoría (null = se puede). */
@@ -1837,28 +1842,18 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return activityResult(await agenda.applyActivity('asistencia', change.payload, [change.cronogramaId]));
   };
 
-  // ---- Recordatorios de Psicopedagogía (el sistema prepara el texto; aquí queda el registro de lo enviado u omitido)
-  const [psyReminderPolicy, setPsyReminderPolicy] = useState<PsyReminderPolicy>(DEFAULT_PSY_POLICY);
-  const [psyReminderLogs, setPsyReminderLogs] = useState<PsyReminderLog[]>([]);
-
-  const savePsyReminderPolicy: DataContextType['savePsyReminderPolicy'] = policy => {
+  // ---- Recordatorios de Psicopedagogía (el sistema prepara el texto; aquí queda el registro de lo enviado u omitido). La política (una para todo el grupo, por versiones)
+  // y los recordatorios registrados viven en la base de datos (`useAgenda`): la base vuelve a comprobar lo que se registra y deja quién y cuándo.
+  const savePsyReminderPolicy: DataContextType['savePsyReminderPolicy'] = async policy => {
     if (!can(PERM.psiConfig)) return { ok: false, error: 'Su rol no puede configurar los recordatorios de Psicopedagogía.' };
-    const problems = validatePsyPolicy({ sessionBefore: policy.sessionBefore.join(','), activityBefore: policy.activityBefore.join(','), validityBefore: policy.validityBefore.join(',') });
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    setPsyReminderPolicy(policy);
-    return { ok: true };
+    const res = await agenda.savePsyPolicy(policy);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
-  const logPsyReminder: DataContextType['logPsyReminder'] = (reminder, channel, result, note) => {
+  const logPsyReminder: DataContextType['logPsyReminder'] = async (reminder, channel, result, note) => {
     if (!can(PERM.psiRemind)) return { ok: false, error: 'Su rol no puede registrar recordatorios.' };
-    const problems = validatePsyReminderLog(reminder, channel, result, note, psyReminderLogs);
-    if (problems.length > 0) return { ok: false, error: problems[0] };
-    const entry: PsyReminderLog = {
-      id: nextSequentialId('PRL', psyReminderLogs.map(l => l.id)), key: reminder.key, kind: reminder.kind, refId: reminder.refId, studentId: reminder.studentId,
-      offset: reminder.offset, at: new Date().toISOString(), by: currentUser.name, channel, result, note: note.trim() || undefined,
-    };
-    setPsyReminderLogs(prev => [entry, ...prev]);
-    return { ok: true };
+    const res = await agenda.logPsyReminder(reminder, channel, result, note);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
   const setCapacityConfig: DataContextType['setCapacityConfig'] = async config => {
@@ -2000,7 +1995,8 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const { closures: cashClosures, pettyMovements: pettyCashMovements, pettyFunds } = cashBoxes;
   // Asesorías, historial, seguimiento y cupos: de la base de datos. El alumno, su programa y el responsable salen de las listas al mostrar (nunca se guardan).
   const agenda = useAgenda(agendaData, { students, enrollments, staff, branches });
-  const { schedules, trackings, capacityConfig, monthlySchedules, psyEvents } = agenda;
+  const { schedules, trackings, capacityConfig, monthlySchedules, psyEvents, psyReminderPolicy, psyReminderLogs } = agenda;
+  const psyReminderPolicies = agenda.psyPolicies;
 
   const updateEnrollmentVerification: DataContextType['updateEnrollmentVerification'] = async (enrollmentId, data, deductions = []) => {
     if (!can(PERM.deliverMaterials)) return { ok: false, error: 'Su rol no puede registrar la entrega de materiales.' };
@@ -3242,6 +3238,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       unenrollFromActivity,
       markActivityAttendance,
       psyReminderPolicy,
+      psyReminderPolicies,
       savePsyReminderPolicy,
       psyReminderLogs,
       logPsyReminder,

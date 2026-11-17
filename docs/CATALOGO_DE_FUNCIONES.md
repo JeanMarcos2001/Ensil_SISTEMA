@@ -437,7 +437,7 @@ Cómo leerlo:
 
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
-| **Ver la auditoría** · menú «Auditoría»<br><code>sis-auditoria:view</code> | ver | — | — | Auditoría, Asesoría → — | — |
+| **Ver la auditoría** · menú «Auditoría»<br><code>sis-auditoria:view</code> | ver | — | — | Auditoría, Asesoría, Recordatorio de Psicopedagogía → — | — |
 
 ### Solicitudes pendientes `sis-solicitudes`
 

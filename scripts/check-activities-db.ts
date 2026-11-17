@@ -182,10 +182,13 @@ const draft = (over: Partial<Omit<MonthlySchedule, 'id'>> = {}): Omit<MonthlySch
 function memoryRepo(opts: { fail?: string; failRead?: boolean; codes?: Record<string, string> } = {}) {
   const calls: { fn: string; args: unknown[] }[] = [];
   const repo: AgendaRepository = {
-    async loadAll() { return { ok: true, data: { asesorias: [], eventos: [], seguimientos: [], capacidad: [], ...EMPTY_ACTIVITIES } }; },
+    async loadAll() { return { ok: true, data: { asesorias: [], eventos: [], seguimientos: [], capacidad: [], ...EMPTY_ACTIVITIES, psyPoliticas: [], psyRecordatorios: [] } }; },
     async apply() { return { ok: true, data: { codes: {} } }; },
     async loadTouched() { return { ok: true, data: {} }; },
     async saveCapacity() { return { ok: true, data: null }; },
+    async savePsyPolicy() { return { ok: true, data: 1 }; },
+    async addPsyReminder() { return { ok: true, data: 'PRL-001' }; },
+    async loadPsyReminders() { return { ok: true, data: { psyPoliticas: [], psyRecordatorios: [] } }; },
     async applyActivities(action, payload) { calls.push({ fn: 'applyActivities', args: [action, payload] }); return opts.fail ? { ok: false, error: opts.fail } : { ok: true, data: { codes: opts.codes ?? {} } }; },
     async loadActivitiesTouched(ids) {
       calls.push({ fn: 'loadActivitiesTouched', args: [ids] });

@@ -9,6 +9,9 @@
  */
 import type { ActivityRows } from '../utils/activitiesDb';
 import type { CapacityChanges, AgendaRows, EventoRow } from '../utils/agendaDb';
+import { policyText, validatePsyPolicy, validatePsyReminderLog, type PsyReminder } from '../utils/psyReminders';
+import type { PsyReminderRows } from '../utils/psyRemindersDb';
+import type { PsyReminderLog, PsyReminderPolicy } from '../context/DataContext';
 import type { OpResult, RepoResult } from './orgDirectory';
 
 /** Lo que viaja a la base: filas nuevas (completas, con `_nueva`) o con lo que cambió, y los eventos del historial. Los códigos son borradores. */
@@ -19,6 +22,9 @@ export interface AgendaPayload {
 }
 
 export interface AgendaApplied { codes: Record<string, string>; fresh: Partial<AgendaRows> }
+
+/** Un recordatorio de Psicopedagogía tal como lo guarda la base: la sede, quién y cuándo los pone ella. */
+export interface PsyReminderRequest { kind: PsyReminderLog['kind']; refId: string; studentId: string; offset: number; channel: PsyReminderLog['channel']; result: PsyReminderLog['result']; note: string }
 
 /** Lo que viaja para cambiar cronogramas y actividades (migración 0023): filas nuevas completas (`_nueva`) o con lo que cambió, y los eventos del historial. */
 export interface ActivitiesPayload {
@@ -45,6 +51,12 @@ export interface AgendaRepository {
   applyActivities(action: string, payload: ActivitiesPayload): Promise<RepoResult<{ codes: Record<string, string> }>>;
   /** Vuelve a leer esos cronogramas completos (con sus actividades, inscritos e historial). Los que ya no existen no vuelven. */
   loadActivitiesTouched(cronogramaIds: string[]): Promise<RepoResult<ActivitiesFresh>>;
+  /** Guarda la política de recordatorios de Psicopedagogía (una versión nueva si cambió) y devuelve el número de la vigente. */
+  savePsyPolicy(policy: PsyReminderPolicy): Promise<RepoResult<number>>;
+  /** Registra un recordatorio de Psicopedagogía y devuelve su código. */
+  addPsyReminder(r: PsyReminderRequest): Promise<RepoResult<string>>;
+  /** Vuelve a leer las versiones de la política y los recordatorios registrados (son pocas filas). */
+  loadPsyReminders(): Promise<RepoResult<PsyReminderRows>>;
 }
 
 const fail = (error: string): OpResult<never> => ({ ok: false, error });
@@ -113,4 +125,31 @@ export async function applyActivities(repo: AgendaRepository, action: string, pa
   const fresh = await refreshActivities(repo, ids);
   if (!fresh.ok || !fresh.value) return fail(fresh.error ?? 'Se guardó, pero no se pudo volver a leer.');
   return { ok: true, value: { codes, touched: ids, fresh: fresh.value } };
+}
+
+// ------------------------------------------------------------------------------------------------------------------ Recordatorios de Psicopedagogía
+
+/** Guarda la política de recordatorios del grupo (días antes de las asesorías, de las actividades y del fin de la vigencia). Una versión nueva solo si cambió. */
+export async function savePsyPolicyVersion(repo: AgendaRepository, policy: PsyReminderPolicy): Promise<OpResult> {
+  const problems = validatePsyPolicy(policyText(policy));
+  if (problems.length > 0) return fail(problems[0]!);
+  const res = await repo.savePsyPolicy(policy);
+  return res.ok ? { ok: true } : fail(res.error ?? 'No se pudo guardar la política de recordatorios.');
+}
+
+/** Registra que un recordatorio se envió o se omitió (quién y cuándo los pone la base). Un mismo recordatorio no se registra dos veces. */
+export async function logPsyReminderEntry(
+  repo: AgendaRepository, logs: Pick<PsyReminderLog, 'key'>[], reminder: Pick<PsyReminder, 'key' | 'kind' | 'refId' | 'studentId' | 'offset'>,
+  channel: PsyReminderLog['channel'], result: PsyReminderLog['result'], note: string,
+): Promise<OpResult> {
+  const problems = validatePsyReminderLog(reminder, channel, result, note, logs);
+  if (problems.length > 0) return fail(problems[0]!);
+  const res = await repo.addPsyReminder({ kind: reminder.kind, refId: reminder.refId, studentId: reminder.studentId, offset: reminder.offset, channel, result, note: note.trim() });
+  return res.ok ? { ok: true } : fail(res.error ?? 'No se pudo registrar el recordatorio.');
+}
+
+/** Vuelve a leer la política y los recordatorios. Si la lectura falla, la operación ya se guardó: se avisa. */
+export async function refreshPsyReminders(repo: AgendaRepository): Promise<OpResult<PsyReminderRows>> {
+  const res = await repo.loadPsyReminders();
+  return res.ok && res.data ? { ok: true, value: res.data } : fail('Se guardó, pero no se pudo volver a leer. Actualice la pantalla para ver lo que quedó.');
 }

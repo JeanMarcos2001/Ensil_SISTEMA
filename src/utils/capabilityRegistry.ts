@@ -566,7 +566,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
 
   // ----------------------------------------------------------------------------------------------------------- Sistema
   f('sis-auditoria', 'Auditoría', 'mod-sistema', [
-    { action: 'view', label: 'Ver la auditoría', kind: 'ver', menu: menu('sistema', 'Auditoría'), reads: ['audit', 'schedule'], note: 'Los sueldos del detalle solo se muestran con «Ver remuneraciones».' },
+    { action: 'view', label: 'Ver la auditoría', kind: 'ver', menu: menu('sistema', 'Auditoría'), reads: ['audit', 'schedule', 'psyReminder'], note: 'Los sueldos del detalle solo se muestran con «Ver remuneraciones».' },
   ]),
   f('sis-solicitudes', 'Solicitudes pendientes', 'mod-sistema', [
     { action: 'view', label: 'Ver solicitudes pendientes', kind: 'ver', menu: menu('sistema', 'Solicitudes pendientes'), reads: ['enrollmentRequest', 'enrollment'], note: 'Resolver cada solicitud pide la función «Aprobar» del tipo correspondiente.' },

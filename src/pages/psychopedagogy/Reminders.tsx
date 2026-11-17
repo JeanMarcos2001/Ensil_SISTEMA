@@ -30,6 +30,8 @@ export function Reminders() {
   const [branchFilter, setBranchFilter] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [skipping, setSkipping] = useState<PsyReminder | null>(null);
+  // Mientras la base guarda, los botones quedan apagados (una operación a la vez)
+  const [busy, setBusy] = useState(false);
   const mayRemind = can(PERM.psiRemind);
 
   const all = useMemo(() => {
@@ -44,8 +46,11 @@ export function Reminders() {
   const reminders = all.filter(r => (!kind || r.kind === kind) && (!branchFilter || r.branchName === branchName(branchFilter)));
   const count = (k: PsyReminderKind) => all.filter(r => r.kind === k).length;
 
-  const send = (r: PsyReminder, channel: 'WhatsApp' | 'Llamada') => {
-    const res = logPsyReminder(r, channel, 'Enviado', '');
+  const send = async (r: PsyReminder, channel: 'WhatsApp' | 'Llamada') => {
+    if (busy) return;
+    setBusy(true);
+    const res = await logPsyReminder(r, channel, 'Enviado', '');
+    setBusy(false);
     setNote(res.ok ? `Registrado: ${KIND_LABEL[r.kind].toLowerCase()} de ${r.studentName}.` : res.error ?? 'No se pudo registrar.');
   };
   const copy = async (r: PsyReminder) => {
@@ -127,9 +132,9 @@ export function Reminders() {
                           ? <a href={r.whatsappUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 h-8 px-3 rounded-xl text-xs font-medium bg-surface border border-border-soft hover:bg-surface-muted"><MessageCircle size={14} /> WhatsApp</a>
                           : <span className="inline-flex items-center h-8 px-2 text-xs text-text-muted" title="El titular no tiene un celular válido registrado">Sin celular</span>}
                         <Button variant="secondary" size="sm" className="gap-1" onClick={() => copy(r)}><Copy size={14} /> Copiar</Button>
-                        <Button variant="primary" size="sm" disabled={!mayRemind} onClick={() => send(r, 'WhatsApp')} title="Registra que el mensaje se envió por WhatsApp">Marcar enviado</Button>
-                        <Button variant="ghost" size="sm" className="gap-1" disabled={!mayRemind} onClick={() => send(r, 'Llamada')} title="Registra una llamada"><Phone size={14} /></Button>
-                        <Button variant="ghost" size="sm" disabled={!mayRemind} onClick={() => setSkipping(r)}>Omitir</Button>
+                        <Button variant="primary" size="sm" disabled={!mayRemind || busy} onClick={() => send(r, 'WhatsApp')} title="Registra que el mensaje se envió por WhatsApp">Marcar enviado</Button>
+                        <Button variant="ghost" size="sm" className="gap-1" disabled={!mayRemind || busy} onClick={() => send(r, 'Llamada')} title="Registra una llamada"><Phone size={14} /></Button>
+                        <Button variant="ghost" size="sm" disabled={!mayRemind || busy} onClick={() => setSkipping(r)}>Omitir</Button>
                       </div>
                     </td>
                   </tr>
@@ -174,9 +179,9 @@ export function Reminders() {
         size="md"
         detailLabel="Motivo"
         detailPlaceholder="Ej: ya confirmó por teléfono, el alumno se retiró..."
-        onSubmit={({ detail }) => {
+        onSubmit={async ({ detail }) => {
           if (!skipping) return;
-          const res = logPsyReminder(skipping, 'Otro', 'Omitido', detail);
+          const res = await logPsyReminder(skipping, 'Otro', 'Omitido', detail);
           if (res.ok) setNote(`Omitido: ${KIND_LABEL[skipping.kind].toLowerCase()} de ${skipping.studentName}.`);
           return res.ok ? null : res.error ?? 'No se pudo omitir.';
         }}

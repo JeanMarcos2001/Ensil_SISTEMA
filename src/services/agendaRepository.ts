@@ -1,11 +1,12 @@
 /**
  * Repositorio de la agenda de Psicopedagogía sobre Supabase (tablas `asesorias`, `psy_eventos`, `seguimientos` y `capacidad_asesorias`, y las funciones de la
- * migración 0022; `cronogramas`, `actividades` y `actividad_inscripciones`, y la función de la migración 0023). Solo traduce: filas ↔ modelo y errores de la base ↔ mensajes claros. Las reglas viven en `utils/schedule.ts` y compañía; la seguridad no
+ * migración 0022; `cronogramas`, `actividades` y `actividad_inscripciones`, y la función de la migración 0023; `psy_recordatorio_politicas` y `psy_recordatorios`, y las funciones de la migración 0024). Solo traduce: filas ↔ modelo y errores de la base ↔ mensajes claros. Las reglas viven en `utils/schedule.ts` y compañía; la seguridad no
  * está aquí: la deciden las políticas y las funciones de la base según la cuenta que inició sesión (quién ve y cambia la agenda de cada sede).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ActividadRow, CronogramaRow, InscripcionRow } from '../utils/activitiesDb';
 import { agendaErrorMessage, type AgendaRows, type AsesoriaRow, type CapacidadRow, type EventoRow, type SeguimientoRow } from '../utils/agendaDb';
+import { psyRemindersErrorMessage, type PsyPoliticaRow, type PsyRecordatorioRow } from '../utils/psyRemindersDb';
 import type { AgendaRepository } from './agenda';
 import type { RepoResult } from './orgDirectory';
 
@@ -39,18 +40,20 @@ async function fetchIn<T>(client: SupabaseClient, table: string, column: string,
 export function createSupabaseAgendaRepository(client: SupabaseClient): AgendaRepository {
   return {
     async loadAll() {
-      const [a, e, s, c, cr, ac, ins] = await Promise.all([
+      const [a, e, s, c, cr, ac, ins, pol, rec] = await Promise.all([
         fetchAll<AsesoriaRow>(client, 'asesorias', 'id'), fetchAll<EventoRow>(client, 'psy_eventos', 'id'), fetchAll<SeguimientoRow>(client, 'seguimientos', 'id'),
         client.from('capacidad_asesorias').select('*'),
         fetchAll<CronogramaRow>(client, 'cronogramas', 'id'), fetchAll<ActividadRow>(client, 'actividades', 'id'), fetchAll<InscripcionRow>(client, 'actividad_inscripciones', 'actividad_id'),
+        fetchAll<PsyPoliticaRow>(client, 'psy_recordatorio_politicas', 'version'), fetchAll<PsyRecordatorioRow>(client, 'psy_recordatorios', 'id'),
       ]);
-      const error = a.error ?? e.error ?? s.error ?? c.error ?? cr.error ?? ac.error ?? ins.error;
+      const error = a.error ?? e.error ?? s.error ?? c.error ?? cr.error ?? ac.error ?? ins.error ?? pol.error ?? rec.error;
       if (error) return failure(error);
       return {
         ok: true,
         data: {
           asesorias: a.data as AsesoriaRow[], eventos: e.data as EventoRow[], seguimientos: s.data as SeguimientoRow[], capacidad: (c.data ?? []) as CapacidadRow[],
           cronogramas: cr.data as CronogramaRow[], actividades: ac.data as ActividadRow[], inscripciones: ins.data as InscripcionRow[],
+          psyPoliticas: pol.data as PsyPoliticaRow[], psyRecordatorios: rec.data as PsyRecordatorioRow[],
         } satisfies AgendaRows,
       };
     },
@@ -75,6 +78,27 @@ export function createSupabaseAgendaRepository(client: SupabaseClient): AgendaRe
     async saveCapacity(changes) {
       const { error } = await client.rpc('guardar_capacidad', { p_cambios: changes });
       return error ? failure(error) : { ok: true, data: null };
+    },
+
+    async savePsyPolicy(policy) {
+      const { data, error } = await client.rpc('guardar_politica_recordatorios_psy', { p_asesorias: policy.sessionBefore, p_actividades: policy.activityBefore, p_vigencia: policy.validityBefore });
+      if (error) return { ok: false, error: psyRemindersErrorMessage(error) };
+      return typeof data === 'number' ? { ok: true, data } : { ok: false, error: 'La base no devolvió la respuesta esperada. Actualice la página e intente de nuevo.' };
+    },
+
+    async addPsyReminder(r) {
+      const { data, error } = await client.rpc('registrar_recordatorio_psy', {
+        p_tipo: r.kind, p_ref: r.refId, p_alumno: r.studentId, p_etapa: r.offset, p_canal: r.channel, p_resultado: r.result, p_nota: r.note || null,
+      });
+      if (error) return { ok: false, error: psyRemindersErrorMessage(error) };
+      return typeof data === 'string' && data !== '' ? { ok: true, data } : { ok: false, error: 'La base no devolvió la respuesta esperada. Actualice la página e intente de nuevo.' };
+    },
+
+    async loadPsyReminders() {
+      const [pol, rec] = await Promise.all([fetchAll<PsyPoliticaRow>(client, 'psy_recordatorio_politicas', 'version'), fetchAll<PsyRecordatorioRow>(client, 'psy_recordatorios', 'id')]);
+      const error = pol.error ?? rec.error;
+      if (error) return { ok: false, error: psyRemindersErrorMessage(error) };
+      return { ok: true, data: { psyPoliticas: pol.data as PsyPoliticaRow[], psyRecordatorios: rec.data as PsyRecordatorioRow[] } };
     },
 
     async applyActivities(action, payload) {

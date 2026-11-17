@@ -1,11 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { applyActivities, applyAgenda, applyCapacity, refreshActivities, refreshAgenda, type ActivitiesFresh, type ActivitiesPayload, type AgendaPayload } from '../services/agenda';
+import {
+  applyActivities, applyAgenda, applyCapacity, logPsyReminderEntry, refreshActivities, refreshAgenda, refreshPsyReminders, savePsyPolicyVersion,
+  type ActivitiesFresh, type ActivitiesPayload, type AgendaPayload,
+} from '../services/agenda';
 import { createSupabaseAgendaRepository } from '../services/agendaRepository';
 import type { OpResult } from '../services/orgDirectory';
 import { replaceCronogramas } from '../utils/activitiesDb';
 import { agendaFromRows, capacityChanges, mergeAgendaRows, type AgendaLists, type AgendaRows, type AgendaState } from '../utils/agendaDb';
-import type { CapacityConfig } from '../context/DataContext';
+import type { CapacityConfig, PsyReminderLog, PsyReminderPolicy } from '../context/DataContext';
+import type { PsyReminder } from '../utils/psyReminders';
 
 /**
  * La agenda de Psicopedagogía (asesorías, historial, seguimiento, cupos, cronogramas mensuales y actividades especiales) guardada en la base de datos: arranca con lo que
@@ -71,6 +75,27 @@ export function useAgenda(initial: AgendaRows, lists: AgendaLists) {
     return { ok: true };
   }, [repo, mergeActivities]);
 
+  /** Vuelve a leer la política de recordatorios y los recordatorios registrados (son pocas filas). Si la lectura falla, se queda lo que había: la operación ya se guardó. */
+  const refreshPsy = useCallback(async () => {
+    const res = await refreshPsyReminders(repo);
+    if (res.ok && res.value) merge(res.value);
+  }, [repo, merge]);
+
+  /** Guarda la política de recordatorios de Psicopedagogía (una para todo el grupo; una versión nueva si cambió). */
+  const savePsyPolicy = useCallback(async (policy: PsyReminderPolicy): Promise<OpResult> => {
+    const res = await savePsyPolicyVersion(repo, policy);
+    if (res.ok) await refreshPsy();
+    return res;
+  }, [repo, refreshPsy]);
+
+  /** Registra un recordatorio de Psicopedagogía enviado u omitido; valida contra lo último que se vio. */
+  const logPsyReminder = useCallback(
+    async (reminder: Pick<PsyReminder, 'key' | 'kind' | 'refId' | 'studentId' | 'offset'>, channel: PsyReminderLog['channel'], result: PsyReminderLog['result'], note: string): Promise<OpResult> => {
+      const res = await logPsyReminderEntry(repo, stateRef.current.psyReminderLogs, reminder, channel, result, note);
+      if (res.ok) await refreshPsy();
+      return res;
+    }, [repo, refreshPsy]);
+
   /** Guarda lo que cambió en los cupos y vuelve a leerlos. */
   const saveCapacity = useCallback(async (next: CapacityConfig): Promise<OpResult> => {
     const changes = capacityChanges(stateRef.current.capacityConfig, next);
@@ -81,5 +106,5 @@ export function useAgenda(initial: AgendaRows, lists: AgendaLists) {
     return { ok: true };
   }, [repo, merge]);
 
-  return { ...state, apply, applyActivity, refreshFor, refreshActivitiesFor, saveCapacity, current: () => stateRef.current };
+  return { ...state, apply, applyActivity, refreshFor, refreshActivitiesFor, saveCapacity, savePsyPolicy, logPsyReminder, current: () => stateRef.current };
 }

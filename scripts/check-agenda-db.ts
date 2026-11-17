@@ -57,7 +57,7 @@ const rows: AgendaRows = {
     { id: 'EVT-0002', en: '2026-11-13T16:00:00Z', por: 'Ana', tema: 'asesoria', ref_id: 'SES-002', alumno_id: 'ALU-001', sede_id: 'FIL-002', tipo: 'Cancelada', iniciador: 'Institución', motivo: 'Caída de la matrícula', detalle: null, desde: { date: '2026-11-21', time: '17:00', responsible: '' }, hasta: null },
   ],
   seguimientos: [{ id: 'TRK-001', alumno_id: 'ALU-001', asesoria_id: 'SES-001', sede_id: 'FIL-002', fecha: '2026-11-20', estado: 'Completada', metricas: { velocidad: 220 }, observaciones: 'Bien', checklist: null }],
-  cronogramas: [], actividades: [], inscripciones: [],
+  cronogramas: [], actividades: [], inscripciones: [], psyPoliticas: [], psyRecordatorios: [],
   capacidad: [
     { id: 'general', ambito: 'general', sede_id: null, fecha: null, hora: null, cupo: 8 }, { id: 'sede:FIL-002', ambito: 'sede', sede_id: 'FIL-002', fecha: null, hora: null, cupo: null },
     { id: 'exc:FIL-002:2026-11-20:16:00', ambito: 'excepcion', sede_id: 'FIL-002', fecha: '2026-11-20', hora: '16:00', cupo: 3 },
@@ -153,6 +153,9 @@ function memoryRepo(opts: { fail?: string; failRead?: boolean; codes?: Record<st
     async saveCapacity(changes) { calls.push({ fn: 'saveCapacity', args: [changes] }); return opts.fail ? { ok: false, error: opts.fail } : { ok: true, data: null }; },
     async applyActivities() { return { ok: true, data: { codes: {} } }; },
     async loadActivitiesTouched() { return { ok: true, data: { cronogramas: [], actividades: [], inscripciones: [], eventos: [] } }; },
+    async savePsyPolicy() { return { ok: true, data: 1 }; },
+    async addPsyReminder() { return { ok: true, data: 'PRL-001' }; },
+    async loadPsyReminders() { return { ok: true, data: { psyPoliticas: [], psyRecordatorios: [] } }; },
   };
   return { repo, calls };
 }
@@ -278,9 +281,9 @@ check('Las acciones de la agenda son asíncronas y devuelven { ok, error } (ya n
   /addSchedule: \(data: Omit<Schedule, 'id'>\) => Promise<StockResult/.test(ctxSrc) && /updateSchedule: \([^)]*\) => Promise<\{ ok: boolean; reason\?: string \}>/.test(ctxSrc) && /addTracking: \([^)]*\) => Promise<StockResult/.test(ctxSrc)
   && /updateTracking: \([^)]*\) => Promise<StockResult>/.test(ctxSrc) && /setCapacityConfig: \([^)]*\) => Promise<StockResult>/.test(ctxSrc)
   && !['addSchedule', 'addTracking', 'updateTracking', 'setCapacityConfig'].some(a => THROWS_ON_DENIAL.has(a)));
-check('El contexto ya no guarda en memoria las asesorías, el seguimiento, los cupos, los cronogramas ni las actividades (ni su historial), ni copia nombres en la agenda',
-  !/setSchedules|setTrackings|setCapacityConfig\] = useState|buildScheduleSeed|buildTrackingSeed|syncStudentName\(|syncCatalogLabels\(|relabelFrom|setMonthlySchedules|activityEvents|EVT-L-|logActivityRemovals|nextNumericId/.test(ctxSrc)
-  && /const \{ schedules, trackings, capacityConfig, monthlySchedules, psyEvents \} = agenda;/.test(ctxSrc));
+check('El contexto ya no guarda en memoria las asesorías, el seguimiento, los cupos, los cronogramas ni las actividades (ni su historial), ni la política y el registro de recordatorios, ni copia nombres en la agenda',
+  !/setSchedules|setTrackings|setCapacityConfig\] = useState|buildScheduleSeed|buildTrackingSeed|syncStudentName\(|syncCatalogLabels\(|relabelFrom|setMonthlySchedules|activityEvents|EVT-L-|logActivityRemovals|nextNumericId|setPsyReminderPolicy|setPsyReminderLogs|DEFAULT_PSY_POLICY/.test(ctxSrc)
+  && /const \{ schedules, trackings, capacityConfig, monthlySchedules, psyEvents, psyReminderPolicy, psyReminderLogs \} = agenda;/.test(ctxSrc));
 check('Reservar guarda con la función de la base (la base asigna el código y el responsable va por su id); reprogramar, cancelar y marcar la asistencia mandan solo lo que cambió y su evento',
   /agenda\.apply\('reservar', \{ asesorias: \[scheduleInsertRow\(created, responsibleId\)\], eventos: events\.map\(eventRow\) \}\)/.test(ctxSrc) && /agenda\.apply\(scheduleActionOf\(target, after\), \{ asesorias: \[change\], eventos: events\.map\(eventRow\) \}\)/.test(ctxSrc)
   && /buildScheduleEvents\(undefined, created, undefined, currentUser\.name, new Date\(\)\.toISOString\(\), newEventId\)/.test(ctxSrc));

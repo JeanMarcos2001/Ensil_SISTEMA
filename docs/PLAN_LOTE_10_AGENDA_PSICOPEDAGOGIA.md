@@ -52,7 +52,11 @@ Lo que la base vuelve a comprobar (las reglas siguen siendo funciones puras de `
 
 ## 10C — Recordatorios de Psicopedagogía (migración 0024)
 
-El mismo patrón que la cobranza (Lote 9C): la política **por versiones** (días antes de una asesoría, de una actividad y del fin de la vigencia) y los recordatorios registrados por sede, sin repetirse y con el código asignado por la base. El sistema sigue sin enviar mensajes: prepara el texto, abre WhatsApp y deja el registro.
+**Estado (2026-11-16): hecho y verificado en el código** (`tsc`, `vite build`, los 47 `check-*`; la migración 0024 probada contra una copia de la base con unos 90 casos y con la lista que arma la propia pantalla, y su «deshacer»). **La migración 0024 ya está aplicada a la base real (la pegó el usuario; verificada por SQL el 2026-11-16) y el código se subió a `main` después, porque la aplicación lee las tablas nuevas al iniciar sesión.** Falta probar en el navegador con la sesión del usuario (sin guardar nada hasta que él lo pida).
+- ✅ **Migración 0024** (`supabase/migrations/20261116100000_recordatorios_de_psicopedagogia.sql`, con su «deshacer» en `supabase/deshacer/`).
+- ✅ **Sistema:** `utils/psyRemindersDb.ts`, operaciones en `services/agenda.ts` y `services/agendaRepository.ts`, `useAgenda` (guarda y vuelve a leer política y recordatorios), el contexto sin política ni registro en memoria (las acciones son asíncronas), las pantallas de Recordatorios y de Configuración con `await` (y el historial de versiones), el registro de funciones (la auditoría lee los recordatorios) y `check-psy-reminders-db.ts`.
+- El mismo patrón que la cobranza (Lote 9C): la política **por versiones**, **una para todo el grupo** (días antes de una asesoría, de una actividad y del fin de la vigencia) y los recordatorios registrados por sede, **solo se agregan**, sin repetirse y con el código `PRL-NNN` asignado por la base. El sistema sigue sin enviar mensajes: prepara el texto, abre WhatsApp y deja el registro.
+- Lo que la base vigila: la función del registro de cada acción; rangos de la política con las mismas palabras que la pantalla; que la asesoría siga pendiente (y, si es primera, con la matrícula verificada), la actividad no haya pasado y el alumno siga inscrito sin asistencia, la matrícula siga activa; que la etapa sea de la política vigente; canal, resultado y motivo al omitir; sede alcanzable; y que un mismo recordatorio no se registre dos veces.
 
 ## Principios (los de siempre)
 

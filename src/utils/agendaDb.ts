@@ -7,13 +7,14 @@
  * (es una constancia). Lo que viaja a la base son **borradores de código** (`SES-~1~`, `EVT-~2~`, `TRK-~3~`): la base asigna los reales.
  */
 import type {
-  Assignment, CapacityConfig, CapacityOverride, ChangeInitiator, Enrollment, MonthlySchedule, PsyEvent, PsyEventType, Schedule, Staff, Student, Tracking,
+  Assignment, CapacityConfig, CapacityOverride, ChangeInitiator, Enrollment, MonthlySchedule, PsyEvent, PsyEventType, PsyReminderLog, PsyReminderPolicy, Schedule, Staff, Student, Tracking,
 } from '../context/DataContext';
 import { monthlyFromRows, type ActivityLists, type ActivityRows, EMPTY_ACTIVITIES } from './activitiesDb';
 import { draftId } from './draftIds';
 import { latestEnrollmentOf } from './identity';
 import { dbErrorMessage, type DbErrorLike } from './orgDirectory';
 import { isStaffNamed, staffLabel } from './psyActivities';
+import { currentPsyPolicy, psyPolicyFromRow, psyReminderFromRow, sortPsyReminders, EMPTY_PSY_REMINDERS, type PsyPolicyVersion, type PsyReminderRows } from './psyRemindersDb';
 import { DEFAULT_CAPACITY, SLOT_DURATION } from './schedule';
 
 // ------------------------------------------------------------------------------------------------------------------ Filas de la base
@@ -32,13 +33,17 @@ export interface SeguimientoRow {
 export interface CapacidadRow { id: string; ambito: 'general' | 'sede' | 'excepcion'; sede_id: string | null; fecha: string | null; hora: string | null; cupo: number | null }
 export interface EventPlace { date: string; time: string; responsible: string }
 
-export interface AgendaRows extends ActivityRows { asesorias: AsesoriaRow[]; eventos: EventoRow[]; seguimientos: SeguimientoRow[]; capacidad: CapacidadRow[] }
-export const EMPTY_AGENDA: AgendaRows = { asesorias: [], eventos: [], seguimientos: [], capacidad: [], ...EMPTY_ACTIVITIES };
+export interface AgendaRows extends ActivityRows, PsyReminderRows { asesorias: AsesoriaRow[]; eventos: EventoRow[]; seguimientos: SeguimientoRow[]; capacidad: CapacidadRow[] }
+export const EMPTY_AGENDA: AgendaRows = { asesorias: [], eventos: [], seguimientos: [], capacidad: [], ...EMPTY_ACTIVITIES, ...EMPTY_PSY_REMINDERS };
 
 /** Con qué se derivan los nombres: los alumnos, las matrículas y el personal (las listas salen de la base, cada una con su gancho). */
 export interface AgendaLists extends ActivityLists { students: Pick<Student, 'id' | 'name'>[]; enrollments: Enrollment[] }
 
-export interface AgendaState { schedules: Schedule[]; psyEvents: PsyEvent[]; trackings: Tracking[]; capacityConfig: CapacityConfig; monthlySchedules: MonthlySchedule[] }
+export interface AgendaState {
+  schedules: Schedule[]; psyEvents: PsyEvent[]; trackings: Tracking[]; capacityConfig: CapacityConfig; monthlySchedules: MonthlySchedule[];
+  /** La política de recordatorios vigente, sus versiones (la más alta primero) y los recordatorios registrados (el más reciente primero). */
+  psyReminderPolicy: PsyReminderPolicy; psyPolicies: PsyPolicyVersion[]; psyReminderLogs: PsyReminderLog[];
+}
 
 // ------------------------------------------------------------------------------------------------------------------ Filas → modelo
 
@@ -83,7 +88,11 @@ export function agendaFromRows(rows: AgendaRows, lists: AgendaLists): AgendaStat
     id: r.id, studentId: r.alumno_id, scheduleId: r.asesoria_id ?? undefined, date: r.fecha, status: r.estado, metrics: r.metricas ?? {}, observations: r.observaciones,
     checklist: (r.checklist ?? undefined) as Tracking['checklist'],
   }));
-  return { schedules, psyEvents, trackings, capacityConfig: capacityFromRows(rows.capacidad), monthlySchedules: monthlyFromRows(rows, { staff: lists.staff, branches: lists.branches }) };
+  const psyPolicies = rows.psyPoliticas.map(psyPolicyFromRow).sort((a, b) => b.version - a.version);
+  return {
+    schedules, psyEvents, trackings, capacityConfig: capacityFromRows(rows.capacidad), monthlySchedules: monthlyFromRows(rows, { staff: lists.staff, branches: lists.branches }),
+    psyReminderPolicy: currentPsyPolicy(psyPolicies), psyPolicies, psyReminderLogs: sortPsyReminders(rows.psyRecordatorios.map(psyReminderFromRow)),
+  };
 }
 
 const byId = <T extends { id: string }>(a: T, b: T) => a.id.localeCompare(b.id);
@@ -98,6 +107,8 @@ export function mergeAgendaRows(current: AgendaRows, fresh: Partial<AgendaRows>)
     asesorias: merge(current.asesorias, fresh.asesorias), eventos: merge(current.eventos, fresh.eventos), seguimientos: merge(current.seguimientos, fresh.seguimientos),
     capacidad: fresh.capacidad ?? current.capacidad,
     cronogramas: current.cronogramas, actividades: current.actividades, inscripciones: current.inscripciones,
+    // La política y los recordatorios solo se agregan y se vuelven a leer completos (son pocas filas): lo recién leído reemplaza a lo que había
+    psyPoliticas: fresh.psyPoliticas ?? current.psyPoliticas, psyRecordatorios: fresh.psyRecordatorios ?? current.psyRecordatorios,
   };
 }
 
