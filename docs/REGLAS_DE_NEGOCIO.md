@@ -977,3 +977,20 @@ Si algo falla, todo se deshace y los números quedan libres: **sin repetidos y s
 **Límites anotados.** (1) La base cuenta como «alcanza todas las sedes» también a la cuenta marcada «Todas» (igual que el resto de sus reglas de sede); el cálculo del navegador solo mira la función del rol. (2) Las alertas por regla se calculan en el navegador con las cuentas que esa cuenta alcanza a leer. (3) El sistema sigue sin enviar WhatsApp ni correos. (4) Un aviso no se borra: si algún día crece demasiado, la limpieza de los viejos se hace aparte, desde la base.
 
 **Cómo se prueba.** `npx tsx scripts/check-notices-db.ts` (filas ↔ aviso, lo que se manda al emitir, las operaciones con un repositorio en memoria, que los eventos de la base sean los del registro, el texto y la clave del aviso a Logística, la migración y el cableado) y, contra una copia de la base con cuentas de varias sedes (Chiclayo, Piura, almacén, aprobador, supervisor, respaldo, cuenta marcada «Todas», sin la función de ver avisos e inactiva): quién emite y quién no, quién recibe cada aviso, el respaldo, lo leído por cuenta, que nadie escribe las tablas directo, y **el reparto de la base comparado con el del navegador en 8 625 combinaciones** (eventos × lugares × solicitante), además de deshacer y volver a aplicar.
+
+## La recepción se habilita desde la fecha estimada de llegada (2026-11-18, migración 0027)
+
+**Qué pasaba.** En Logística → Recepciones, el botón «Recepcionar» estaba apagado hasta la ETA, pero «Ver ticket» abría el mismo panel con todo editable y con el botón «Confirmar recepción y cargar stock» encendido; y la base aceptaba confirmar la recepción en cualquier momento (probado: con ETA de mañana, cargaba el stock). El usuario lo notó con el envío ENV-2026-001 (en tránsito, ETA 19/11/2026 4:10 p. m.).
+
+**Qué es la ETA.** La **fecha (y hora) estimada de llegada** del envío o de la transferencia; no es la fecha en que se hizo el envío (esa es otra, «fecha»). Los envíos traen fecha y hora; las transferencias, solo fecha.
+
+**La regla.**
+- Un documento en tránsito **solo se puede recibir desde su ETA**: desde la fecha y, si trae hora, desde esa hora (hora de Lima). Antes de eso **solo se ve**: ni se edita lo recibido, ni se agregan artículos extra, ni se confirma. No es solo visual: la base (`confirmar_recepcion`) rechaza la recepción antes de la ETA, ni siquiera el Superusuario la salta.
+- **Si el envío llegó antes**, Logística lo habilita: «Habilitar recepción manual» o marcarlo «Listo para recepción» (las salidas que el sistema ya tenía). Con cualquiera de las dos se puede recibir de inmediato.
+- **Sin ETA y sin habilitación** tampoco se recibe: se pide registrar la ETA o habilitar la recepción manual.
+
+**«Ver ticket» es solo lectura.** Muestra origen, destino, ETA, estado y el detalle esperado. Si el documento ya se recibió, muestra lo que quedó registrado (las diferencias: faltantes, dañados y extras, con su observación) y quién recibió y cuándo. No tiene campos editables ni botón de confirmar.
+
+**«Recepcionar» pide confirmar.** Solo se abre desde la ETA. Al pulsar «Confirmar recepción y cargar stock» aparece primero una ventana que dice cuánto stock se cargará y cuántas diferencias se registrarán, y que **no hay marcha atrás**: el stock se carga de inmediato y, si algo quedó mal, solo se corrige con un ajuste de stock con motivo. Recién al aceptar se guarda.
+
+**Cómo se prueba.** `npx tsx scripts/check-stock-db.ts` (la regla en los límites —un minuto antes, en punto, sin hora, manual, «Listo», sin ETA—, el servicio que no llama a la base antes de la ETA, la migración y que la vista de solo lectura no tenga campos editables) y, contra una copia de la base: antes de la 0027 se recibía con ETA de mañana; después se rechaza (envíos y transferencias, con los mismos textos del sistema), se recibe desde la ETA, con recepción manual o «Listo», lo de siempre sigue igual (permisos, diferencias, incidencias) y se puede deshacer.

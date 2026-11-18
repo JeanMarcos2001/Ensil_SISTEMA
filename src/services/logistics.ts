@@ -15,7 +15,7 @@ import {
 } from '../utils/inventory';
 import { locationSaleError, shipmentRouteError, transferRouteError, type StockLocation } from '../utils/logisticsRoutes';
 import {
-  courierError, detailError, methodError, receptionError, shipmentContentError, transferRequestError, transferDispatchError, type ReceivedLine,
+  clockNow, courierError, detailError, methodError, receptionError, receptionWindow, shipmentContentError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
 } from '../utils/logisticsDocs';
 import { nextSequentialId } from '../utils/ids';
 import type { AdjustmentLine, KardexLine } from '../utils/stockDb';
@@ -70,9 +70,11 @@ export interface LogisticsContext {
   transfers: Transfer[];
   couriers: Courier[];
   methods: ShippingMethod[];
+  /** Hoy y la hora con que se decide si ya se puede recibir (por defecto, la del equipo; las verificaciones fijan una). */
+  now?: ClockParts;
 }
 
-const fail = (error: string): LogisticsResult => ({ ok: false, error });
+const fail =(error: string): LogisticsResult => ({ ok: false, error });
 const done = (affects: Affects, id?: string): LogisticsResult => ({ ok: true, affects, ...(id ? { id } : {}) });
 const MAX_ID_ATTEMPTS = 3;
 
@@ -262,6 +264,9 @@ export async function confirmReception(repo: LogisticsRepository, ctx: Logistics
   if (!doc) return fail('No se encontró el documento a recepcionar.');
   const invalid = receptionError(doc.status, input.receivedItems, itemIds(ctx));
   if (invalid) return fail(invalid);
+  // Antes de la fecha (y hora) estimada de llegada el documento solo se ve: no se llama a la base (que también lo rechaza)
+  const window = receptionWindow(doc, ctx.now ?? clockNow());
+  if (!window.open) return fail(window.reason ?? 'Todavía no se puede recibir este documento.');
   const res = await repo.confirmReception(
     input.docType, input.docId,
     input.receivedItems.map(r => ({ articulo_id: r.itemId, cantidad: r.quantity, estado: r.status, observacion: r.observation })),

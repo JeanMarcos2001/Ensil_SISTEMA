@@ -25,7 +25,8 @@ import { capabilityById } from '../src/utils/capabilities';
 import { adjustmentError, minStockError, packageError, signedAdjustment, stockEntryError } from '../src/utils/inventory';
 import { stockLocations } from '../src/utils/logisticsRoutes';
 import {
-  SHIPMENT_FLOW, TRANSFER_FLOW, courierError, detailError, flattenBoxes, isInTransit, methodError, receptionError, receptionOutcome, shipmentContentError, shipmentMovesStock,
+  RECEPTION_NO_ETA, SHIPMENT_FLOW, TRANSFER_FLOW, clockNow, courierError, detailError, etaLabel, flattenBoxes, isInTransit, methodError, receptionError, receptionOutcome, receptionTooEarlyMessage,
+  receptionWindow, shipmentContentError, shipmentMovesStock,
   shipmentTransitionError, transferDispatchError, transferMovesStock, transferRequestError, transferTransitionError, transportError,
 } from '../src/utils/logisticsDocs';
 import { renderLogisticsSeedSql } from '../src/utils/logisticsSeedSql';
@@ -243,7 +244,7 @@ const repo: LogisticsRepository = {
   insertMethod: async mt => reply('insertMethod', [mt], mt),
   updateMethod: async mt => reply('updateMethod', [mt], mt),
 };
-const ctx = (extra: Partial<LogisticsContext> = {}): LogisticsContext => ({ items, locations, stock, shipments: [], transfers: [], couriers, methods, ...extra });
+const ctx = (extra: Partial<LogisticsContext> = {}): LogisticsContext => ({ items, locations, stock, shipments: [], transfers: [], couriers, methods, now: { date: '2026-11-20', time: '10:00' }, ...extra });
 const reset = () => { calls.length = 0; nextFail = null; idConflicts = 0; };
 const names2 = () => calls.map(c => c.fn).join(',');
 
@@ -387,8 +388,49 @@ r = await confirmReception(repo, ctx({ shipments: [received] }), { docId: receiv
 check('Un envío ya recibido no se vuelve a recibir (no suma dos veces al stock)', !r.ok && /solo se recibe lo que está en tránsito/.test(r.error ?? '') && calls.length === 0);
 r = await confirmReception(repo, ctx(), { docId: 'ENV-NO-EXISTE', docType: 'Envío', receivedItems: lines });
 check('Un documento que no existe no se recibe', !r.ok && /No se encontró el documento/.test(r.error ?? ''));
-r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tránsito' })] }), { docId: 'TRF-2026-001', docType: 'Transferencia', receivedItems: [{ itemId: 'ITM-HER-02', quantity: 4, status: 'ok' }] });
+r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tránsito', eta: '2026-11-12' })] }), { docId: 'TRF-2026-001', docType: 'Transferencia', receivedItems: [{ itemId: 'ITM-HER-02', quantity: 4, status: 'ok' }] });
 check('También se recibe una transferencia en tránsito', r.ok && calls[0].args[0] === 'Transferencia');
+
+// Recepción desde la fecha estimada de llegada (ETA)
+const timing = (extra: Record<string, unknown> = {}) => ({ status: 'En tránsito', eta: '2026-11-19', etaTime: '16:10', ...extra });
+const at = (date: string, time: string) => ({ date, time });
+check('Antes de la fecha y hora estimadas de llegada (ETA) no se puede recibir: ni el día anterior ni el mismo día antes de la hora',
+  !receptionWindow(timing(), at('2026-11-18', '23:59')).open && !receptionWindow(timing(), at('2026-11-19', '16:09')).open && !receptionWindow(timing(), at('2026-11-19', '00:00')).open);
+check('Desde la fecha y la hora estimadas sí: en punto, más tarde ese día y los días siguientes',
+  receptionWindow(timing(), at('2026-11-19', '16:10')).open && receptionWindow(timing(), at('2026-11-19', '16:11')).open && receptionWindow(timing(), at('2026-11-20', '00:00')).open);
+check('Sin hora de ETA (una transferencia), se habilita desde el comienzo de la fecha',
+  !receptionWindow(timing({ etaTime: undefined }), at('2026-11-18', '23:59')).open && receptionWindow(timing({ etaTime: undefined }), at('2026-11-19', '00:00')).open);
+check('Si llegó antes, Logística lo habilita: con la recepción manual o marcándolo «Listo para recepción» se puede recibir aunque falten días',
+  receptionWindow(timing({ manualEnable: true }), at('2026-11-10', '08:00')).open && receptionWindow(timing({ status: 'Listo para recepción' }), at('2026-11-10', '08:00')).open
+  && receptionWindow(timing({ eta: undefined, etaTime: undefined, manualEnable: true }), at('2026-11-10', '08:00')).open);
+const noEta = receptionWindow(timing({ eta: undefined, etaTime: undefined }), at('2026-11-20', '10:00'));
+check('Sin ETA y sin habilitación no se recibe: se pide registrarla o habilitar la recepción manual', !noEta.open && noEta.reason === RECEPTION_NO_ETA);
+const early = receptionWindow(timing(), at('2026-11-18', '10:00'));
+check('El aviso de «todavía no» trae la ETA con su fecha y hora, y dice qué hacer si llegó antes',
+  !early.open && early.reason === receptionTooEarlyMessage('19/11/2026 4:10 p. m.') && /habilite la recepción manual/.test(early.reason ?? '')
+  && etaLabel('2026-11-19', '16:10') === '19/11/2026 4:10 p. m.' && etaLabel('2026-11-19') === '19/11/2026' && etaLabel('2026-11-19', '00:05') === '19/11/2026 12:05 a. m.');
+check('Hoy y la hora salen del equipo en formato AAAA-MM-DD y HH:MM', /^\d{4}-\d{2}-\d{2}$/.test(clockNow().date) && /^\d{2}:\d{2}$/.test(clockNow().time) && clockNow(new Date(2026, 10, 19, 4, 5)).time === '04:05');
+
+reset();
+const tooEarly = shipment({ status: 'En tránsito', eta: '2026-11-21', etaTime: '09:00' });
+r = await confirmReception(repo, ctx({ shipments: [tooEarly] }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
+check('Antes de la ETA la recepción no llega a la base (no se carga stock) y dice por qué', !r.ok && /Todavía no llega la fecha estimada/.test(r.error ?? '') && /21\/11\/2026 9:00 a\. m\./.test(r.error ?? '') && calls.length === 0);
+r = await confirmReception(repo, ctx({ shipments: [tooEarly], now: { date: '2026-11-21', time: '08:59' } }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
+check('Un minuto antes de la ETA todavía no', !r.ok && calls.length === 0);
+r = await confirmReception(repo, ctx({ shipments: [tooEarly], now: { date: '2026-11-21', time: '09:00' } }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
+check('En punto de la ETA sí llega a la base', r.ok && names2() === 'confirmReception');
+reset();
+r = await confirmReception(repo, ctx({ shipments: [{ ...tooEarly, manualEnable: true }] }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
+check('Con la recepción manual habilitada se recibe antes de la ETA', r.ok && names2() === 'confirmReception');
+reset();
+r = await confirmReception(repo, ctx({ shipments: [{ ...tooEarly, status: 'Listo para recepción' }] }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
+check('Marcado «Listo para recepción» se recibe antes de la ETA', r.ok && names2() === 'confirmReception');
+reset();
+r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tránsito' })] }), { docId: 'TRF-2026-001', docType: 'Transferencia', receivedItems: [{ itemId: 'ITM-HER-02', quantity: 4, status: 'ok' }] });
+check('Una transferencia en tránsito sin ETA ni habilitación no se recibe', !r.ok && r.error === RECEPTION_NO_ETA && calls.length === 0);
+reset();
+r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tránsito', eta: '2026-11-21' })] }), { docId: 'TRF-2026-001', docType: 'Transferencia', receivedItems: [{ itemId: 'ITM-HER-02', quantity: 4, status: 'ok' }] });
+check('Una transferencia con la ETA de mañana tampoco', !r.ok && /Todavía no llega la fecha estimada/.test(r.error ?? '') && calls.length === 0);
 
 // Couriers y métodos
 reset();
@@ -472,6 +514,31 @@ const pages = ['Stock', 'Adjustments', 'Receptions', 'Shipments', 'Transfers', '
 check('Las pantallas de Logística esperan (await) las acciones que guardan y apagan el botón mientras guardan', pages.every(([name, src]) => /await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy)/.test(src))), pages.filter(([name, src]) => !(/await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy)/.test(src)))).map(([n]) => n).join());
 check('Caja y Verificación esperan la respuesta de la base antes de seguir', /await registerItemSale/.test(read('src/pages/Cash.tsx')) && /await reverseCashMovement/.test(read('src/pages/Cash.tsx')) && /await updateEnrollmentVerification/.test(read('src/pages/Verification.tsx')));
 check('Ajustes y Stock dejan que el tipo defina el signo del ajuste (antes, en Stock, una merma con cantidad positiva sumaba stock)', /signedAdjustment/.test(read('src/pages/logistics/Stock.tsx')) && /signedAdjustment/.test(read('src/pages/logistics/Adjustments.tsx')));
+
+// La migración 0027 y la pantalla de Recepciones
+const mig27 = read('supabase/migrations/20261118200000_recepcion_desde_la_eta.sql');
+const down27 = read('supabase/deshacer/20261118200000_recepcion_desde_la_eta.down.sql');
+check('La base exige lo mismo que el sistema: solo desde la ETA (hora de Lima), con las salidas de recepción manual y «Listo para recepción», y con las mismas palabras',
+  /create or replace function public\.confirmar_recepcion\(p_tipo text, p_doc text, p_lineas jsonb, p_observacion text\) returns void/.test(mig27) && mig27.includes(RECEPTION_NO_ETA) && mig27.includes(receptionTooEarlyMessage('%'))
+  && /now\(\) at time zone 'America\/Lima'/.test(mig27) && /v_estado <> 'Listo para recepción' and not coalesce\(v_manual, false\)/.test(mig27)
+  && /e\.eta, e\.eta_hora, e\.habilitar_recepcion_manual/.test(mig27) && /t\.eta, null::text, t\.habilitar_recepcion_manual/.test(mig27));
+check('La migración 0027 conserva lo demás de la recepción (función del registro, mover stock del destino, incidencias) y no cambia ningún permiso; se puede deshacer',
+  /app\.exigir\('log-recepciones:confirm'/.test(mig27) && /app\.exigir\('log-transfer:receive'/.test(mig27) && /app\.mover_stock\(v_destino/.test(mig27) && /insert into public\.incidencias_recepcion/.test(mig27)
+  && !/\bgrant\b|\brevoke\b/.test(mig27.replace(/--.*$/gm, '')) && /create or replace function public\.confirmar_recepcion/.test(down27) && !/v_desde/.test(down27) && !/America\/Lima/.test(down27));
+
+const recSrc = read('src/pages/logistics/Receptions.tsx');
+const readOnlyTable = recSrc.slice(recSrc.indexOf('{ticketReadOnly ? (\n                  <div className="bg-surface'), recSrc.indexOf(') : (\n                <div className="bg-surface'));
+check('«Ver ticket» abre solo la vista y «Recepcionar» abre la recepción; Recepcionar sigue apagado hasta la ETA y avisa por qué',
+  /handleOpenReception\(doc, 'view'\)/.test(recSrc) && /handleOpenReception\(doc, 'receive'\)/.test(recSrc) && /disabled=\{!ready\}/.test(recSrc) && /gate\.reason \?\? 'Documento no habilitado para recepción'/.test(recSrc)
+  && /const open = nextMode === 'receive' && receptionWindow\(timingOf\(doc\), clockNow\(\)\)\.open;/.test(recSrc));
+check('En la vista de solo lectura no hay nada que se pueda editar: ni campos, ni listas, ni botón de agregar extra, ni de confirmar',
+  readOnlyTable.length > 500 && !/<input|<select|<textarea|onChange|onClick/.test(readOnlyTable) && /\{!ticketReadOnly && \(\s*<Button[\s\S]*?Agregar artículo extra/.test(recSrc)
+  && /\{!ticketReadOnly && can\(receiveCapability\(selectedDocument\.type\)\) && \(/.test(recSrc) && /\{!ticketReadOnly && \(\s*<div>\s*<h3[^>]*>Observaciones de Recepción/.test(recSrc));
+check('Confirmar la recepción pide primero una confirmación que dice que no hay marcha atrás; la recepción se vuelve a comprobar (ETA y cantidades) antes de pedirla y solo se confirma en modo recepción',
+  /onClick=\{askConfirmation\}/.test(recSrc) && !/onClick=\{handleConfirmReception\}/.test(recSrc) && /<ConfirmDialog[\s\S]*?onConfirm=\{handleConfirmReception\}/.test(recSrc) && /no se puede deshacer/.test(recSrc)
+  && /receptionWindow\(timingOf\(selectedDocument\.data\), clockNow\(\)\)/.test(recSrc) && /if \(!selectedDocument \|\| saving \|\| mode !== 'receive'\) return;/.test(recSrc) && /receptionCheck\(selectedDocument\.data\.status, receivedLines\(\)/.test(recSrc));
+check('Un documento ya recibido se ve con lo que quedó registrado (las diferencias que anotó la recepción), no con lo esperado',
+  /docIncidents/.test(recSrc) && /INCIDENT_LABEL\[i\.type\]/.test(recSrc) && /Resultado de la recepción/.test(recSrc) && /Recepción registrada/.test(recSrc));
 
 if (failed > 0) {
   console.log(`\n${failed} comprobaciones fallaron.`);

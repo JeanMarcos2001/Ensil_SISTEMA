@@ -6,7 +6,8 @@
  *    cancelar mientras no se haya recibido (si ya salió, lo despachado vuelve al origen).
  *  - Una transferencia es una solicitud con aprobación: Borrador → Solicitada → Aprobada → En tránsito → (Listo para recepción) → Recibida (con o sin
  *    diferencias); también Rechazada y Cancelada. Solo se despacha lo aprobado.
- *  - El stock sale del origen UNA sola vez, al despachar; el destino suma al recibir. Una recepción solo se confirma sobre un documento en tránsito.
+ *  - El stock sale del origen UNA sola vez, al despachar; el destino suma al recibir. Una recepción solo se confirma sobre un documento en tránsito
+ *    y **solo desde la fecha (y hora) estimada de llegada**, salvo que Logística la habilite antes (`receptionWindow`).
  *  - Las cantidades de las cajas son el detalle del envío o de la transferencia (`flattenBoxes`).
  */
 import type { Courier, Shipment, ShipmentBox, ShippingMethod, Transfer, TransferBox } from '../context/DataContext';
@@ -195,6 +196,51 @@ export function receptionError(docStatus: string, received: ReceivedLine[], know
     if (knownItemIds && !knownItemIds.includes(r.itemId)) return 'Un artículo recibido no existe en el catálogo.';
   }
   return null;
+}
+
+// ------------------------------------------------------------------------------------------------------------------ Cuándo se puede recibir
+
+/** Lo que decide si ya se puede recibir un documento en tránsito. */
+export interface ReceptionTiming { status: string; eta?: string; etaTime?: string; manualEnable?: boolean }
+
+/** Hoy y la hora (AAAA-MM-DD y HH:MM), en la hora del lugar (Lima). La base usa la hora de Lima. */
+export interface ClockParts { date: string; time: string }
+
+export const RECEPTION_NO_ETA = 'Este documento no tiene fecha de llegada (ETA): pida a Logística que la registre o que habilite la recepción manual.';
+/** El aviso cuando todavía no llega la fecha estimada. La base dice lo mismo con la fecha puesta en el «%». */
+export const receptionTooEarlyMessage = (etaLabel: string): string =>
+  `Todavía no llega la fecha estimada de llegada (ETA: ${etaLabel}). La recepción se habilita desde ese momento; si llegó antes, pida a Logística que habilite la recepción manual.`;
+
+const dmy = (iso: string): string => iso.split('-').reverse().join('/');
+const hm12 = (t: string): string => {
+  const [h = 0, m = 0] = t.split(':').map(Number);
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'p. m.' : 'a. m.'}`;
+};
+/** La ETA como se muestra: 19/11/2026 4:10 p. m. (sin hora, solo la fecha). */
+export const etaLabel = (eta: string, etaTime?: string): string => (etaTime ? `${dmy(eta)} ${hm12(etaTime)}` : dmy(eta));
+
+export interface ReceptionWindow {
+  open: boolean;
+  /** Por qué todavía no se puede recibir (solo si `open` es falso). */
+  reason?: string;
+}
+
+/**
+ * ¿Ya se puede recibir este documento? La recepción se habilita **desde la fecha (y la hora) estimada de llegada (ETA)**; antes de eso el documento solo se ve.
+ * Si llegó antes, Logística la habilita a mano (recepción manual) o lo marca «Listo para recepción». Sin ETA ni habilitación, tampoco se recibe.
+ * La base vuelve a comprobarlo al confirmar (`confirmar_recepcion`, migración 0027).
+ */
+export function receptionWindow(doc: ReceptionTiming, now: ClockParts): ReceptionWindow {
+  if (doc.manualEnable || doc.status === 'Listo para recepción') return { open: true };
+  if (!doc.eta) return { open: false, reason: RECEPTION_NO_ETA };
+  const reached = doc.etaTime ? doc.eta < now.date || (doc.eta === now.date && doc.etaTime <= now.time) : doc.eta <= now.date;
+  return reached ? { open: true } : { open: false, reason: receptionTooEarlyMessage(etaLabel(doc.eta, doc.etaTime)) };
+}
+
+/** Hoy y la hora del equipo en que corre el sistema (el del navegador; en Perú es la hora de Lima). */
+export function clockNow(d: Date = new Date()): ClockParts {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return { date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: `${p(d.getHours())}:${p(d.getMinutes())}` };
 }
 
 // ------------------------------------------------------------------------------------------------------------------ Couriers y métodos de envío
