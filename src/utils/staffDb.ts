@@ -179,3 +179,40 @@ export function accountPlaceWarning(
   const problem = errorCoherenciaRolLugar({ nombre: role.name, esSistema: role.locked === true, mueveAlmacen }, { almacenIds: places.warehouses });
   return problem ? `Su cuenta quedaría con una combinación incoherente. ${problem}` : undefined;
 }
+
+// ------------------------------------------------------------------------------------------------------------------ Directorio del equipo (migración 0025)
+
+/**
+ * Lo mínimo del equipo que entrega la función `directorio_equipo()` a cualquier cuenta con acceso vigente, para elegir y nombrar responsables (una asesoría, una
+ * actividad, una entrevista, quien atiende una matrícula) SIN abrir la ficha de Personal: código, nombres, apellidos y estado de cada persona activa de las sedes que
+ * la cuenta alcanza, y sus asignaciones activas. Nada de documento, nacimiento, teléfono, correo, dirección, contratos ni sueldos.
+ */
+export interface DirectorioPersonaRow { id: string; codigo: string; nombres: string; apellido_paterno: string; apellido_materno: string | null; estado: string }
+export interface DirectorioAsignacionRow { id: string; personal_id: string; sede_id: string; area: string; fecha_inicio: string; es_principal: boolean; estado: string }
+export interface DirectorioEquipo { personal: DirectorioPersonaRow[]; asignaciones: DirectorioAsignacionRow[] }
+export const EMPTY_DIRECTORY: DirectorioEquipo = { personal: [], asignaciones: [] };
+
+/** Una persona del directorio como `Staff`: los datos personales que el directorio no entrega quedan vacíos (esa cuenta no tiene «Ver personal»). */
+export const staffFromDirectory = (r: DirectorioPersonaRow): Staff => ({
+  id: r.id, code: r.codigo, docType: '', docNumber: '', names: r.nombres, lastNameP: r.apellido_paterno, lastNameM: r.apellido_materno ?? '', birthDate: '', phone: '', status: r.estado,
+});
+
+/** Una asignación del directorio como `Assignment` (sin acceso al sistema, observaciones ni cierre: el directorio solo entrega las activas). */
+export const assignmentFromDirectory = (r: DirectorioAsignacionRow, places: Place[]): Assignment => assignmentFromRow({
+  id: r.id, personal_id: r.personal_id, sede_id: r.sede_id, almacen_id: null, area: r.area, con_acceso: false, fecha_inicio: r.fecha_inicio, fecha_fin: null, es_principal: r.es_principal,
+  estado: r.estado, observaciones: null, motivo_cierre: null, cerrada_por: null,
+}, places);
+
+/** Lo que la cuenta ya leyó de `personal` manda; del directorio se agregan solo las personas que faltan (en el orden de su código). */
+export function mergeStaffWithDirectory(full: Staff[], directory: DirectorioPersonaRow[]): Staff[] {
+  const known = new Set(full.map(s => s.id));
+  const extra = directory.filter(r => !known.has(r.id)).map(staffFromDirectory);
+  return extra.length === 0 ? full : [...full, ...extra].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Lo mismo para las asignaciones: las que la cuenta ya leyó de `asignaciones` mandan; se agregan solo las activas que faltan. */
+export function mergeAssignmentsWithDirectory(full: Assignment[], directory: DirectorioAsignacionRow[], places: Place[]): Assignment[] {
+  const known = new Set(full.map(a => a.id));
+  const extra = directory.filter(r => !known.has(r.id)).map(r => assignmentFromDirectory(r, places));
+  return extra.length === 0 ? full : [...full, ...extra].sort((a, b) => a.id.localeCompare(b.id));
+}

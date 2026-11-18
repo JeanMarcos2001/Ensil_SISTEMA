@@ -7,7 +7,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Assignment, Staff } from '../context/DataContext';
 import type { Place } from '../utils/assignments';
 import { dbErrorMessage, isIdConflict } from '../utils/orgDirectory';
-import { assignmentFromRow, assignmentToRow, staffFromRow, staffPatchToRow, staffToRow, type AsignacionRow, type PersonalRow } from '../utils/staffDb';
+import {
+  assignmentFromRow, assignmentToRow, mergeAssignmentsWithDirectory, mergeStaffWithDirectory, staffFromRow, staffPatchToRow, staffToRow, EMPTY_DIRECTORY,
+  type AsignacionRow, type DirectorioEquipo, type PersonalRow,
+} from '../utils/staffDb';
 import type { RepoResult } from './orgDirectory';
 import type { StaffRepository } from './staffDirectory';
 
@@ -16,15 +19,26 @@ const failure = <T>(error: { code?: string; message?: string; details?: string }
 
 const NOT_TOUCHED = 'No se pudo completar: el registro ya no existe o su cuenta no tiene permiso para cambiarlo.';
 
+/**
+ * El directorio del equipo (migración 0025): lo mínimo para elegir responsables sin tener «Ver personal». Solo AGREGA a lo que la cuenta ya lee; si la función falla o
+ * todavía no existe, se sigue con lo que la cuenta leyó (el sistema abre igual).
+ */
+async function loadDirectory(client: SupabaseClient): Promise<DirectorioEquipo> {
+  const { data, error } = await client.rpc('directorio_equipo');
+  if (error || !data || typeof data !== 'object') return EMPTY_DIRECTORY;
+  const d = data as Partial<DirectorioEquipo>;
+  return { personal: Array.isArray(d.personal) ? d.personal : [], asignaciones: Array.isArray(d.asignaciones) ? d.asignaciones : [] };
+}
+
 export function createSupabaseStaffRepository(client: SupabaseClient): StaffRepository {
   return {
     async listStaff() {
-      const { data, error } = await client.from('personal').select('*').order('id');
-      return error ? failure(error) : { ok: true, data: (data as PersonalRow[]).map(staffFromRow) };
+      const [full, directory] = await Promise.all([client.from('personal').select('*').order('id'), loadDirectory(client)]);
+      return full.error ? failure(full.error) : { ok: true, data: mergeStaffWithDirectory((full.data as PersonalRow[]).map(staffFromRow), directory.personal) };
     },
     async listAssignments(places: Place[]) {
-      const { data, error } = await client.from('asignaciones').select('*').order('id');
-      return error ? failure(error) : { ok: true, data: (data as AsignacionRow[]).map(r => assignmentFromRow(r, places)) };
+      const [full, directory] = await Promise.all([client.from('asignaciones').select('*').order('id'), loadDirectory(client)]);
+      return full.error ? failure(full.error) : { ok: true, data: mergeAssignmentsWithDirectory((full.data as AsignacionRow[]).map(r => assignmentFromRow(r, places)), directory.asignaciones, places) };
     },
     async insertStaff(staff: Staff) {
       const { data, error } = await client.from('personal').insert(staffToRow(staff)).select().single();
