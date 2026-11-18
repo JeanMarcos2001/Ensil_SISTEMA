@@ -41,7 +41,7 @@ interface PendingConfirm {
 }
 
 export function Verification() {
-  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, schedules, updateEnrollmentVerification, pendingFirstSessions, can } = useData();
+  const { enrollments, recipes, items, programs, branches, stockItems, plans, staff, assignments, schedules, updateEnrollmentVerification, notifyMissingStock, pendingFirstSessions, can } = useData();
   const [isVerifyOpen, setIsVerifyOpen] = useState(false);
   const [selectedEnrollment, setSelectedEnrollment] = useState<Enrollment | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<Recipe | null>(null);
@@ -57,6 +57,9 @@ export function Verification() {
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
   const [saving, setSaving] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
+  // Aviso a Logística cuando no hay stock de nada: se manda una vez por matrícula y por día (la base lo vuelve a comprobar)
+  const [notifying, setNotifying] = useState(false);
+  const [notifyResult, setNotifyResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   // Matrículas cuya primera asesoría espera la verificación (por número de matrícula)
   const waiting = pendingFirstSessions();
@@ -90,6 +93,14 @@ export function Verification() {
       else item?.composition?.forEach(c => { if (!alreadyDelivered.includes(c.itemId)) delete n[c.itemId]; });
       return n;
     });
+  };
+
+  const handleNotifyLogistics = async () => {
+    if (!selectedEnrollment || notifying) return;
+    setNotifying(true);
+    const res = await notifyMissingStock(selectedEnrollment.id);
+    setNotifying(false);
+    setNotifyResult(res.ok ? { ok: true } : { ok: false, error: res.error ?? 'No se pudo avisar a Logística.' });
   };
 
   const handleSaveVerification = () => {
@@ -177,6 +188,7 @@ export function Verification() {
       return;
     }
     setSelectedEnrollment(enrollment);
+    setNotifyResult(null);
 
     // Receta de materiales vigente para el programa, nivel y sede de la matrícula
     const recipe = recipeForEnrollment(enrollment, recipes, todayLocalISO());
@@ -520,6 +532,18 @@ export function Verification() {
                       <div>
                         <p className="font-medium">No hay stock en {branchName} de ningún artículo de esta receta.</p>
                         <p className="mt-1 text-xs">Ni del kit ni de sus artículos sueltos. Por ahora no se puede entregar nada: pida a Logística que envíe stock a la sede. Si la primera asesoría está cerca, reprográmela en Programación.</p>
+                        {can(PERM.deliverMaterials) && (
+                          <div className="mt-3 flex flex-wrap items-center gap-3">
+                            <Button type="button" variant="outline" className="h-8 px-3 text-xs" onClick={handleNotifyLogistics} disabled={notifying || notifyResult?.ok === true}>
+                              {notifying ? 'Avisando…' : 'Avisar a Logística'}
+                            </Button>
+                            {notifyResult && (
+                              <span className={`text-xs ${notifyResult.ok ? 'text-success-text' : 'text-danger-text'}`} role="status">
+                                {notifyResult.ok ? 'Se avisó a Logística. Les llegará a su campana de avisos.' : notifyResult.error}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

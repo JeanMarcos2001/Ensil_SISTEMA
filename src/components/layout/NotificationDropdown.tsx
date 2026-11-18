@@ -8,7 +8,8 @@ import { Badge } from '../ui/Badge';
  * Campana del encabezado. Muestra solo lo que le corresponde al usuario actual:
  *  - Alertas: las que dispara una regla (cuotas vencidas, materiales pendientes, contratos por vencer, stock bajo el mínimo); se calculan y
  *    desaparecen solas cuando se corrige la causa. Un clic lleva a la pantalla donde se resuelven.
- *  - Avisos: lo que hizo alguien (un envío despachado, una solicitud pendiente, una reversa…); cada usuario los marca leídos por su cuenta.
+ *  - Avisos: lo que hizo alguien (un envío despachado, una solicitud pendiente, una reversa…); viven en la base (la base decide a quién le llega
+ *    cada uno) y cada usuario los marca leídos por su cuenta. Se actualizan solos cada minuto.
  */
 export function NotificationDropdown() {
   const { myNotifications, myAlerts, markNotificationAsRead } = useData();
@@ -117,6 +118,7 @@ export function NotificationDropdown() {
                               <p className="text-xs text-text-muted mt-1 line-clamp-2 leading-relaxed">{notif.message}</p>
                               <p className="text-[10px] text-text-muted mt-2">
                                 {new Date(notif.date).toLocaleString('es-PE', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}
+                                {notif.emittedBy && <span> · {notif.emittedBy}</span>}
                                 {notif.viaFallback && <span className="ml-2 text-warning-text">Te llega porque nadie más podía recibirlo</span>}
                               </p>
                             </div>
@@ -135,7 +137,7 @@ export function NotificationDropdown() {
               <button
                 className="text-xs font-medium text-primary-accent hover:underline disabled:text-text-muted disabled:no-underline disabled:cursor-default"
                 disabled={unreadNotices.length === 0}
-                onClick={() => unreadNotices.forEach(n => markNotificationAsRead(n.id))}
+                onClick={() => markNotificationAsRead(unreadNotices.map(n => n.id))}
               >
                 {unreadNotices.length === 0 ? 'No hay avisos nuevos' : 'Marcar todos los avisos como leídos'}
               </button>

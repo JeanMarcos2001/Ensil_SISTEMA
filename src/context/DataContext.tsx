@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState,
 import { buildEnrollmentBatch, type EnrollmentDraft } from '../utils/enrollment';
 import { formatDisplayDate } from '../utils/tariffs';
 import { draftId, replaceDraftIds } from '../utils/draftIds';
-import { createIdAllocator, ID_PREFIX, nextSequentialId } from '../utils/ids';
+import { ID_PREFIX, nextSequentialId } from '../utils/ids';
 import { SLOT_DURATION, addDaysISO, allActivities, canChangeWithNotice, changeBlockedByNotice, branchOfStudent, localDateOf, MONTHS, todayLocalISO, validateActivityEnrollment, weekdayIndex, type FlatActivity } from '../utils/schedule';
 import { addMonths, canEnableExtension, enrollmentValidity, firstSessionOf, programOf } from '../utils/validity';
 import { attendanceBlock, blockedFirstSessions, scheduleGate, type FirstSessionGate } from '../utils/verificationGate';
@@ -84,7 +84,9 @@ import {
   activeAccount, defaultViewBranch, lastSuperuserError, NO_BRANCH, NO_SCOPE, scopeOfUser, selfAccountError, validView, viewBranchError, warehouseOperationError, type SessionScope,
 } from '../utils/session';
 import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, seatLimitError, validateRoleInput, type AcceptedRisk } from '../utils/roleBuilder';
-import { markRead, noticesFor, visibility, type NoticeScope } from '../utils/notifications';
+import { visibility, type NoticeScope } from '../utils/notifications';
+import { useNotices } from '../hooks/useNotices';
+import { missingStockNotice, noStockAtAll, recipeForEnrollment } from '../utils/verification';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
 import { availableStock, getCurrentPrice, itemSaleError } from '../utils/inventory';
@@ -685,8 +687,12 @@ export interface Notification {
   /** Qué pasó (`EVENTS` del registro de funciones) y dónde: de ahí se calcula quién lo recibe. Sin evento = aviso general para todos. */
   eventId?: string;
   scope?: NoticeScope;
-  /** Quiénes ya lo leyeron (cada usuario lo marca por su cuenta). */
+  /** Quiénes ya lo leyeron (cada usuario lo marca por su cuenta). Los avisos de la base traen solo la marca de la cuenta actual (`NoticeView.read`). */
   readBy?: string[];
+  /** Lo que el aviso nombra (el envío, la matrícula…). */
+  reference?: string;
+  /** Quién lo emitió (el nombre de su cuenta). */
+  emittedBy?: string;
 }
 
 /** Un aviso tal como lo ve un usuario: con su marca de leído y si le llega por respaldo. */
@@ -1615,12 +1621,13 @@ interface DataContextType {
   updateShipmentStatus: (id: string, status: Shipment['status'], observation?: string) => Promise<StockResult>;
   updateShipment: (id: string, shipment: Partial<Shipment>) => Promise<StockResult>;
   deleteShipment: (id: string) => Promise<StockResult>;
-  notifications: Notification[];
-  /** Los avisos que le corresponden al usuario actual (según las funciones de su rol y su sede), con la marca de leído. */
+  /** Los avisos que le corresponden al usuario actual, con la marca de leído. Viven en la base (la base decide quién recibe cada uno según las funciones y sedes de todas las cuentas) y se actualizan solos cada minuto. */
   myNotifications: NoticeView[];
   /** Alertas por regla (cuotas vencidas, materiales pendientes, contratos por vencer, stock bajo el mínimo) que le corresponden al usuario actual. */
   myAlerts: SystemAlert[];
-  markNotificationAsRead: (id: string) => void;
+  markNotificationAsRead: (id: string | string[]) => void;
+  /** Avisa a Logística que en la sede de la matrícula no hay stock de nada de lo que falta entregar (una vez por matrícula y por día). */
+  notifyMissingStock: (enrollmentId: string) => Promise<StockResult>;
   incidents: ReceptionIncident[];
   /** Sede que se ve: `'all'` (vista global) solo para quien alcanza todas; el resto, una de las suyas. Sale de la cuenta con la que se trabaja. */
   currentBranchId: string;
@@ -1648,7 +1655,6 @@ export const DataContext = createContext<DataContextType | undefined>(undefined)
  * `accountId` = la cuenta con la que se ingresó.
  */
 export function DataProvider({ children, access, accountId, org: orgData, catalog: catalogData, itemCatalog: itemCatalogData, logistics: logisticsData, people: peopleData, money: moneyData, cashBoxes: cashBoxesData, collection: collectionData, agenda: agendaData }: { children: ReactNode; access: AccessData; accountId: string; org: OrgDirectoryData; catalog: CatalogData; itemCatalog: ItemCatalogData; logistics: LogisticsData; people: PeopleData; money: MoneyRows; cashBoxes: CashBoxesData; collection: CollectionConfigData; agenda: AgendaRows }) {
-  const allocId = useRef(createIdAllocator()).current;
   // Datos de ejemplo de personas, matrículas, planes, pagos y caja: `data/seedPeople.ts` (fechas relativas a hoy, armados con las reglas reales)
   // Titulares y alumnos: de la base de datos (`AccessGate` los lee al iniciar sesión). Las acciones de más abajo son asíncronas: validan con las reglas
   // puras, guardan, vuelven a leer lo guardado y devuelven `{ ok, error }`. Los datos de ejemplo están en `data/seedPeople.ts` (se cargan con
@@ -1863,20 +1869,34 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const [isEnrollmentWizardOpen, setIsEnrollmentWizardOpen] = useState(false);
 
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { id: 'NOT-001', title: 'Bienvenido', message: 'Bienvenido al sistema ENSIL', type: 'info', date: new Date().toISOString(), readBy: [] }
-  ]);
-
-  /** Emite un aviso: guarda qué pasó y dónde; quién lo recibe se calcula al mostrar (`utils/notifications.ts`). */
-  const notify = (eventId: string, n: { title: string; message: string; type: Notification['type']; scope?: NoticeScope }) => {
-    setNotifications(prev => [
-      { id: allocId('NOT', prev.map(x => x.id)), title: n.title, message: n.message, type: n.type, date: new Date().toISOString(), eventId, scope: n.scope, readBy: [] },
-      ...prev,
-    ]);
+  // Los avisos viven en la base: se guarda qué pasó y dónde, y la base decide quién lo recibe al leer (con las funciones y sedes de todas las cuentas).
+  // Emitir un aviso es una consecuencia de la acción, no parte de ella: si falla no se deshace lo ya guardado (se anota en la consola y se sigue).
+  const notices = useNotices();
+  const notify = (eventId: string, n: { title: string; message: string; type: Notification['type']; scope?: NoticeScope; reference?: string }) => {
+    void notices.emit(eventId, n).then(res => { if (!res.ok) console.warn('No se pudo guardar el aviso:', res.error); });
   };
 
-  const markNotificationAsRead = (id: string) => {
-    setNotifications(prev => markRead(prev, id, currentUser.id));
+  const markNotificationAsRead = (id: string | string[]) => { void notices.markRead(Array.isArray(id) ? id : [id]); };
+
+  /** Avisa a Logística que en la sede de la matrícula no hay stock de nada de lo que falta entregar (una vez por matrícula y por día; la base lo vuelve a comprobar). */
+  const notifyMissingStock: DataContextType['notifyMissingStock'] = async enrollmentId => {
+    const enrollment = enrollments.find(e => e.id === enrollmentId);
+    if (!enrollment) return { ok: false, error: 'No se encontró la matrícula.' };
+    const recipe = recipeForEnrollment(enrollment, recipes, todayLocalISO());
+    if (!recipe) return { ok: false, error: 'La matrícula no tiene una receta de materiales vigente.' };
+    const delivered = enrollment.verifiedItems ?? [];
+    if (!noStockAtAll(recipe, items, stockItems, enrollment.branchId || '', delivered)) {
+      return { ok: false, error: 'En la sede ya hay stock de algo de lo que falta entregar: no hace falta avisar a Logística.' };
+    }
+    const first = firstSessionOf(enrollment.id, schedules);
+    const notice = missingStockNotice({
+      enrollmentId: enrollment.id, student: enrollment.student, branchName: locationName(enrollment.branchId || '') || enrollment.sede || '', recipe, items, delivered,
+      firstSession: first ? { date: first.date, time: first.time } : undefined, today: todayLocalISO(),
+    });
+    const res = await notices.emit('verification_without_stock', {
+      title: notice.title, message: notice.message, type: 'warning', scope: { subjectBranchId: enrollment.branchId || undefined }, reference: enrollment.id, key: notice.key,
+    });
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   };
 
   const confirmReception: DataContextType['confirmReception'] = async data => {
@@ -3190,7 +3210,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   // Avisos y alertas del usuario actual: se calculan con las cuentas y funciones de hoy (nada de esto se guarda)
   const holders = useMemo(() => buildHolders({ users, roles, permissions, branches }), [users, roles, permissions, branches]);
-  const myNotifications = useMemo(() => noticesFor(currentUser, notifications, holders), [currentUser, notifications, holders]);
+  const myNotifications = notices.notices;
   const myAlerts = useMemo(
     () => deriveAlerts({ plans, enrollments, contracts, stockItems, items, branches: locations, blockedSessions: blockedFirstSessions(enrollments, gateContext()) }, todayLocalISO())
       .filter(a => visibility(currentUser, a, holders).visible),
@@ -3390,10 +3410,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       updateShipmentStatus,
       updateShipment,
       deleteShipment,
-      notifications,
       myNotifications,
       myAlerts,
       markNotificationAsRead,
+      notifyMissingStock,
       incidents,
       currentBranchId,
       selectBranch,

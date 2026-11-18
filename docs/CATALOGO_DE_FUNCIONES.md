@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**53 funcionalidades · 188 funciones** (3 reservadas) · 22 avisos · 14 combinaciones a separar.
+**53 funcionalidades · 188 funciones** (3 reservadas) · 23 avisos · 14 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -65,7 +65,7 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver verificación** · menú «Verificación»<br><code>op-verificacion:view</code> | ver | — | — | Verificación de materiales, Matrícula, Receta de materiales, Stock, Asesoría → — | — |
-| **Registrar la entrega de materiales**<br><code>op-verificacion:deliver</code> | operar | Ver verificación, Ver el stock | Confirmar la recepción de un envío en la misma sede (recomendada) | Receta de materiales, Stock → Verificación de materiales, Stock, Kardex | — |
+| **Registrar la entrega de materiales**<br><code>op-verificacion:deliver</code> | operar | Ver verificación, Ver el stock | Confirmar la recepción de un envío en la misma sede (recomendada) | Receta de materiales, Stock → Verificación de materiales, Stock, Kardex | Sin stock para verificar materiales (aviso a Logística) |
 
 ### Caja `op-caja`
 
@@ -127,8 +127,8 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver envíos** · menú «Envíos»<br><code>log-envios:view</code> | ver | — | — | Envío, Filial → — | — |
-| **Preparar un envío**<br><code>log-envios:create</code> | crear | Ver envíos, Ver el stock | Realizar el envío (despachar) en cualquier sede (recomendada) | Stock, Filial → Envío | — |
-| **Editar un envío**<br><code>log-envios:edit</code> | editar | Ver envíos | — | — → Envío | — |
+| **Preparar un envío**<br><code>log-envios:create</code> | crear | Ver envíos, Ver el stock | Realizar el envío (despachar) en cualquier sede (recomendada) | Stock, Filial → Envío | Envío despachado |
+| **Editar un envío**<br><code>log-envios:edit</code> | editar | Ver envíos | — | — → Envío | Envío despachado |
 | **Eliminar un envío** 🛡 control<br><code>log-envios:delete</code> | eliminar | Ver envíos | — | — → Envío | — |
 | **Realizar el envío (despachar)**<br><code>log-envios:dispatch</code> | operar | Ver envíos, Ver el stock | Confirmar la recepción de un envío en la sede destino (obligatoria) | Stock, Envío, Filial → Envío, Stock, Kardex | Envío despachado, Envío cancelado |
 
@@ -356,7 +356,7 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver roles** · menú «Roles»<br><code>org-roles:view</code> | ver | — | — | Rol, Permisos del rol, Cuenta de usuario → — | — |
-| **Crear rol**<br><code>org-roles:create</code> | crear | Ver roles | — | — → Rol | — |
+| **Crear rol**<br><code>org-roles:create</code> | crear | Ver roles | — | — → Rol | Permisos de un rol modificados |
 | **Editar rol**<br><code>org-roles:edit</code> | editar | Ver roles | — | — → Rol | — |
 | **Eliminar rol** 🛡 control<br><code>org-roles:delete</code> | eliminar | Ver roles | — | — → Rol | — |
 | **Configurar permisos** 🛡 control · menú «Permisos»<br><code>org-roles:config_perms</code> | configurar | Ver roles | — | Rol, Permisos del rol → Permisos del rol | Permisos de un rol modificados |
@@ -492,7 +492,7 @@ El aviso llega a quien tenga la función indicada en la sede que corresponde, no
 
 | Aviso | Lo dispara | Llega a quien tenga… (y dónde) |
 |---|---|---|
-| Envío despachado | Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
+| Envío despachado | Preparar un envío · Editar un envío · Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
 | Envío cancelado | Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
 | Envío recibido | Confirmar la recepción de un envío | Realizar el envío (despachar) (sede origen) |
 | Transferencia solicitada | Solicitar transferencia | Aprobar transferencia (cualquier sede) |
@@ -506,6 +506,7 @@ El aviso llega a quien tenga la función indicada en la sede que corresponde, no
 | Solicitud de cambio de programa pendiente | Solicitar cambio de programa o nivel | Aprobar cambio de programa o nivel (cualquier sede) |
 | Solicitud de traslado de sede pendiente | Solicitar traslado de sede | Aprobar traslado de sede (cualquier sede) |
 | Solicitud resuelta | Aprobar caída · Aprobar reactivación · Aprobar cambio de programa o nivel · Aprobar traslado de sede | Quien hizo la solicitud |
+| Sin stock para verificar materiales (aviso a Logística) | Registrar la entrega de materiales | Preparar un envío (cualquier sede) |
 | Primera asesoría sin materiales entregados | La regla del sistema (por fecha o estado) | Registrar la entrega de materiales (sede del alumno o documento)<br>Marcar la asistencia de la asesoría (sede del alumno o documento) |
 | Pago reversado | Reversar pago | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
 | Movimiento de caja reversado | Reversar movimiento | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
@@ -513,7 +514,7 @@ El aviso llega a quien tenga la función indicada en la sede que corresponde, no
 | Cuota refinanciada | Refinanciar una cuota | Ver cartera y reportes de cobranza (sede del alumno o documento)<br>Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
 | Cuotas vencidas | La regla del sistema (por fecha o estado) | Enviar recordatorios (sede del alumno o documento) |
 | Contratos por vencer | La regla del sistema (por fecha o estado) | Editar contrato (cambio de condiciones con motivo) (cualquier sede) |
-| Permisos de un rol modificados | Configurar permisos | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
+| Permisos de un rol modificados | Crear rol · Configurar permisos | Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
 
 ## Combinaciones que conviene separar
 

@@ -117,6 +117,7 @@ export const EVENTS: EventDef[] = [
   { id: 'program_change_request_pending', label: 'Solicitud de cambio de programa pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_program_change', where: 'any' }], fallback: FALLBACK },
   { id: 'enrollment_transfer_pending', label: 'Solicitud de traslado de sede pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_transfer', where: 'any' }], fallback: FALLBACK },
   { id: 'request_resolved', label: 'Solicitud resuelta', trigger: 'accion', recipients: [{ person: 'requester' }], fallback: FALLBACK },
+  { id: 'verification_without_stock', label: 'Sin stock para verificar materiales (aviso a Logística)', trigger: 'accion', recipients: [{ capability: 'log-envios:create', where: 'any' }], fallback: FALLBACK },
   { id: 'first_session_without_materials', label: 'Primera asesoría sin materiales entregados', trigger: 'sistema', recipients: [{ capability: 'op-verificacion:deliver', where: 'subject-branch' }, { capability: 'psi-prog:mark_attendance', where: 'subject-branch' }], fallback: FALLBACK },
   // Dinero
   { id: 'payment_reversed', label: 'Pago reversado', trigger: 'accion', recipients: [SUPERVISE], fallback: FALLBACK },
@@ -298,7 +299,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
     { action: 'view', label: 'Ver verificación', kind: 'ver', menu: menu(OP, 'Verificación'), reads: ['verification', 'enrollment', 'recipe', 'stock', 'schedule'] },
     {
       action: 'deliver', label: 'Registrar la entrega de materiales', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['recipe', 'stock'],
-      writes: ['verification', 'stock', 'kardex'], actions: ['updateEnrollmentVerification'],
+      writes: ['verification', 'stock', 'kardex'], emits: ['verification_without_stock'], actions: ['updateEnrollmentVerification', 'notifyMissingStock'],
       counterparts: [cp('log-recepciones:confirm', 'same-branch', 'advisory', 'Sin quien reciba los envíos en la sede, el stock de materiales no se repone y la verificación se detendrá.')],
     },
   ]),
@@ -355,9 +356,9 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('log-envios', 'Envíos', 'mod-logistica', [
     { action: 'view', label: 'Ver envíos', kind: 'ver', menu: menu('logistica', 'Envíos'), reads: ['shipment', 'branch'] },
-    { action: 'create', label: 'Preparar un envío', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['shipment'], actions: ['addShipment'],
+    { action: 'create', label: 'Preparar un envío', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['shipment'], emits: ['shipment_dispatched'], actions: ['addShipment'],
       counterparts: [cp('log-envios:dispatch', 'any', 'advisory', 'Nadie podrá despachar el envío preparado: hay que crear un usuario con «Realizar el envío (despachar)».')] },
-    { action: 'edit', label: 'Editar un envío', kind: 'editar', requires: ['view'], writes: ['shipment'], actions: ['updateShipment'] },
+    { action: 'edit', label: 'Editar un envío', kind: 'editar', requires: ['view'], writes: ['shipment'], emits: ['shipment_dispatched'], actions: ['updateShipment'] },
     { action: 'delete', label: 'Eliminar un envío', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['shipment'], actions: ['deleteShipment'] },
     {
       action: 'dispatch', label: 'Realizar el envío (despachar)', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['stock', 'shipment', 'branch'],
@@ -518,7 +519,7 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   })),
   f('org-roles', 'Roles y Permisos', 'mod-org', [
     { action: 'view', label: 'Ver roles', kind: 'ver', menu: menu('organizacion', 'Roles'), reads: ['role', 'permission', 'user'] },
-    { action: 'create', label: 'Crear rol', kind: 'crear', requires: ['view'], writes: ['role'], actions: ['addRole'] },
+    { action: 'create', label: 'Crear rol', kind: 'crear', requires: ['view'], writes: ['role'], emits: ['role_permissions_changed'], actions: ['addRole'] },
     { action: 'edit', label: 'Editar rol', kind: 'editar', requires: ['view'], writes: ['role'], actions: ['updateRole'] },
     { action: 'delete', label: 'Eliminar rol', kind: 'eliminar', requires: ['view'], sensitive: 'control', writes: ['role'], actions: ['deleteRole'] },
     { action: 'config_perms', label: 'Configurar permisos', kind: 'configurar', requires: ['view'], sensitive: 'control', menu: menu('organizacion', 'Permisos'), reads: ['role', 'permission'], writes: ['permission'], emits: ['role_permissions_changed'], actions: ['savePermissions'] },

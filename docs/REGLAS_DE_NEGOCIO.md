@@ -928,7 +928,7 @@ Si algo falla, todo se deshace y los números quedan libres: **sin repetidos y s
 
 **Qué se ve en pantalla.** Marcar enviado, registrar una llamada y omitir esperan la respuesta de la base y apagan los botones mientras guardan; si la base rechaza, aparece su motivo en español. Configuración → Psicopedagogía → Recordatorios guarda con «Guardando…» y muestra la tabla de versiones (días de cada tipo, quién y cuándo).
 
-**Límites anotados.** La base no vuelve a calcular que una vigencia esté «por vencer» (depende de la duración del programa y de la primera asesoría): comprueba que la matrícula siga activa. Los avisos (notificaciones) siguen en memoria y son el siguiente lote (mensajería y avisos).
+**Límites anotados.** La base no vuelve a calcular que una vigencia esté «por vencer» (depende de la duración del programa y de la primera asesoría): comprueba que la matrícula siga activa. Los avisos (notificaciones) pasaron a la base en el Lote 11A (ver «Avisos de la campana en la base»).
 
 **Cómo se prueba.** `npx tsx scripts/check-psy-reminders-db.ts` (filas ↔ lo que se muestra, operaciones contra un repositorio en memoria, la migración con el registro, los mismos textos de error que las reglas del sistema y el cableado) y, contra una copia de la base, la migración con cuentas de dos sedes (política por versiones, cada tipo de recordatorio con sus rechazos, quién ve qué, lo que no se cambia, deshacer y volver a aplicar) y con la lista que arma la propia pantalla: lo que se registra desaparece de lo pendiente (las claves coinciden con las de la base). Limitación: la copia tiene una sola conexión, así que el candado entre dos personas a la vez no se probó con conexiones reales.
 
@@ -947,3 +947,33 @@ Si algo falla, todo se deshace y los números quedan libres: **sin repetidos y s
 **Límites anotados.** Las vacaciones y el cese no viajan en el directorio (los contratos siguen cerrados): si se elige a alguien de vacaciones, la base lo rechaza al guardar con su mensaje («El responsable no trabaja ese día…»), pero la lista no lo marca de antemano en esa cuenta. Sí lo marca para quien lee contratos. Si algún día se quiere marcar de antemano para todos, se agregan las ausencias al directorio.
 
 **Cómo se prueba.** `npx tsx scripts/check-team-directory.ts` (filas ↔ modelo, la mezcla, la lista de responsables y el nombre en la agenda con SOLO el directorio, lo que la migración entrega y lo que no, y el cableado) y, contra una copia de la base, con las cuentas como están en la real (Administrador de sede, Psicopedagogía, solo almacén, con todas las sedes, sin acceso): antes de la migración el Administrador de sede recibe cero personas; después ve a su equipo de Chiclayo y a nadie más, sin ningún dato personal, y las tablas siguen cerradas para él.
+
+## Avisos de la campana en la base y «Avisar a Logística» (2026-11-18, migración 0026; Lote 11A)
+
+**Por qué.** Antes los avisos vivían en el navegador de cada cuenta: lo que disparaba una cuenta no le llegaba a otra. Y el navegador no podía calcular a quién le toca cada aviso, porque una cuenta común no lee las cuentas, roles ni funciones de las demás. Ahora los avisos se guardan en la base y **la base decide a quién le llega**, al leer.
+
+**Qué se guarda.**
+- Un aviso guarda **qué pasó y dónde**: el evento, la sede de destino, la de origen o la del asunto (una sede o el almacén), quién lo pidió, lo que nombra (el envío, la matrícula…) y quién lo emitió. **No guarda a quién llega.** Por eso, si se crea una cuenta con la función correcta en una sede, esa cuenta empieza a ver lo que ya iba hacia esa sede.
+- Cada cuenta marca **sus** avisos como leídos (lo que lee una no cambia lo de otra). Los avisos y esas marcas **solo se agregan**: no se modifican ni se borran.
+- Las **alertas por regla** (cuotas vencidas, stock bajo el mínimo, contratos por vencer, primera asesoría sin materiales) **no se guardan**: se siguen calculando al mostrar.
+
+**A quién le llega** (igual que antes, ahora dentro de la base).
+- Cada evento dice a quién va: a quien tenga una función **en la sede que corresponde** (destino, origen o asunto), a cualquiera que tenga la función, o a quien pidió. Cuentas activas con rol activo; el Superusuario (rol técnico) no cuenta como destinatario, pero **ve todos los avisos** para dar soporte.
+- Si el aviso no trae la sede que su regla pide, llega a todos los que tienen la función (es mejor que llegue de más a que no llegue).
+- Si **nadie** cumple la regla, llega a quien tenga «Recibir los avisos que nadie más puede recibir» y se muestra «Te llega porque nadie más podía recibirlo».
+- Para ver la campana hace falta «Ver la bandeja de avisos» (o sus dos funciones hermanas: supervisar y respaldo).
+- Las reglas de cada evento **salen del registro de funciones** (no se copian a mano a la base): `npx tsx scripts/doc-avisos-seed.ts` genera `supabase/seed/avisos_eventos.sql`, que se vuelve a cargar cuando cambia un evento.
+
+**Quién puede emitir un aviso.** Solo quien tiene alguna de las funciones que lo causan (las que declaran `emits` en el registro), solo avisos de eventos que dispara una acción, y alcanzando al menos una de las sedes del aviso. El nombre de quien lo emite sale de su cuenta, no de la pantalla. Emitir es una **consecuencia** de la acción (un envío despachado, una solicitud, una reversa…): si el aviso falla no se deshace la acción.
+
+**La campana se actualiza sola** cada minuto y al volver a la pestaña, porque ahora los avisos los generan otras personas. Se muestran los de los últimos 60 días.
+
+**Botón «Avisar a Logística» (verificación de materiales).**
+- Aparece cuando en la sede **no hay stock de nada** de lo que falta entregar (ni del kit ni de sus artículos sueltos). Lo pulsa quien puede registrar la entrega de materiales (no hay función nueva ni cambia ningún rol).
+- El aviso llega a quien tenga **«Preparar un envío»** en cualquier sede (la logística central, las mismas cuentas a las que ya llega el aviso de stock bajo el mínimo); si nadie la tiene, a quien reciba los avisos de respaldo.
+- Lleva la **sede**, la **matrícula y el alumno**, **lo que falta** (con su cantidad) y la **fecha de la primera asesoría** (o dice que aún no tiene una reservada).
+- **Una vez por matrícula y por día:** si se pulsa otra vez el mismo día, el sistema dice «Este aviso ya se envió». Al día siguiente se puede avisar de nuevo.
+
+**Límites anotados.** (1) La base cuenta como «alcanza todas las sedes» también a la cuenta marcada «Todas» (igual que el resto de sus reglas de sede); el cálculo del navegador solo mira la función del rol. (2) Las alertas por regla se calculan en el navegador con las cuentas que esa cuenta alcanza a leer. (3) El sistema sigue sin enviar WhatsApp ni correos. (4) Un aviso no se borra: si algún día crece demasiado, la limpieza de los viejos se hace aparte, desde la base.
+
+**Cómo se prueba.** `npx tsx scripts/check-notices-db.ts` (filas ↔ aviso, lo que se manda al emitir, las operaciones con un repositorio en memoria, que los eventos de la base sean los del registro, el texto y la clave del aviso a Logística, la migración y el cableado) y, contra una copia de la base con cuentas de varias sedes (Chiclayo, Piura, almacén, aprobador, supervisor, respaldo, cuenta marcada «Todas», sin la función de ver avisos e inactiva): quién emite y quién no, quién recibe cada aviso, el respaldo, lo leído por cuenta, que nadie escribe las tablas directo, y **el reparto de la base comparado con el del navegador en 8 625 combinaciones** (eventos × lugares × solicitante), además de deshacer y volver a aplicar.

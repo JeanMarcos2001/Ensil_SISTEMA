@@ -10,6 +10,7 @@
  */
 import type { Enrollment, Item, Plan, Recipe, StockItem } from '../context/DataContext';
 import { availableStock } from './inventory';
+import { longDayLabel, to12h } from './schedule';
 
 export type DeliveryMode = 'kit' | 'componentes';
 
@@ -189,6 +190,43 @@ export function noStockAtAll(recipe: Recipe, items: Item[], stock: StockItem[], 
     if (canSplitKit(item) && item!.composition!.some(c => !alreadyDelivered.includes(c.itemId) && availableStock(stock, branchId, c.itemId) >= line.quantity * c.quantity)) return false;
   }
   return pending > 0;
+}
+
+// ---------------------------------------------------------------- Aviso a Logística (sin stock)
+
+/** Las líneas de la receta que aún no se entregaron (lo que hace falta que Logística envíe), con su cantidad. */
+export function missingStockLines(recipe: Recipe, items: Item[], alreadyDelivered: string[]): { name: string; quantity: number }[] {
+  return recipe.items
+    .filter(line => !alreadyDelivered.includes(line.itemId))
+    .map(line => ({ name: items.find(i => i.id === line.itemId)?.name ?? line.itemId, quantity: line.quantity }));
+}
+
+export interface MissingStockNoticeInput {
+  enrollmentId: string;
+  student: string;
+  branchName: string;
+  recipe: Recipe;
+  items: Item[];
+  delivered: string[];
+  /** La primera asesoría vigente de la matrícula, si hay una (la urgencia del aviso). */
+  firstSession?: { date: string; time: string };
+  /** Hoy (día local, AAAA-MM-DD): con la matrícula forma la clave que evita avisar dos veces el mismo día. */
+  today: string;
+}
+
+/**
+ * El aviso «Sin stock para verificar» que recibe Logística: la sede, la matrícula y el alumno, lo que falta y la fecha de la primera asesoría.
+ * Se emite una vez por matrícula y por día (la clave lo impide la segunda vez).
+ */
+export function missingStockNotice(input: MissingStockNoticeInput): { title: string; message: string; key: string } {
+  const sede = input.branchName || 'la sede';
+  const lines = missingStockLines(input.recipe, input.items, input.delivered).map(l => `${l.quantity} × ${l.name}`).join(', ');
+  const first = input.firstSession ? ` La primera asesoría es el ${longDayLabel(input.firstSession.date)} a las ${to12h(input.firstSession.time)}.` : ' La matrícula aún no tiene primera asesoría reservada.';
+  return {
+    title: `Sin stock para verificar materiales en ${sede}`,
+    message: `En ${sede} no hay stock de nada de lo que falta entregar a ${input.student} (matrícula ${input.enrollmentId}): ${lines}.${first} Se necesita un envío de stock a la sede.`,
+    key: `${input.enrollmentId}:${input.today}`,
+  };
 }
 
 /** Nombres de lo que quedaría sin entregar con las marcas actuales (un kit por componentes lista los componentes que faltan). */

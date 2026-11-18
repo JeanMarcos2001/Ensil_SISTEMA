@@ -124,8 +124,8 @@ check('Lo ya entregado no cuenta: si solo falta el kit y no hay nada de él, se 
 const page = readFileSync('src/pages/Verification.tsx', 'utf8').replace(/\r\n/g, '\n');
 check('La pantalla ofrece «Buscar por componentes» (sin depender de ninguna casilla del artículo), lista todos los componentes (en gris los que no tienen stock) y nada se marca solo',
   /Buscar por componentes/.test(page) && !/allowUnpacking|Entregar por componentes/.test(page) && /Sin stock suficiente en la sede|sin stock suficiente/.test(page) && /useState<Record<string, boolean>>\(\{\}\)/.test(page));
-check('Sin stock del kit la lista de componentes se abre sola, y sin stock de nada se avisa en medio de la ventana (el botón «Avisar a Logística» llega con la mensajería)',
-  /initialModes\(recipe, items, delivered, \{ stock: stockItems, branchId: enrollment\.branchId \|\| '' \}\)/.test(page) && /noStockAtAll\(/.test(page) && /No hay stock en \{branchName\} de ningún artículo de esta receta/.test(page) && !/Avisar a Logística/.test(page));
+check('Sin stock del kit la lista de componentes se abre sola, y sin stock de nada se avisa en medio de la ventana con el botón «Avisar a Logística» (Lote 11A; solo para quien puede entregar materiales)',
+  /initialModes\(recipe, items, delivered, \{ stock: stockItems, branchId: enrollment\.branchId \|\| '' \}\)/.test(page) && /noStockAtAll\(/.test(page) && /No hay stock en \{branchName\} de ningún artículo de esta receta/.test(page) && /Avisar a Logística/.test(page) && /can\(PERM\.deliverMaterials\)/.test(page) && /notifyMissingStock\(selectedEnrollment\.id\)/.test(page));
 check('El resumen dice qué quedaría pendiente con lo marcado', /pendingNames\(/.test(page) && /Quedaría pendiente:/.test(page));
 
 console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} caso(s) fallaron.`);

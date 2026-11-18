@@ -18,7 +18,7 @@ Documento de trabajo del **2026-11-06**. Reúne **todo lo que falta** para usar 
 - Reglas del acceso: una cuenta nace de una persona de Personal; el rol real se elige solo en Usuarios y se filtra por el lugar de trabajo; el Superusuario es solo para cuentas técnicas; alcance por sede en Personal y Asignaciones.
 - Hoy hay en la base: 6 empresas, 16 sedes, 1 almacén, 7 roles, 2 cuentas, 1 persona con su asignación; y las tablas de contratos y planillas (migración 0007, vacías todavía); el catálogo comercial de prueba (migración 0010): 4 programas, 4 niveles, 5 tipos de pago, 8 tarifarios, 2 promociones y 5 orígenes de leads; los artículos de prueba (migración 0011): 5 artículos, 3 precios y 3 recetas; el stock, el kardex, los envíos y las transferencias (migraciones 0012 y 0013) con el stock de partida; y los titulares y alumnos de prueba (migración 0014): 5 titulares y 5 alumnos.
 
-**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): cobranza (política y recordatorios), asesorías y actividades de Psicopedagogía, auditoría y avisos. (Matrículas, planes y cuotas, pagos, caja, cierres de caja, caja chica, notas de crédito, solicitudes y correcciones ya están en la base o en camino: ver el Lote 8 y el Lote 9.)
+**Todavía NO está en la base de datos** (vive en memoria y se pierde al recargar): la bandeja de Mensajería interna (de ejemplo) y la auditoría. (Matrículas, planes y cuotas, pagos, caja, cierres de caja, caja chica, notas de crédito, solicitudes y correcciones ya están en la base o en camino: ver el Lote 8 y el Lote 9.)
 
 > **Consecuencia:** el sistema **no puede usarse todavía con datos reales de alumnos ni dinero**. Eso es el centro de este plan (Fase 3). Todo lo demás lo rodea.
 
@@ -187,8 +187,9 @@ Es lo que más trabajo lleva. Se hace **por pasos, en este orden**, repitiendo e
 
 ### 6.8 Solicitudes, avisos y cierre del bloque
 
-- ☐ 🤖 **Aviso «Sin stock para verificar» a Logística** (botón «Avisar a Logística» en la verificación de materiales cuando no hay stock de nada; llega a quien tenga la función de logística central; lleva sede, matrícula, artículos que faltan y fecha de la primera asesoría; pedido del usuario el 2026-11-11, se construye junto con la mensajería).
-- ☐ 🤖 Solicitudes (caída, reactivación, cambio, traslado), avisos y alertas por regla, y el alcance por sede en **todas** las pantallas (hoy solo Stock, Kardex, Envíos, Transferencias, Recepciones, el asistente de matrícula y el Dashboard la respetan). *(L)*
+- ☑ **(Lote 11A, 2026-11-18; migración 0026 y eventos aplicados) Aviso «Sin stock para verificar» a Logística** (botón «Avisar a Logística» en la verificación de materiales cuando no hay stock de nada; llega a quien tenga la función de logística central; lleva sede, matrícula, artículos que faltan y fecha de la primera asesoría; pedido del usuario el 2026-11-11, se construye junto con la mensajería).
+- ☑ **Solicitudes** (caída, reactivación, cambio, traslado) en la base (Lote 9B) y **avisos de la campana** en la base (Lote 11A: la base reparte cada aviso por función y sede; las alertas por regla se calculan al mostrar).
+- ☐ 🤖 El alcance por sede en **todas** las pantallas (hoy solo Stock, Kardex, Envíos, Transferencias, Recepciones, el asistente de matrícula y el Dashboard la respetan). *(L)*
 - ☐ 🤖 **Retirar el código y los datos de ejemplo** una vez que todo esté en la base. *(M)*
 
 ---
