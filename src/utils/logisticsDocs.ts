@@ -144,11 +144,11 @@ export function transferRequestError(t: Pick<Transfer, 'reason' | 'items'>, item
   return detailError(t.items, [], itemIds);
 }
 
-/** Lo que exige despachar una transferencia aprobada: método de envío, ETA, transporte y cajas coherentes con el detalle. */
+/** Lo que exige despachar una transferencia aprobada: método de envío, fecha de llegada, transporte y cajas coherentes con el detalle. */
 export function transferDispatchError(
   t: Pick<Transfer, 'eta' | 'shippingMethodId' | 'courierId' | 'trackingNumber' | 'travelerName' | 'shippingObservation' | 'items' | 'boxes'>, cat: TransportCatalog,
 ): string | null {
-  if (!t.shippingMethodId || !t.eta) return 'Por favor complete el método de envío y el ETA.';
+  if (!t.shippingMethodId || !t.eta) return 'Por favor complete el método de envío y la fecha de llegada.';
   const transport = transportError(cat.methods.find(m => m.id === t.shippingMethodId), t, false);
   if (transport) return transport;
   return detailError(t.items, (t.boxes ?? []) as (ShipmentBox | TransferBox)[], cat.itemIds);
@@ -206,18 +206,40 @@ export interface ReceptionTiming { status: string; eta?: string; etaTime?: strin
 /** Hoy y la hora (AAAA-MM-DD y HH:MM), en la hora del lugar (Lima). La base usa la hora de Lima. */
 export interface ClockParts { date: string; time: string }
 
-export const RECEPTION_NO_ETA = 'Este documento no tiene fecha de llegada (ETA): pida a Logística que la registre o que habilite la recepción manual.';
-/** El aviso cuando todavía no llega la fecha estimada. La base dice lo mismo con la fecha puesta en el «%». */
+export const RECEPTION_NO_ETA = 'Este documento no tiene fecha de llegada: pida a Logística que la registre o que habilite la recepción manual.';
+/** El aviso cuando todavía no llega la fecha de llegada. La base dice lo mismo con la fecha puesta en el «%». */
 export const receptionTooEarlyMessage = (etaLabel: string): string =>
-  `Todavía no llega la fecha estimada de llegada (ETA: ${etaLabel}). La recepción se habilita desde ese momento; si llegó antes, pida a Logística que habilite la recepción manual.`;
+  `La recepción se habilita desde la fecha de llegada (${etaLabel}). Si llegó antes, pida a Logística que habilite la recepción manual.`;
 
 const dmy = (iso: string): string => iso.split('-').reverse().join('/');
-const hm12 = (t: string): string => {
+/** La hora en 12 horas: «6 p. m.» en punto; con minutos, «4:10 p. m.». */
+export const hm12 = (t: string): string => {
   const [h = 0, m = 0] = t.split(':').map(Number);
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'p. m.' : 'a. m.'}`;
+  return `${h % 12 === 0 ? 12 : h % 12}${m === 0 ? '' : `:${String(m).padStart(2, '0')}`} ${h >= 12 ? 'p. m.' : 'a. m.'}`;
 };
-/** La ETA como se muestra: 19/11/2026 4:10 p. m. (sin hora, solo la fecha). */
+/** La fecha de llegada como se muestra: 19/11/2026 4:10 p. m. (sin hora, solo la fecha). */
 export const etaLabel = (eta: string, etaTime?: string): string => (etaTime ? `${dmy(eta)} ${hm12(etaTime)}` : dmy(eta));
+
+/** Las horas de llegada que se pueden elegir al despachar un envío: de 6 a. m. a 10 p. m., en punto (no hay minutos). */
+export const ARRIVAL_FIRST_HOUR = 6;
+export const ARRIVAL_LAST_HOUR = 22;
+export interface HourOption { value: string; label: string }
+/**
+ * La lista de horas para elegir la hora de llegada: «6 a. m.», «7 a. m.» … «12 p. m.» … «10 p. m.» (el valor es «HH:00»). Si el envío ya trae una hora
+ * fuera de la lista (uno anterior a esta regla, por ejemplo 4:10 p. m.), se agrega para no perderla al editarlo.
+ */
+export function arrivalHourOptions(current?: string): HourOption[] {
+  const options: HourOption[] = [];
+  for (let h = ARRIVAL_FIRST_HOUR; h <= ARRIVAL_LAST_HOUR; h++) {
+    const value = `${String(h).padStart(2, '0')}:00`;
+    options.push({ value, label: hm12(value) });
+  }
+  if (current && !options.some(o => o.value === current)) {
+    options.push({ value: current, label: hm12(current) });
+    options.sort((a, b) => a.value.localeCompare(b.value));
+  }
+  return options;
+}
 
 export interface ReceptionWindow {
   open: boolean;
@@ -226,9 +248,9 @@ export interface ReceptionWindow {
 }
 
 /**
- * ¿Ya se puede recibir este documento? La recepción se habilita **desde la fecha (y la hora) estimada de llegada (ETA)**; antes de eso el documento solo se ve.
- * Si llegó antes, Logística la habilita a mano (recepción manual) o lo marca «Listo para recepción». Sin ETA ni habilitación, tampoco se recibe.
- * La base vuelve a comprobarlo al confirmar (`confirmar_recepcion`, migración 0027).
+ * ¿Ya se puede recibir este documento? La recepción se habilita **desde la fecha (y la hora) de llegada** (en el código, `eta`); antes de eso el documento solo se ve.
+ * Si llegó antes, Logística la habilita a mano (recepción manual) o lo marca «Listo para recepción». Sin fecha de llegada ni habilitación, tampoco se recibe.
+ * La base vuelve a comprobarlo al confirmar (`confirmar_recepcion`, migraciones 0027 y 0028).
  */
 export function receptionWindow(doc: ReceptionTiming, now: ClockParts): ReceptionWindow {
   if (doc.manualEnable || doc.status === 'Listo para recepción') return { open: true };

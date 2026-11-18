@@ -5,12 +5,15 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2, ArrowRight, Calendar, Clock, MapPin, Save } from 'lucide-react';
+import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2, ArrowRight, Calendar, Clock, MapPin, Save, Printer } from 'lucide-react';
 import { useData, ShippingMethod, Courier, ShipmentItem, Shipment, ShipmentBox, ShipmentBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
 import { nextSequentialId } from '../../utils/ids';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
+import { arrivalHourOptions, etaLabel } from '../../utils/logisticsDocs';
+import { printHtml } from '../../utils/printTable';
+import { shipmentChecklistHtml } from '../../utils/shipmentPrint';
 
 export function Shipments() {
   const { 
@@ -307,6 +310,30 @@ export function Shipments() {
 
   const handleConfirmProperly = () => {
     handleSaveShipment('En tránsito');
+  };
+
+  /** Imprime la lista de verificación del envío (cajas y artículos, cada uno con su casilla para marcar a mano). */
+  const handlePrintChecklist = () => {
+    const html = shipmentChecklistHtml({
+      code: selectedShipment?.id,
+      originName: warehouse?.name ?? 'Almacén central',
+      destinationName: stockLocations.find(b => b.id === destinationId)?.name ?? '',
+      createdLabel: etaLabel(date),
+      arrivalLabel: eta ? etaLabel(eta, etaTime) : '',
+      methodName: shippingMethods.find(m => m.id === selectedShippingMethod)?.name ?? '',
+      courierName: couriers.find(c => c.id === selectedCourier)?.name,
+      trackingNumber: trackingNumber || undefined,
+      travelerName: travelerName || undefined,
+      observation: observation || undefined,
+      boxes: boxes.map(b => ({
+        number: b.boxNumber,
+        observation: b.observation,
+        items: b.items.map(i => ({ name: items.find(x => x.id === i.itemId)?.name ?? 'Artículo desconocido', quantity: i.quantity })),
+      })),
+    }, new Date().toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }));
+    if (!printHtml(html)) {
+      openConfirm({ title: 'No se pudo imprimir', description: 'El navegador no abrió la ventana de impresión. Intente de nuevo.', variant: 'danger', confirmLabel: 'Entendido', onConfirm: () => {} });
+    }
   };
 
   const resetForm = () => {
@@ -679,7 +706,7 @@ export function Shipments() {
                        {shipment.eta && (
                           <div className="flex items-center gap-1 text-text-muted">
                             <Clock size={12} />
-                            <span>ETA: {shipment.eta} {shipment.etaTime || ''}</span>
+                            <span>Llegada: {etaLabel(shipment.eta, shipment.etaTime)}</span>
                           </div>
                        )}
                     </div>
@@ -724,18 +751,18 @@ export function Shipments() {
               </div>
               
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Origen</label>
-                  <input 
-                    type="text" 
+                <div className="space-y-1.5 min-w-0">
+                  <label className="block truncate text-xs font-medium text-text-secondary uppercase tracking-wide">Origen</label>
+                  <input
+                    type="text"
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
                     value={stockLocations.find(b => b.id === originId)?.name || 'Central'}
                     disabled
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Sede Destino <span className="text-error">*</span></label>
-                  <select 
+                <div className="space-y-1.5 min-w-0">
+                  <label className="block truncate text-xs font-medium text-text-secondary uppercase tracking-wide">Sede Destino <span className="text-error">*</span></label>
+                  <select
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={destinationId}
                     onChange={(e) => setDestinationId(e.target.value)}
@@ -746,33 +773,45 @@ export function Shipments() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha Creación</label>
-                  <DateInput 
-                    
-                    className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={date}
-                    disabled
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">ETA Estimada <span className="text-error">*</span></label>
-                  <div className="flex gap-2">
-                    <DateInput 
-                      
-                      className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
-                      value={eta}
-                      onChange={(e) => setEta(e.target.value)}
-                    />
-                    <input 
-                      type="time" 
-                      className="w-32 h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
-                      value={etaTime}
-                      onChange={(e) => setEtaTime(e.target.value)}
+              </div>
+
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5 min-w-0">
+                    <label className="block truncate text-xs font-medium text-text-secondary uppercase tracking-wide" title="Fecha de creación">Fecha de creación</label>
+                    <DateInput
+                      className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
+                      value={date}
+                      disabled
                     />
                   </div>
+                  <div className="space-y-1.5 min-w-0">
+                    <label className="block truncate text-xs font-medium text-text-secondary uppercase tracking-wide" title="Fecha de llegada">Fecha de llegada <span className="text-error">*</span></label>
+                    <DateInput
+                      className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
+                      value={eta}
+                      placeholder="Elegir fecha"
+                      onChange={(e) => setEta(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5 min-w-0">
+                    <label className="block truncate text-xs font-medium text-text-secondary uppercase tracking-wide" title="Hora de llegada">Hora de llegada <span className="text-error">*</span></label>
+                    <select
+                      aria-label="Hora de llegada"
+                      className="w-full h-10 bg-surface border border-border-soft rounded-xl px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-colors"
+                      value={etaTime}
+                      onChange={(e) => setEtaTime(e.target.value)}
+                    >
+                      <option value="">Elegir hora</option>
+                      {arrivalHourOptions(etaTime).map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
+                <p className="text-[11px] text-text-muted">La sede podrá recibirlo desde esa fecha y hora (de 6 a. m. a 10 p. m.).</p>
               </div>
+
 
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Observación General</label>
@@ -924,11 +963,14 @@ export function Shipments() {
             {dispatchAvailability?.advisories.map(a => (
               <p key={a} className="self-start text-xs text-warning-text">{a}</p>
             ))}
-            <div className="flex justify-end gap-3">
-              <Button variant="ghost" onClick={() => { setIsSummaryOpen(false); setIsNewShipmentOpen(true); }}>Volver a editar</Button>
-              <Button variant="primary" onClick={handleConfirmProperly} disabled={saving || !can('log-envios:dispatch') || dispatchAvailability?.available === false}>
-                {selectedShipment?.status === 'Borrador' ? 'Finalizar Despacho' : 'Confirmar Envío'}
-              </Button>
+            <div className="flex w-full items-center justify-between gap-3">
+              <Button variant="secondary" onClick={handlePrintChecklist} className="gap-2"><Printer size={16} />Imprimir lista</Button>
+              <div className="flex justify-end gap-3">
+                <Button variant="ghost" onClick={() => { setIsSummaryOpen(false); setIsNewShipmentOpen(true); }}>Volver a editar</Button>
+                <Button variant="primary" onClick={handleConfirmProperly} disabled={saving || !can('log-envios:dispatch') || dispatchAvailability?.available === false}>
+                  {selectedShipment?.status === 'Borrador' ? 'Finalizar Despacho' : 'Confirmar Envío'}
+                </Button>
+              </div>
             </div>
           </div>
         }
@@ -948,8 +990,8 @@ export function Shipments() {
               <span className="font-medium text-text-primary">{shippingMethods.find(m => m.id === selectedShippingMethod)?.name}</span>
             </div>
             <div>
-              <span className="text-text-secondary block mb-1">ETA:</span>
-              <span className="font-medium text-text-primary">{eta} {etaTime || ''}</span>
+              <span className="text-text-secondary block mb-1">Fecha de llegada:</span>
+              <span className="font-medium text-text-primary">{eta ? etaLabel(eta, etaTime) : '-'}</span>
             </div>
             {selectedCourier && (
               <>
@@ -1027,8 +1069,8 @@ export function Shipments() {
                     <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedShipment.destinationId)?.name}</span>
                   </div>
                   <div>
-                    <span className="text-xs text-text-muted block">ETA</span>
-                    <span className="text-sm font-medium text-text-primary">{selectedShipment.eta || '-'} {selectedShipment.etaTime || ''}</span>
+                    <span className="text-xs text-text-muted block">Fecha de llegada</span>
+                    <span className="text-sm font-medium text-text-primary">{selectedShipment.eta ? etaLabel(selectedShipment.eta, selectedShipment.etaTime) : '-'}</span>
                   </div>
                 </div>
               </div>

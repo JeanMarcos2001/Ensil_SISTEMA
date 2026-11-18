@@ -9,6 +9,7 @@ import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, 
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
+import { etaLabel } from '../../utils/logisticsDocs';
 
 export function Transfers() {
   const { 
@@ -160,7 +161,7 @@ export function Transfers() {
   const validateDispatchForm = () => {
     setFormError(null);
     if (!selectedShippingMethod || !eta) {
-      setFormError('Por favor complete el método de envío y el ETA.');
+      setFormError('Por favor complete el método de envío y la fecha de llegada.');
       return false;
     }
 
@@ -824,7 +825,7 @@ export function Transfers() {
                   />
                 </div>
                 <div className="col-span-2 space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">ETA Estimada <span className="text-error">*</span></label>
+                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha de llegada <span className="text-error">*</span></label>
                   <DateInput 
                     
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
@@ -978,8 +979,8 @@ export function Transfers() {
               <span className="font-medium text-text-primary">{shippingMethods.find(m => m.id === selectedShippingMethod)?.name}</span>
             </div>
             <div>
-              <span className="text-text-secondary block mb-1">ETA:</span>
-              <span className="font-medium text-text-primary">{eta}</span>
+              <span className="text-text-secondary block mb-1">Fecha de llegada:</span>
+              <span className="font-medium text-text-primary">{eta ? etaLabel(eta) : '-'}</span>
             </div>
           </div>
 
@@ -1056,8 +1057,8 @@ export function Transfers() {
                     <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedTransfer.destinationId)?.name}</span>
                   </div>
                   <div>
-                    <span className="text-xs text-text-muted block">ETA</span>
-                    <span className="text-sm font-medium text-text-primary">{selectedTransfer.eta || '-'}</span>
+                    <span className="text-xs text-text-muted block">Fecha de llegada</span>
+                    <span className="text-sm font-medium text-text-primary">{selectedTransfer.eta ? etaLabel(selectedTransfer.eta) : '-'}</span>
                   </div>
                 </div>
               </div>

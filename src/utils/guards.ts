@@ -172,8 +172,11 @@ export const menuVisible = (moduleId: string, item: string, can: (capabilityId: 
 /**
  * Lo que se le ofrece a quien mira: si falta una contraparte obligatoria no se ofrece la función, con el motivo. Al Superusuario sí se
  * le ofrece (es quien crea las cuentas que faltan y hoy puede hacerlo todo) y se le muestra el motivo como aviso.
+ * `verified` dice si se pudo comprobar quién cubre las contrapartes: una cuenta común no lee a las demás y depende de lo que conteste la base
+ * (migración 0028). Mientras no se sepa, **no se bloquea ni se avisa** por algo que no se pudo comprobar (el Superusuario sí lee todas las cuentas).
  */
-export function availabilityForViewer(base: Availability, isSuperuser: boolean): Availability {
+export function availabilityForViewer(base: Availability, isSuperuser: boolean, verified = true): Availability {
+  if (!verified && !isSuperuser) return { available: true, advisories: [] };
   if (base.available || !isSuperuser) return base;
   return { available: true, advisories: [`${base.reason} (Se le ofrece porque usted es Superusuario.)`, ...base.advisories] };
 }

@@ -86,6 +86,7 @@ import {
 import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, seatLimitError, validateRoleInput, type AcceptedRisk } from '../utils/roleBuilder';
 import { visibility, type NoticeScope } from '../utils/notifications';
 import { useNotices } from '../hooks/useNotices';
+import { useCounterparts } from '../hooks/useCounterparts';
 import { missingStockNotice, noStockAtAll, recipeForEnrollment } from '../utils/verification';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
@@ -3217,8 +3218,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     [plans, enrollments, contracts, stockItems, items, branches, schedules, recipes, holders, currentUser]
   );
 
+  // Quién recibe en cada sede lo dice también la base: una cuenta común (Logística, por ejemplo) no lee a las demás y no «veía» a quien recibe
+  const counterparts = useCounterparts();
+  const availabilityHolders = useMemo(() => [...holders, ...counterparts.holders], [holders, counterparts.holders]);
   const availabilityOf: DataContextType['availabilityOf'] = (capabilityId, target) =>
-    availabilityForViewer(availability(capabilityId, holders, target), currentUser.role === SUPERUSER);
+    availabilityForViewer(availability(capabilityId, availabilityHolders, target), currentUser.role === SUPERUSER, counterparts.ready);
 
   const data: DataContextType = {
       guardians, 

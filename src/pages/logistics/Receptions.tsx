@@ -329,7 +329,7 @@ export function Receptions() {
               <tr className="border-b border-border-soft bg-surface-muted/50">
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Documento</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Origen</th>
-                <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">ETA / Fecha</th>
+                <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Fecha de llegada</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Método / Courier</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Estado</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider text-right">Acciones</th>
@@ -369,7 +369,7 @@ export function Receptions() {
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2 text-sm text-text-secondary">
                         <Calendar size={14} />
-                        {eta}
+                        {eta ? etaLabel(eta, (doc as { etaTime?: string }).etaTime) : 'Sin fecha de llegada'}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-text-secondary">{methodDisplay}</td>
@@ -461,11 +461,11 @@ export function Receptions() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Llegada estimada (ETA)</p>
+                  <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Fecha de llegada</p>
                   <p className="text-sm font-semibold text-text-primary">
                     {(selectedDocument.data as { eta?: string }).eta
                       ? etaLabel((selectedDocument.data as { eta?: string }).eta!, (selectedDocument.data as { etaTime?: string }).etaTime)
-                      : 'Sin ETA registrada'}
+                      : 'Sin fecha de llegada'}
                   </p>
                 </div>
                 <div>

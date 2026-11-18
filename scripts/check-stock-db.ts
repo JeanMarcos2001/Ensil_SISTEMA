@@ -25,7 +25,7 @@ import { capabilityById } from '../src/utils/capabilities';
 import { adjustmentError, minStockError, packageError, signedAdjustment, stockEntryError } from '../src/utils/inventory';
 import { stockLocations } from '../src/utils/logisticsRoutes';
 import {
-  RECEPTION_NO_ETA, SHIPMENT_FLOW, TRANSFER_FLOW, clockNow, courierError, detailError, etaLabel, flattenBoxes, isInTransit, methodError, receptionError, receptionOutcome, receptionTooEarlyMessage,
+  ARRIVAL_FIRST_HOUR, ARRIVAL_LAST_HOUR, RECEPTION_NO_ETA, SHIPMENT_FLOW, TRANSFER_FLOW, arrivalHourOptions, clockNow, hm12, courierError, detailError, etaLabel, flattenBoxes, isInTransit, methodError, receptionError, receptionOutcome, receptionTooEarlyMessage,
   receptionWindow, shipmentContentError, shipmentMovesStock,
   shipmentTransitionError, transferDispatchError, transferMovesStock, transferRequestError, transferTransitionError, transportError,
 } from '../src/utils/logisticsDocs';
@@ -353,7 +353,7 @@ r = await createTransfer(repo, ctx(), { ...trNew, items: [] }, {});
 check('Una solicitud sin artículos no llega a la base', !r.ok && calls.length === 0);
 const approved = transfer({ status: 'Aprobada' });
 r = await changeTransferStatus(repo, ctx({ transfers: [approved] }), approved.id, 'En tránsito');
-check('Despachar sin método de envío ni ETA no llega a la base', !r.ok && /método de envío y el ETA/.test(r.error ?? '') && calls.length === 0);
+check('Despachar sin método de envío ni fecha de llegada no llega a la base', !r.ok && /método de envío y la fecha de llegada/.test(r.error ?? '') && calls.length === 0);
 const full = { ...approved, shippingMethodId: 'SM-003', eta: '2026-11-12', boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] };
 r = await changeTransferStatus(repo, ctx({ transfers: [full] }), full.id, 'En tránsito');
 check('Despachar con todo completo llega a la base y relee stock y documentos', r.ok && r.affects === 'both' && names2() === 'changeTransferStatus');
@@ -409,12 +409,23 @@ const early = receptionWindow(timing(), at('2026-11-18', '10:00'));
 check('El aviso de «todavía no» trae la ETA con su fecha y hora, y dice qué hacer si llegó antes',
   !early.open && early.reason === receptionTooEarlyMessage('19/11/2026 4:10 p. m.') && /habilite la recepción manual/.test(early.reason ?? '')
   && etaLabel('2026-11-19', '16:10') === '19/11/2026 4:10 p. m.' && etaLabel('2026-11-19') === '19/11/2026' && etaLabel('2026-11-19', '00:05') === '19/11/2026 12:05 a. m.');
+check('Las horas en punto se muestran sin minutos y en 12 horas: «6 a. m.», «12 p. m.», «10 p. m.»; con minutos, «4:10 p. m.»',
+  hm12('06:00') === '6 a. m.' && hm12('12:00') === '12 p. m.' && hm12('13:00') === '1 p. m.' && hm12('22:00') === '10 p. m.' && hm12('00:00') === '12 a. m.' && hm12('16:10') === '4:10 p. m.'
+  && etaLabel('2026-11-20', '18:00') === '20/11/2026 6 p. m.');
+const hourOptions = arrivalHourOptions();
+check('La hora de llegada se elige de 6 a. m. a 10 p. m., solo horas en punto (17 opciones, sin minutos)',
+  ARRIVAL_FIRST_HOUR === 6 && ARRIVAL_LAST_HOUR === 22 && hourOptions.length === 17 && hourOptions[0].value === '06:00' && hourOptions[0].label === '6 a. m.'
+  && hourOptions[16].value === '22:00' && hourOptions[16].label === '10 p. m.' && hourOptions.every(o => /^\d{2}:00$/.test(o.value)) && hourOptions.some(o => o.label === '12 p. m.')
+  && hourOptions.every((o, i) => i === 0 || o.value > hourOptions[i - 1].value));
+check('Un envío anterior con una hora que no está en la lista (4:10 p. m.) no la pierde al editarlo; el resto de la lista no cambia',
+  arrivalHourOptions('16:10').length === 18 && arrivalHourOptions('16:10').some(o => o.value === '16:10' && o.label === '4:10 p. m.') && arrivalHourOptions('16:00').length === 17
+  && arrivalHourOptions('16:10').every((o, i, a) => i === 0 || o.value > a[i - 1].value));
 check('Hoy y la hora salen del equipo en formato AAAA-MM-DD y HH:MM', /^\d{4}-\d{2}-\d{2}$/.test(clockNow().date) && /^\d{2}:\d{2}$/.test(clockNow().time) && clockNow(new Date(2026, 10, 19, 4, 5)).time === '04:05');
 
 reset();
 const tooEarly = shipment({ status: 'En tránsito', eta: '2026-11-21', etaTime: '09:00' });
 r = await confirmReception(repo, ctx({ shipments: [tooEarly] }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
-check('Antes de la ETA la recepción no llega a la base (no se carga stock) y dice por qué', !r.ok && /Todavía no llega la fecha estimada/.test(r.error ?? '') && /21\/11\/2026 9:00 a\. m\./.test(r.error ?? '') && calls.length === 0);
+check('Antes de la fecha de llegada la recepción no llega a la base (no se carga stock) y dice por qué', !r.ok && /La recepción se habilita desde la fecha de llegada/.test(r.error ?? '') && /21\/11\/2026 9 a\. m\./.test(r.error ?? '') && calls.length === 0);
 r = await confirmReception(repo, ctx({ shipments: [tooEarly], now: { date: '2026-11-21', time: '08:59' } }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
 check('Un minuto antes de la ETA todavía no', !r.ok && calls.length === 0);
 r = await confirmReception(repo, ctx({ shipments: [tooEarly], now: { date: '2026-11-21', time: '09:00' } }), { docId: tooEarly.id, docType: 'Envío', receivedItems: lines });
@@ -430,7 +441,7 @@ r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tráns
 check('Una transferencia en tránsito sin ETA ni habilitación no se recibe', !r.ok && r.error === RECEPTION_NO_ETA && calls.length === 0);
 reset();
 r = await confirmReception(repo, ctx({ transfers: [transfer({ status: 'En tránsito', eta: '2026-11-21' })] }), { docId: 'TRF-2026-001', docType: 'Transferencia', receivedItems: [{ itemId: 'ITM-HER-02', quantity: 4, status: 'ok' }] });
-check('Una transferencia con la ETA de mañana tampoco', !r.ok && /Todavía no llega la fecha estimada/.test(r.error ?? '') && calls.length === 0);
+check('Una transferencia con la fecha de llegada de mañana tampoco', !r.ok && /La recepción se habilita desde la fecha de llegada/.test(r.error ?? '') && calls.length === 0);
 
 // Couriers y métodos
 reset();
@@ -517,14 +528,21 @@ check('Ajustes y Stock dejan que el tipo defina el signo del ajuste (antes, en S
 
 // La migración 0027 y la pantalla de Recepciones
 const mig27 = read('supabase/migrations/20261118200000_recepcion_desde_la_eta.sql');
+const mig28 = read('supabase/migrations/20261118230000_contrapartes_de_funciones.sql');
+const down28 = read('supabase/deshacer/20261118230000_contrapartes_de_funciones.down.sql');
 const down27 = read('supabase/deshacer/20261118200000_recepcion_desde_la_eta.down.sql');
-check('La base exige lo mismo que el sistema: solo desde la ETA (hora de Lima), con las salidas de recepción manual y «Listo para recepción», y con las mismas palabras',
-  /create or replace function public\.confirmar_recepcion\(p_tipo text, p_doc text, p_lineas jsonb, p_observacion text\) returns void/.test(mig27) && mig27.includes(RECEPTION_NO_ETA) && mig27.includes(receptionTooEarlyMessage('%'))
+check('La base exige lo mismo que el sistema: solo desde la fecha de llegada (hora de Lima), con las salidas de recepción manual y «Listo para recepción», y con las mismas palabras (migración 0028)',
+  /create or replace function public\.confirmar_recepcion\(p_tipo text, p_doc text, p_lineas jsonb, p_observacion text\) returns void/.test(mig28) && mig28.includes(RECEPTION_NO_ETA) && mig28.includes(receptionTooEarlyMessage('%'))
   && /now\(\) at time zone 'America\/Lima'/.test(mig27) && /v_estado <> 'Listo para recepción' and not coalesce\(v_manual, false\)/.test(mig27)
   && /e\.eta, e\.eta_hora, e\.habilitar_recepcion_manual/.test(mig27) && /t\.eta, null::text, t\.habilitar_recepcion_manual/.test(mig27));
 check('La migración 0027 conserva lo demás de la recepción (función del registro, mover stock del destino, incidencias) y no cambia ningún permiso; se puede deshacer',
   /app\.exigir\('log-recepciones:confirm'/.test(mig27) && /app\.exigir\('log-transfer:receive'/.test(mig27) && /app\.mover_stock\(v_destino/.test(mig27) && /insert into public\.incidencias_recepcion/.test(mig27)
   && !/\bgrant\b|\brevoke\b/.test(mig27.replace(/--.*$/gm, '')) && /create or replace function public\.confirmar_recepcion/.test(down27) && !/v_desde/.test(down27) && !/America\/Lima/.test(down27));
+
+check('La migración 0028 repite los textos de la recepción sin la sigla «ETA», muestra la hora en 12 horas y conserva lo demás (función del registro, mover stock, incidencias); sus permisos no cambian y se puede deshacer',
+  !/ETA/.test(mig28.replace(/--.*$/gm, '')) && /FMHH12/.test(mig28) && /p\. m\./.test(mig28) && /app\.exigir\('log-recepciones:confirm'/.test(mig28) && /app\.mover_stock\(v_destino/.test(mig28)
+  && /insert into public\.incidencias_recepcion/.test(mig28) && !/(grant|revoke) execute on function public\.confirmar_recepcion/.test(mig28)
+  && /create or replace function public\.confirmar_recepcion/.test(down28) && /drop function if exists public\.contrapartes_de_funciones/.test(down28) && /\(ETA: %\)/.test(down28));
 
 const recSrc = read('src/pages/logistics/Receptions.tsx');
 const readOnlyTable = recSrc.slice(recSrc.indexOf('{ticketReadOnly ? (\n                  <div className="bg-surface'), recSrc.indexOf(') : (\n                <div className="bg-surface'));
@@ -539,6 +557,26 @@ check('Confirmar la recepción pide primero una confirmación que dice que no ha
   && /receptionWindow\(timingOf\(selectedDocument\.data\), clockNow\(\)\)/.test(recSrc) && /if \(!selectedDocument \|\| saving \|\| mode !== 'receive'\) return;/.test(recSrc) && /receptionCheck\(selectedDocument\.data\.status, receivedLines\(\)/.test(recSrc));
 check('Un documento ya recibido se ve con lo que quedó registrado (las diferencias que anotó la recepción), no con lo esperado',
   /docIncidents/.test(recSrc) && /INCIDENT_LABEL\[i\.type\]/.test(recSrc) && /Resultado de la recepción/.test(recSrc) && /Recepción registrada/.test(recSrc));
+
+// «ETA» es una sigla en inglés: en pantalla se llama «fecha de llegada» (el código y la base siguen llamándola eta)
+const withoutComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const shipSrc = read('src/pages/logistics/Shipments.tsx');
+const trfSrc = read('src/pages/logistics/Transfers.tsx');
+const userFacing = (src: string) => withoutComments(src).split('\n').filter(l => /\bETA\b/.test(l));
+check('Ninguna pantalla de Logística muestra la sigla «ETA»: se llama «fecha de llegada»',
+  [shipSrc, trfSrc, recSrc].every(s => userFacing(s).length === 0), [shipSrc, trfSrc, recSrc].flatMap(userFacing).join(' | '));
+check('Los textos de las reglas de Logística tampoco dicen «ETA» (se ven en pantalla)',
+  !/\bETA\b/.test(RECEPTION_NO_ETA) && !/\bETA\b/.test(receptionTooEarlyMessage('x')) && !/\bETA\b/.test(transferDispatchError({ items: [], boxes: [] } as never, {} as never) ?? ''));
+
+// Crear un envío: las fechas y la hora caben en su columna y la hora se elige de una lista (de 6 a. m. a 10 p. m., sin minutos)
+const identity = shipSrc.slice(shipSrc.indexOf('uppercase tracking-wider">Identidad</h3>'), shipSrc.indexOf('Observación General'));
+check('El formulario del envío tiene tres campos en una fila (fecha de creación, fecha de llegada y hora de llegada), cada uno dentro de su columna y con el nombre claro',
+  /<div className="grid grid-cols-3 gap-3">/.test(identity) && (identity.match(/space-y-1\.5 min-w-0/g) ?? []).length === 5 && /Fecha de creación/.test(identity) && /Fecha de llegada/.test(identity) && /Hora de llegada/.test(identity)
+  && !/<div className="flex gap-2">/.test(identity) && !/w-32/.test(identity));
+check('La hora de llegada es una lista de horas en punto (no el reloj del navegador con minutos): arrivalHourOptions, sin type="time"',
+  /arrivalHourOptions\(etaTime\)/.test(identity) && !/type="time"/.test(shipSrc) && /<select[\s\S]*?aria-label="Hora de llegada"/.test(identity));
+check('Las transferencias también dicen «Fecha de llegada» (solo fecha, sin hora) y avisan con las mismas palabras si falta',
+  /Fecha de llegada <span className="text-error">\*<\/span>/.test(trfSrc) && /método de envío y la fecha de llegada/.test(trfSrc));
 
 if (failed > 0) {
   console.log(`\n${failed} comprobaciones fallaron.`);
