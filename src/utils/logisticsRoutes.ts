@@ -1,14 +1,13 @@
 /**
- * Rutas de la mercadería (funciones puras): hay UN almacén central para toda la empresa, aparte de las sedes, y todo lo que se mueve
- * entre sedes pasa por él.
+ * Rutas de la mercadería (funciones puras): hay UN almacén central para toda la empresa, aparte de las sedes.
  *
  * Una «ubicación de stock» es el almacén o una sede: el stock, el kardex, los envíos y las transferencias usan su id (los del almacén
  * llevan el prefijo `ALM-`; los de las sedes, el código de la filial).
  *
  *  - El almacén recibe compras, despacha y recibe devoluciones. **No vende**: la venta se registra siempre en una sede (`locationSaleError`).
- *  - Envío: sale siempre del almacén central y llega a una sede.
- *  - Transferencia: una solicitud con aprobación; uno de sus extremos es siempre el almacén (reposición hacia una sede o devolución de
- *    una sede). Entre dos sedes no hay transferencia directa: lo que sobra se devuelve al almacén y desde ahí se envía.
+ *  - Envío: sale siempre del almacén central y llega a una sede (la sede lo pide con un requerimiento).
+ *  - Transferencia: lo que una SEDE manda a otra sede (un préstamo) o devuelve al almacén central. **No lleva aprobación**: cada sede es
+ *    responsable de lo que manda. Siempre sale de una sede: el almacén manda con los envíos.
  *
  * El almacén central es un dato (`Warehouse`), no un nombre ni un código fijo: Los Olivos es una sede como las demás, con su propio stock.
  */
@@ -76,18 +75,30 @@ export function shipmentRouteError(originId: string, destinationId: string, loca
   return null;
 }
 
-/** Una transferencia tiene siempre al almacén central en uno de sus extremos. */
+/** Los textos de la ruta de una transferencia (la base de datos dice lo mismo, palabra por palabra). */
+export const TRANSFER_ORIGIN_NOT_SEDE = 'Una transferencia sale de una sede: el almacén central envía con los envíos y la sede lo pide con un requerimiento.';
+export const TRANSFER_NO_WAREHOUSE = 'No hay un almacén central activo con ese código.';
+
+/** ¿La transferencia vuelve al almacén central (una devolución)? Si no, es un préstamo a otra sede. */
+export const isReturnToWarehouse = (destinationId: string): boolean => isWarehouseId(destinationId);
+
+/**
+ * Una transferencia sale de una sede activa y llega a otra sede activa (un préstamo) o al almacén central (una devolución). Nunca sale del almacén:
+ * lo que el almacén manda a una sede es un envío. No hay aprobación: la sede que manda responde por lo que manda.
+ */
 export function transferRouteError(originId: string, destinationId: string, locations: StockLocation[]): string | null {
   if (!originId || !destinationId) return 'Indique la sede de origen y la de destino.';
   if (originId === destinationId) return 'El origen y el destino deben ser distintos.';
-  const wh = centralOf(locations);
-  if (!wh) return NO_WAREHOUSE;
-  if (originId !== wh.id && destinationId !== wh.id) {
-    return `Entre filiales todo pasa por el almacén central (${wh.name}): devuelva el stock al almacén o pídalo desde allí.`;
+  if (isWarehouseId(originId)) return TRANSFER_ORIGIN_NOT_SEDE;
+  const origin = locations.find(l => l.id === originId);
+  if (!origin || origin.kind !== 'sede') return 'La sede de origen no existe.';
+  if (origin.status !== 'Activo') return `La sede ${origin.name} está inactiva.`;
+  const dest = locations.find(l => l.id === destinationId);
+  if (isWarehouseId(destinationId)) {
+    if (!dest || dest.kind !== 'almacén' || dest.status !== 'Activo') return TRANSFER_NO_WAREHOUSE;
+    return null;
   }
-  const other = locations.find(l => l.id === (originId === wh.id ? destinationId : originId));
-  if (!other) return 'La sede indicada no existe.';
-  if (other.kind !== 'sede') return 'La otra punta de una transferencia es una sede, no otro almacén.';
-  if (other.status !== 'Activo') return `La sede ${other.name} está inactiva.`;
+  if (!dest || dest.kind !== 'sede') return 'La sede de destino no existe.';
+  if (dest.status !== 'Activo') return `La sede ${dest.name} está inactiva.`;
   return null;
 }

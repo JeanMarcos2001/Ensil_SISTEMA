@@ -87,6 +87,8 @@ import { accountRoleError, planPermissions, roleDeleteError, roleLockedError, se
 import { visibility, type NoticeScope } from '../utils/notifications';
 import { useNotices } from '../hooks/useNotices';
 import { useCounterparts } from '../hooks/useCounterparts';
+import { usePlaceDirectory } from '../hooks/usePlaceDirectory';
+import { mergeLocations } from '../utils/placeDirectory';
 import { missingStockNotice, noStockAtAll, recipeForEnrollment } from '../utils/verification';
 import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
@@ -652,13 +654,18 @@ export interface Transfer {
   date: string;
   originId: string;
   destinationId: string;
-  status: 'Borrador' | 'Solicitada' | 'Aprobada' | 'En tránsito' | 'Listo para recepción' | 'Recibida' | 'Recibida con diferencias' | 'Rechazada' | 'Cancelada' | 'Despachada' | 'Recepcionada';
+  /** Sin aprobación: Borrador → En tránsito → (Listo para recepción) → Recibida (con o sin diferencias); también Cancelada. */
+  status: 'Borrador' | 'En tránsito' | 'Listo para recepción' | 'Recibida' | 'Recibida con diferencias' | 'Cancelada';
   items: TransferItem[];
   boxes?: TransferBox[];
   reason: string;
-  /** Quién la solicitó (a esa persona le llega el aviso de aprobación o rechazo). */
+  /** Quién la preparó (la sede que manda; la base lo toma de la cuenta). */
   requestedBy?: string;
   requestedById?: string;
+  /** Cuándo y quién la despachó (desde ese momento la sede destino la ve) y, si se canceló estando en tránsito, el motivo. */
+  dispatchedAt?: string;
+  dispatchedBy?: string;
+  cancelReason?: string;
   shippingMethodId?: string;
   courierId?: string;
   trackingNumber?: string;
@@ -1517,6 +1524,11 @@ interface DataContextType {
   warehouses: Warehouse[];
   /** El almacén y las sedes como ubicaciones de stock (para nombres y selectores de Logística). */
   stockLocations: StockLocation[];
+  /**
+   * Lo mismo más las demás sedes de la lista que ve cualquier cuenta (solo nombre y estado): sirve para elegir y nombrar el otro extremo de una transferencia
+   * (una cuenta de sede solo lee la suya). No amplía lo que la cuenta ve en el resto del sistema.
+   */
+  transferPlaces: StockLocation[];
   leadSources: LeadSource[];
   programs: Program[];
   levels: Level[];
@@ -1537,7 +1549,8 @@ interface DataContextType {
   /** Ingreso de stock (compra o reposición) con el documento que lo respalda; queda en el kardex. */
   registerStockEntry: (input: { branchId: string; itemId: string; qty: number; doc: string; reason?: string }) => Promise<StockResult>;
   updateMinStock: (stockId: string, minStock: number) => Promise<StockResult>;
-  updateTransferStatus: (id: string, status: Transfer['status']) => Promise<StockResult>;
+  /** Despachar o cancelar. Cancelar una transferencia que ya salió pide su motivo (`observation`). */
+  updateTransferStatus: (id: string, status: Transfer['status'], observation?: string) => Promise<StockResult>;
   updateTransfer: (id: string, transfer: Partial<Transfer>) => Promise<StockResult>;
   addTransfer: (transfer: Omit<Transfer, 'id'>) => Promise<StockResult & { id?: string }>;
   /** El id `STF-NNN` y el código los asigna el sistema. */
@@ -1966,8 +1979,11 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const branches = org.branches;
   const warehouses = org.warehouses;
   const locations = useMemo(() => stockLocations(branches, warehouses), [branches, warehouses]);
+  // La lista de sedes (nombre y estado) que ve cualquier cuenta: para elegir y nombrar el otro extremo de una transferencia
+  const placeDirectory = usePlaceDirectory();
+  const transferPlaces = useMemo(() => mergeLocations(locations, placeDirectory.sedes), [locations, placeDirectory.sedes]);
   /** Nombre de una ubicación de stock (almacén o sede); si ya no existe, su id. */
-  const locationName = (id: string | undefined): string => locations.find(l => l.id === id)?.name ?? id ?? '';
+  const locationName = (id: string | undefined): string => transferPlaces.find(l => l.id === id)?.name ?? id ?? '';
 
   // Los roles, sus funciones y las cuentas llegan de la base (`access`): el navegador ya no guarda nada de esto.
   const [roles, setRoles] = useState<Role[]>(() => access.roles);
@@ -2157,44 +2173,39 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     return log.updateMinStock(stockId, minStock);
   };
 
+  // Una transferencia nace como borrador de la sede que la prepara: no avisa a nadie hasta que se despacha (no hay aprobación)
   const addTransfer: DataContextType['addTransfer'] = async transfer => {
     const res = await log.addTransfer(transfer);
     if (!res.ok) return { ok: false, error: res.error };
-    if (transfer.status === 'Solicitada') announceTransfer({ ...transfer, id: res.id ?? '', requestedBy: currentUser.name, requestedById: currentUser.id } as Transfer, 'Solicitada');
     return { ok: true, id: res.id };
   };
 
-  /** Avisos de una transferencia: pedida (a quien aprueba) y aprobada o rechazada (a quien la pidió). */
-  const announceTransfer = (t: Transfer, status: Transfer['status']) => {
-    const route = `${locationName(t.originId)} → ${locationName(t.destinationId)}`;
-    if (status === 'Solicitada') {
-      notify('transfer_requested', { title: 'Transferencia solicitada', message: `${currentUser.name} solicitó la transferencia ${t.id} (${route}): ${t.reason}.`, type: 'warning', scope: { originBranchId: t.originId, destinationBranchId: t.destinationId } });
-    } else if (status === 'Aprobada' || status === 'Rechazada') {
-      notify('transfer_decided', {
-        title: `Transferencia ${status === 'Aprobada' ? 'aprobada' : 'rechazada'}`, message: `${currentUser.name} ${status === 'Aprobada' ? 'aprobó' : 'rechazó'} la transferencia ${t.id} (${route}).`,
-        type: status === 'Aprobada' ? 'success' : 'warning', scope: { originBranchId: t.originId, destinationBranchId: t.destinationId, requesterId: t.requestedById, requesterName: t.requestedBy },
-      });
-    }
-  };
-
-  const updateTransferStatus: DataContextType['updateTransferStatus'] = async (transferId, newStatus) => {
+  const updateTransferStatus: DataContextType['updateTransferStatus'] = async (transferId, newStatus, observation) => {
     const transfer = log.transfers.find(t => t.id === transferId);
     if (!transfer) return { ok: false, error: 'Transferencia no encontrada.' };
-    // Despachar y cancelar algo ya despachado mueven el stock del origen: si es el almacén, solo lo hace quien trabaja en él
+    // Despachar y cancelar algo ya despachado mueven el stock de la sede que manda: quien la alcanza lo hace (la base lo vuelve a comprobar)
     const deniedMove = transferMovesStock(transfer.status, newStatus) ? warehouseProblem(transfer.originId) : null;
     if (deniedMove) return { ok: false, error: deniedMove };
     // Regla de stock: sale del origen al DESPACHAR (una sola vez); el destino suma al RECIBIR. La base lo hace todo o nada.
-    const res = await log.updateTransferStatus(transferId, newStatus);
+    const res = await log.updateTransferStatus(transferId, newStatus, observation);
     if (!res.ok) return { ok: false, error: res.error };
-    if (newStatus === 'En tránsito' && transfer.status === 'Aprobada') {
+    const route = `${locationName(transfer.originId)} → ${locationName(transfer.destinationId)}`;
+    if (newStatus === 'En tránsito' && transfer.status === 'Borrador') {
       notify('transfer_dispatched', {
         title: 'Transferencia en tránsito',
-        message: `La transferencia ${transfer.id} desde ${locationName(transfer.originId)} está en tránsito. El stock salió del origen y se sumará al recepcionar.`,
+        message: `${currentUser.name} despachó la transferencia ${transfer.id} (${route}). El stock salió del origen y se sumará al recepcionarla.`,
         type: 'info',
         scope: { originBranchId: transfer.originId, destinationBranchId: transfer.destinationId },
       });
     }
-    if (newStatus !== transfer.status && (newStatus === 'Solicitada' || newStatus === 'Aprobada' || newStatus === 'Rechazada')) announceTransfer(transfer, newStatus);
+    if (newStatus === 'Cancelada' && (transfer.status === 'En tránsito' || transfer.status === 'Listo para recepción')) {
+      notify('transfer_cancelled', {
+        title: 'Transferencia cancelada',
+        message: `${currentUser.name} canceló la transferencia ${transfer.id} (${route}): lo que salió volvió a la sede de origen. Motivo: ${(observation ?? '').trim()}.`,
+        type: 'warning',
+        scope: { originBranchId: transfer.originId, destinationBranchId: transfer.destinationId },
+      });
+    }
     return { ok: true };
   };
 
@@ -3419,6 +3430,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       branches,
       warehouses,
       stockLocations: locations,
+      transferPlaces,
       leadSources,
       programs,
       levels,

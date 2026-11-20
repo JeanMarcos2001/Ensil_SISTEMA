@@ -41,7 +41,8 @@ const ADMIN_SEDE: string[] = [
   // Materiales y recepción
   'op-verificacion:view', 'op-verificacion:deliver',
   'log-stock:view', 'log-recepciones:view', 'log-recepciones:confirm', 'log-kardex:view',
-  'log-transfer:view', 'log-transfer:req_transfer', 'log-transfer:receive',
+  // Transferencias entre sedes (sin aprobación: la sede responde por lo que manda): prepara, despacha y recepciona
+  'log-transfer:view', 'log-transfer:create', 'log-transfer:dispatch', 'log-transfer:receive',
   // Pide mercadería al almacén (requerimientos) y conversa con Logística
   'log-requerimientos:view', 'log-requerimientos:create', 'log-requerimientos:message',
   // Asesorías y cronogramas (el alumno fija su horario en secretaría)
@@ -66,7 +67,8 @@ const ALMACEN: string[] = [
   'log-envios:view', 'log-envios:create', 'log-envios:edit', 'log-envios:dispatch',
   // Atiende los requerimientos de las sedes (verifica la existencia, rechaza o los pasa a «Empacando») y conversa con ellas
   'log-requerimientos:view', 'log-requerimientos:attend', 'log-requerimientos:message',
-  'log-transfer:view', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive',
+  // Recepciona las devoluciones de las sedes (el almacén manda con los envíos, no con transferencias)
+  'log-transfer:view', 'log-transfer:receive',
   'log-kardex:view', 'log-ajustes:view', 'log-ajustes:create',
   'rep-general:view', 'rep-stock:view',
 ];
@@ -103,10 +105,9 @@ const CONTABILIDAD: string[] = [
 const SUPERUSUARIO: string[] = ALL_CAPABILITIES.filter(c => !c.reserved).map(c => c.id);
 
 export const ROLE_TEMPLATES: RoleTemplate[] = [
-  { id: 'admin-sede', name: 'Administrador de sede', desc: 'Matrículas, caja, cobranza, materiales y asesorías de su sede', summary: 'Una cuenta por persona de la sede (1 a 3): matricula, cobra, cierra la caja, entrega materiales, recibe envíos y agenda asesorías. No reversa pagos ni reabre cierres.', capabilities: ADMIN_SEDE, branchUserLimit: 3 },
+  { id: 'admin-sede', name: 'Administrador de sede', desc: 'Matrículas, caja, cobranza, materiales y asesorías de su sede', summary: 'Una cuenta por persona de la sede (1 a 3): matricula, cobra, cierra la caja, entrega materiales, pide y recibe mercadería, manda transferencias a otras sedes (o devuelve al almacén) y agenda asesorías. No reversa pagos ni reabre cierres.', capabilities: ADMIN_SEDE, branchUserLimit: 3 },
   { id: 'psicopedagogia', name: 'Psicopedagogía', desc: 'Seguimiento del alumno y asistencia; sin dinero', summary: 'Marca la asistencia y registra el seguimiento. La agenda la ve en lectura y no ve dinero.', capabilities: PSICOPEDAGOGIA, branchUserLimit: 3 },
-  { id: 'almacen-central', name: 'Almacén central', desc: 'Catálogo, stock, envíos, transferencias, kardex y ajustes', summary: 'Un solo almacén para toda la empresa, aparte de las sedes: abastece a las sedes. Despacha los envíos y recibe las devoluciones, pero no confirma recepciones de envíos. Hasta 3 cuentas por almacén (jefe y auxiliares).', capabilities: ALMACEN, branchUserLimit: 3,
-    risks: { 'transferir-aprobar-recibir': 'El almacén aprueba, despacha y recibe transferencias, pero el otro extremo de toda transferencia es siempre una sede con su propio responsable (entre sedes no hay traslado directo): ninguna transferencia queda en manos de una sola persona.' } },
+  { id: 'almacen-central', name: 'Almacén central', desc: 'Catálogo, stock, envíos, devoluciones, kardex y ajustes', summary: 'Un solo almacén para toda la empresa, aparte de las sedes: abastece a las sedes. Despacha los envíos y recibe las devoluciones que las sedes le mandan con una transferencia, pero no confirma recepciones de envíos. Hasta 3 cuentas por almacén (jefe y auxiliares).', capabilities: ALMACEN, branchUserLimit: 3 },
   { id: 'admin-general', name: 'Administración general', desc: 'Aprobaciones, oferta comercial, personal, planilla y auditoría', summary: 'Aprueba caídas, reactivaciones, cambios y traslados; reversas con devolución y reaperturas; oferta comercial; personal y planilla; todos los reportes.', capabilities: ADMIN_GENERAL, risks: { 'reversar-reabrir-caja': 'Es el único rol que reversa movimientos de caja y reabre cierres: la sede no puede hacerlo (separación respecto a quien cobra).', 'reversar-reabrir-caja-chica': 'Lo mismo con la caja chica: la sede la cuenta y la cierra, pero solo Administración general reversa sus gastos y reabre su conteo.' } },
   { id: 'contabilidad', name: 'Contabilidad', desc: 'Lectura y exportación de caja, cartera y planilla', summary: 'Solo lectura y exportación de caja, cartera y planilla de todas las sedes. No registra nada ni arma la planilla.', capabilities: CONTABILIDAD },
   { id: 'superusuario', name: 'Superusuario', desc: 'Roles, usuarios y configuración técnica', summary: 'Puede todo, en todas las sedes. Es el rol técnico de sistemas: no se edita ni se elimina.', capabilities: SUPERUSUARIO, locked: true },

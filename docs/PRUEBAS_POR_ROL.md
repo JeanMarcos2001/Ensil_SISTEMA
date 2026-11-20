@@ -7,13 +7,13 @@
 
 | Cuenta | Rol | Sedes que alcanza | Funciones | Acciones del sistema que puede | Ítems de menú | Tarjetas del Dashboard | Avisos que recibe |
 |---|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Laura Martínez | Administrador de sede | Piura | 60 | 33 | 23 | 6 | 9 |
-| Marco Salas | Administrador de sede | Los Olivos | 60 | 33 | 23 | 6 | 9 |
+| Laura Martínez | Administrador de sede | Piura | 61 | 33 | 23 | 6 | 10 |
+| Marco Salas | Administrador de sede | Los Olivos | 61 | 33 | 23 | 6 | 10 |
 | Juan Pérez | Psicopedagogía | Piura | 15 | 6 | 8 | 0 | 1 |
-| Rosa Quispe | Almacén central | todas (16) | 28 | 17 | 9 | 1 | 9 |
+| Rosa Quispe | Almacén central | todas (16) | 26 | 17 | 9 | 1 | 8 |
 | Admin Sistema | Administración general | todas (16) | 87 | 47 | 31 | 5 | 13 |
 | Elena Ramos | Contabilidad | todas (16) | 17 | 1 | 11 | 2 | 1 |
-| Superadmin | Superusuario | todas (16) | 189 | 128 | 48 | 7 | todos (soporte) |
+| Superadmin | Superusuario | todas (16) | 188 | 128 | 48 | 7 | todos (soporte) |
 
 ## 2. Acciones clave
 
@@ -43,7 +43,8 @@
 | Preparar un envío | — | — | — | ✔ | — | — | ✔ |
 | Despachar un envío | — | — | — | ✔ | — | — | ✔ |
 | Confirmar la recepción de un envío | ✔ | ✔ | — | — | — | — | ✔ |
-| Aprobar una transferencia | — | — | — | ✔ | — | — | ✔ |
+| Preparar una transferencia entre sedes | ✔ | ✔ | — | — | — | — | ✔ |
+| Despachar una transferencia | ✔ | ✔ | — | — | — | — | ✔ |
 | Registrar un ajuste o merma | — | — | — | ✔ | — | — | ✔ |
 | **Psicopedagogía** ||||||||
 | Agendar una asesoría | ✔ | ✔ | — | — | — | — | ✔ |
@@ -136,11 +137,11 @@ Solo los ítems que piden una función (todos ven «Preferencias» y el botón �
 
 Para un caso en su propia sede (el origen de los envíos es el almacén). El Superusuario ve todos los avisos por ser el rol de soporte.
 
-- **Laura Martínez** (Sede (Piura)): Envío despachado, Envío cancelado, Transferencia en tránsito, Stock por debajo del mínimo, Requerimiento rechazado (aviso a la sede), Mensaje de Logística en un requerimiento (aviso a la sede), Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
-- **Marco Salas** (Sede (Los Olivos)): Envío despachado, Envío cancelado, Transferencia en tránsito, Stock por debajo del mínimo, Requerimiento rechazado (aviso a la sede), Mensaje de Logística en un requerimiento (aviso a la sede), Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
+- **Laura Martínez** (Sede (Piura)): Envío despachado, Envío cancelado, Transferencia en tránsito, Transferencia cancelada, Stock por debajo del mínimo, Requerimiento rechazado (aviso a la sede), Mensaje de Logística en un requerimiento (aviso a la sede), Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
+- **Marco Salas** (Sede (Los Olivos)): Envío despachado, Envío cancelado, Transferencia en tránsito, Transferencia cancelada, Stock por debajo del mínimo, Requerimiento rechazado (aviso a la sede), Mensaje de Logística en un requerimiento (aviso a la sede), Primera asesoría sin materiales entregados, Cuota refinanciada, Cuotas vencidas
 - **Juan Pérez** (Psicopedagogía): Primera asesoría sin materiales entregados
-- **Rosa Quispe** (Almacén): Envío recibido, Transferencia solicitada, Transferencia en tránsito, Transferencia recibida, Recepción con faltante o daño, Stock por debajo del mínimo, Requerimiento de una sede (aviso a Logística), Mensaje de una sede en su requerimiento (aviso a Logística), Sin stock para verificar materiales (aviso a Logística)
-- **Admin Sistema** (Admin. general): Transferencia aprobada o rechazada, Recepción con faltante o daño, Solicitud de caída pendiente, Solicitud de reactivación pendiente, Solicitud de cambio de programa pendiente, Solicitud de traslado de sede pendiente, Solicitud resuelta, Pago reversado, Movimiento de caja reversado, Caja reabierta, Cuota refinanciada, Contratos por vencer, Permisos de un rol modificados
+- **Rosa Quispe** (Almacén): Envío recibido, Transferencia en tránsito, Transferencia cancelada, Recepción con faltante o daño, Stock por debajo del mínimo, Requerimiento de una sede (aviso a Logística), Mensaje de una sede en su requerimiento (aviso a Logística), Sin stock para verificar materiales (aviso a Logística)
+- **Admin Sistema** (Admin. general): Transferencia recibida, Recepción con faltante o daño, Solicitud de caída pendiente, Solicitud de reactivación pendiente, Solicitud de cambio de programa pendiente, Solicitud de traslado de sede pendiente, Solicitud resuelta, Pago reversado, Movimiento de caja reversado, Caja reabierta, Cuota refinanciada, Contratos por vencer, Permisos de un rol modificados
 - **Elena Ramos** (Contabilidad): Cuota refinanciada
 
 ## 6. Hallazgos del paso 8

@@ -102,13 +102,13 @@ const LEGACY_67 = [
   'op-caja:view', 'op-caja:reg_income', 'op-caja:reg_expense', 'op-caja:reverse_movement', 'op-caja:deposit', 'op-caja:close_box', 'op-caja:reopen_box',
   'op-caja-chica:view', 'op-caja-chica:reverse_movement', 'op-caja-chica:count', 'op-caja-chica:config',
   'op-cobranza:view', 'op-cobranza:remind', 'op-cobranza:charge_mora', 'op-cobranza:config',
-  'log-transfer:req_transfer', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive',
+  'log-transfer:dispatch', 'log-transfer:receive',
   'per-planilla:view', 'per-planilla:generate', 'per-planilla:adjust', 'per-planilla:close', 'per-planilla:reopen',
   'psi-prog:view', 'psi-prog:create', 'psi-prog:reg_tracking', 'psi-prog:export_schedule', 'psi-prog:activity_lead', 'psi-prog:activity_attendance', 'psi-prog:institutional_change',
   'psi-recordatorios:view', 'psi-recordatorios:remind', 'psi-recordatorios:config',
   'rep-general:view', 'rep-general:export', 'rep-general:save_views',
 ];
-check('Los 66 permisos del catálogo anterior que siguen vigentes conservan su identificador (se retiró «pagar la planilla»: el sistema no registra pagos al personal)', LEGACY_67.length === 66 && LEGACY_67.every(p => idSet.has(p)), list(LEGACY_67.filter(p => !idSet.has(p))));
+check('Los 64 permisos del catálogo anterior que siguen vigentes conservan su identificador (se retiró «pagar la planilla»: el sistema no registra pagos al personal; y en las transferencias entre sedes «solicitar» pasó a «preparar» y se quitó «aprobar»)', LEGACY_67.length === 64 && LEGACY_67.every(p => idSet.has(p)), list(LEGACY_67.filter(p => !idSet.has(p))));
 
 // Ningún permiso escrito a mano en el código apunta a algo que no existe
 const SRC_DIR = join(ROOT, 'src');
@@ -213,7 +213,7 @@ check('Cobrar y emitir notas de crédito se advierte', roleWarnings(['op-pagos:r
 check('Un administrador de sede típico (cobra, cierra, matricula) no recibe ninguna advertencia', roleWarnings(['op-matriculas:create', 'op-pagos:register', 'op-caja:close_box', 'op-verificacion:deliver', 'psi-prog:create', 'log-recepciones:confirm', 'op-matriculas:req_drop']).length === 0);
 check('El almacenero típico (despacha, ajusta, prepara) no recibe advertencia', roleWarnings(['log-envios:create', 'log-envios:dispatch', 'log-ajustes:create', 'log-stock:entry', 'log-stock:edit_min']).length === 0);
 check('Hay al menos una combinación por área (dinero, solicitudes, mercadería, personal, accesos)', ['cobrar-reversar-cerrar', 'pedir-aprobar-caida', 'despachar-recibir', 'ficha-cuenta-rol', 'roles-asignar'].every(id => INCOMPATIBILITIES.some(r => r.id === id)));
-check('Los avisos nuevos existen y cada uno lo dispara alguna función', ['shipment_cancelled', 'shipment_received', 'transfer_requested', 'transfer_decided', 'transfer_received', 'role_permissions_changed'].every(id => !!eventById(id) && ALL_CAPABILITIES.some(c => c.emits.includes(id))));
+check('Los avisos nuevos existen y cada uno lo dispara alguna función', ['shipment_cancelled', 'shipment_received', 'transfer_cancelled', 'transfer_received', 'role_permissions_changed'].every(id => !!eventById(id) && ALL_CAPABILITIES.some(c => c.emits.includes(id))));
 check('La supervisión y el respaldo son funciones distintas', capabilityById('sis-avisos:supervise')!.id !== capabilityById('sis-avisos:fallback')!.id);
 
 // ------------------------------------------------------------------------------------------------------------------ Resumen

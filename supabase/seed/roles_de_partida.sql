@@ -3,14 +3,14 @@
 --
 -- Cargar: pegar este script en el SQL Editor del proyecto `ensil-sistema` (NO el de la web).
 -- Es seguro repetirlo: un rol que ya existe (mismo id o mismo nombre) se omite junto con sus funciones.
--- Crea 5 roles (ROL-002, ROL-003, ROL-004, ROL-005, ROL-006) con 207 funciones en total.
+-- Crea 5 roles (ROL-002, ROL-003, ROL-004, ROL-005, ROL-006) con 206 funciones en total.
 
 with nuevos as (
   insert into public.roles (id, nombre, descripcion, estado, plantilla_id, limite_cuentas_por_sede, riesgos_aceptados)
   values
     ('ROL-002', 'Administrador de sede', 'Matrículas, caja, cobranza, materiales y asesorías de su sede', 'Activo', 'admin-sede', 3, '[]'::jsonb),
     ('ROL-003', 'Psicopedagogía', 'Seguimiento del alumno y asistencia; sin dinero', 'Activo', 'psicopedagogia', 3, '[]'::jsonb),
-    ('ROL-004', 'Almacén central', 'Catálogo, stock, envíos, transferencias, kardex y ajustes', 'Activo', 'almacen-central', 3, jsonb_build_array(jsonb_build_object('ruleId', 'transferir-aprobar-recibir', 'reason', 'El almacén aprueba, despacha y recibe transferencias, pero el otro extremo de toda transferencia es siempre una sede con su propio responsable (entre sedes no hay traslado directo): ninguna transferencia queda en manos de una sola persona.', 'by', 'Plantilla de partida', 'at', current_date::text))),
+    ('ROL-004', 'Almacén central', 'Catálogo, stock, envíos, devoluciones, kardex y ajustes', 'Activo', 'almacen-central', 3, '[]'::jsonb),
     ('ROL-005', 'Administración general', 'Aprobaciones, oferta comercial, personal, planilla y auditoría', 'Activo', 'admin-general', null, jsonb_build_array(jsonb_build_object('ruleId', 'reversar-reabrir-caja', 'reason', 'Es el único rol que reversa movimientos de caja y reabre cierres: la sede no puede hacerlo (separación respecto a quien cobra).', 'by', 'Plantilla de partida', 'at', current_date::text), jsonb_build_object('ruleId', 'reversar-reabrir-caja-chica', 'reason', 'Lo mismo con la caja chica: la sede la cuenta y la cierra, pero solo Administración general reversa sus gastos y reabre su conteo.', 'by', 'Plantilla de partida', 'at', current_date::text))),
     ('ROL-006', 'Contabilidad', 'Lectura y exportación de caja, cartera y planilla', 'Activo', 'contabilidad', null, '[]'::jsonb)
   on conflict do nothing
@@ -28,8 +28,9 @@ from (values
     ('ROL-002', 'log-requerimientos:message'),
     ('ROL-002', 'log-requerimientos:view'),
     ('ROL-002', 'log-stock:view'),
+    ('ROL-002', 'log-transfer:create'),
+    ('ROL-002', 'log-transfer:dispatch'),
     ('ROL-002', 'log-transfer:receive'),
-    ('ROL-002', 'log-transfer:req_transfer'),
     ('ROL-002', 'log-transfer:view'),
     ('ROL-002', 'msg-mensajeria:view'),
     ('ROL-002', 'op-caja-chica:count'),
@@ -113,8 +114,6 @@ from (values
     ('ROL-004', 'log-stock:pack'),
     ('ROL-004', 'log-stock:unpack'),
     ('ROL-004', 'log-stock:view'),
-    ('ROL-004', 'log-transfer:approve_transfer'),
-    ('ROL-004', 'log-transfer:dispatch'),
     ('ROL-004', 'log-transfer:receive'),
     ('ROL-004', 'log-transfer:view'),
     ('ROL-004', 'msg-mensajeria:view'),

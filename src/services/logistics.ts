@@ -16,7 +16,7 @@ import {
 import { locationSaleError, shipmentRouteError, transferRouteError, type StockLocation } from '../utils/logisticsRoutes';
 import {
   boxesProgressError, clockNow, courierError, detailError, isPreDispatch, methodError, PRE_DISPATCH_STATUSES, receptionError, receptionWindow, shipmentContentError, shipmentPatchError,
-  shipmentStageError, shipmentStaleError, shipmentTransitionError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
+  shipmentStageError, shipmentStaleError, shipmentTransitionError, transferCancelError, transferRequestError, transferDispatchError, transferTransitionError, type ClockParts, type ReceivedLine,
 } from '../utils/logisticsDocs';
 import { nextSequentialId } from '../utils/ids';
 import type { AdjustmentLine, KardexLine } from '../utils/stockDb';
@@ -53,7 +53,7 @@ export interface LogisticsRepository {
   removeShipment(id: string): Promise<RepoResult<null>>;
   createTransfer(payload: Record<string, unknown>): Promise<RepoResult<string>>;
   editTransfer(id: string, payload: Record<string, unknown>): Promise<RepoResult<null>>;
-  changeTransferStatus(id: string, status: string): Promise<RepoResult<null>>;
+  changeTransferStatus(id: string, status: string, observation?: string): Promise<RepoResult<null>>;
   confirmReception(kind: 'Envío' | 'Transferencia', docId: string, lines: { articulo_id: string; cantidad: number; estado: string; observacion?: string }[], observation?: string): Promise<RepoResult<null>>;
 
   insertCourier(courier: Courier): Promise<RepoResult<Courier>>;
@@ -284,22 +284,31 @@ export async function editTransfer(repo: LogisticsRepository, ctx: LogisticsCont
   if (prev.status === 'Borrador') {
     const invalid = transferRequestError(next, itemIds(ctx));
     if (invalid) return fail(invalid);
-  } else if (prev.status === 'Aprobada' && ('items' in payload || 'cajas' in payload)) {
-    const invalid = detailError(next.items, next.boxes ?? [], itemIds(ctx));
-    if (invalid) return fail(invalid);
+    // Al cambiar la lista del borrador sin mandar cajas, las cajas se vuelven a armar (la base hace lo mismo): no quedan cajas que no sumen la lista
+    if ('lineas' in payload || 'cajas' in payload) {
+      const boxes = 'cajas' in payload ? next.boxes ?? [] : [];
+      const detail = detailError(next.items, boxes, itemIds(ctx));
+      if (detail) return fail(detail);
+    }
   }
   const res = await repo.editTransfer(id, payload);
   return res.ok ? done('documents') : fail(res.error ?? 'No se pudo guardar la transferencia.');
 }
 
-export async function changeTransferStatus(repo: LogisticsRepository, ctx: LogisticsContext, id: string, status: Transfer['status']): Promise<LogisticsResult> {
+export async function changeTransferStatus(repo: LogisticsRepository, ctx: LogisticsContext, id: string, status: Transfer['status'], observation?: string): Promise<LogisticsResult> {
   const transfer = ctx.transfers.find(t => t.id === id);
   if (!transfer) return fail('Transferencia no encontrada.');
+  const flow = transferTransitionError(transfer.status, status);
+  if (flow) return fail(flow);
+  if (status === 'Cancelada') {
+    const reason = transferCancelError(transfer.status, observation);
+    if (reason) return fail(reason);
+  }
   if (status === 'En tránsito') {
     const invalid = transferDispatchError(transfer, transportCatalog(ctx));
     if (invalid) return fail(invalid);
   }
-  const res = await repo.changeTransferStatus(id, status);
+  const res = await repo.changeTransferStatus(id, status, observation);
   return res.ok ? done('both') : fail(res.error ?? 'No se pudo cambiar el estado de la transferencia.');
 }
 

@@ -6,7 +6,7 @@
 import type { Item, Recipe, StockItem } from '../src/context/DataContext';
 import { seedBranches, seedWarehouses } from '../src/data/seedCatalog';
 import { itemSaleError, stockEntryError, stockMovesError } from '../src/utils/inventory';
-import { centralWarehouse, isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../src/utils/logisticsRoutes';
+import { centralWarehouse, isReturnToWarehouse, isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError } from '../src/utils/logisticsRoutes';
 import { duplicateRecipe, overlappingRecipe, recipeStatusError, recipesOverlap, validateRecipe } from '../src/utils/recipes';
 
 let failed = 0;
@@ -44,14 +44,16 @@ check('Un envío no puede ir al propio almacén', /no el propio almacén/.test(s
 check('Un envío exige destino, que exista y esté activo', shipmentRouteError('ALM-001', '', locs) === 'Indique la filial de destino.' && /no existe/.test(shipmentRouteError('ALM-001', 'XXX', locs) ?? '') && /inactiva/.test(shipmentRouteError('ALM-001', 'CAJ', locs) ?? ''));
 check('Sin almacén definido no hay envíos y se dice cómo arreglarlo', /Organización → Almacenes/.test(shipmentRouteError('ALM-001', 'PIU', noWarehouse) ?? ''));
 
-check('Una transferencia puede ser del almacén a una filial (reposición)', transferRouteError('ALM-001', 'PIU', locs) === null);
-check('…o de una filial al almacén (devolución)', transferRouteError('CHI', 'ALM-001', locs) === null);
-check('Los Olivos devuelve al almacén como cualquier otra sede', transferRouteError('LOL', 'ALM-001', locs) === null);
-check('Entre dos filiales no hay transferencia: todo pasa por el almacén', /Entre filiales todo pasa por el almacén central \(Almacén central\)/.test(transferRouteError('PIU', 'CHI', locs) ?? '') && /Entre filiales/.test(transferRouteError('LOL', 'PIU', locs) ?? ''));
+// Una transferencia la manda una sede a otra sede (un préstamo) o de vuelta al almacén (una devolución); sin aprobación
+check('Una sede le manda a otra sede (un préstamo: Piura le presta a Chiclayo)', transferRouteError('PIU', 'CHI', locs) === null && transferRouteError('LOL', 'PIU', locs) === null);
+check('…o devuelve al almacén central', transferRouteError('CHI', 'ALM-001', locs) === null && transferRouteError('LOL', 'ALM-001', locs) === null);
+check('Una transferencia nunca sale del almacén: el almacén manda con los envíos y la sede pide con un requerimiento', /sale de una sede/.test(transferRouteError('ALM-001', 'PIU', locs) ?? '') && /requerimiento/.test(transferRouteError('ALM-001', 'PIU', locs) ?? ''));
 check('El origen y el destino deben ser distintos', transferRouteError('PIU', 'PIU', locs) === 'El origen y el destino deben ser distintos.');
-check('Una transferencia exige las dos sedes', transferRouteError('', 'PIU', locs) !== null && transferRouteError('ALM-001', '', locs) !== null);
-check('La sede de una transferencia debe estar activa', /inactiva/.test(transferRouteError('ALM-001', 'CAJ', locs) ?? '') && /inactiva/.test(transferRouteError('CAJ', 'ALM-001', locs) ?? ''));
-check('Sin almacén definido tampoco hay transferencias', /Organización → Almacenes/.test(transferRouteError('PIU', 'CHI', noWarehouse) ?? ''));
+check('Una transferencia exige las dos sedes', transferRouteError('', 'PIU', locs) === 'Indique la sede de origen y la de destino.' && transferRouteError('PIU', '', locs) === 'Indique la sede de origen y la de destino.');
+check('La sede que manda y la que recibe deben estar activas', transferRouteError('CAJ', 'PIU', locs) === 'La sede Cajamarca está inactiva.' && transferRouteError('PIU', 'CAJ', locs) === 'La sede Cajamarca está inactiva.');
+check('La sede de origen y la de destino deben existir', transferRouteError('XXX', 'PIU', locs) === 'La sede de origen no existe.' && transferRouteError('PIU', 'XXX', locs) === 'La sede de destino no existe.');
+check('Devolver al almacén pide un almacén central activo', transferRouteError('PIU', 'ALM-001', noWarehouse) === 'No hay un almacén central activo con ese código.' && transferRouteError('PIU', 'ALM-001', stockLocations(branches, [W('ALM-001', 'Almacén central', 'Inactivo')])) === 'No hay un almacén central activo con ese código.');
+check('Se sabe si es una devolución (destino almacén) o un préstamo (destino sede)', isReturnToWarehouse('ALM-001') && !isReturnToWarehouse('PIU') && !isReturnToWarehouse('FIL-002'));
 
 // ------------------------------------------------------------------------------------------------------------------ Recetas
 const item = (id: string, extra: Partial<Item> = {}): Item => ({ id, name: `Artículo ${id}`, status: 'Activo', type: 'Libro', description: '', unit: 'Unidad', cost: 1, isDeliveredOnEnrollment: true, ...extra } as Item);

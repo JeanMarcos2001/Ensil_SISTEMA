@@ -60,6 +60,7 @@ export function Receptions() {
     shipments, 
     transfers,
     stockLocations,
+    transferPlaces,
     items,
     incidents,
     shippingMethods,
@@ -132,11 +133,10 @@ export function Receptions() {
     switch (status) {
       case 'En tránsito': return 'warning';
       case 'Listo para recepción': return 'info';
-      case 'Recibido': 
-      case 'Recepcionada': return 'success';
+      case 'Recibido':
+      case 'Recibida': return 'success';
       case 'Recibido con diferencias': 
       case 'Recibida con diferencias': return 'warning';
-      case 'Rechazada': return 'danger';
       default: return 'neutral';
     }
   };
@@ -224,7 +224,7 @@ export function Receptions() {
     if (!selectedDocument) return '';
     const outcome = receptionOutcome(selectedDocument.type, selectedDocument.data.items, receivedLines());
     const units = outcome.stockIn.reduce((a, l) => a + l.quantity, 0);
-    const dest = stockLocations.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId;
+    const dest = transferPlaces.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId;
     const diffs = outcome.hasDifferences
       ? `y se registrarán ${outcome.incidents.length} diferencia${outcome.incidents.length === 1 ? '' : 's'} (faltantes, dañados o extras)`
       : 'sin diferencias';
@@ -391,7 +391,7 @@ export function Receptions() {
             </thead>
             <tbody className="divide-y divide-border-soft">
               {filteredDocuments.map((doc) => {
-                const origin = stockLocations.find(b => b.id === doc.originId)?.name || doc.originId;
+                const origin = transferPlaces.find(b => b.id === doc.originId)?.name || doc.originId;
                 const eta = 'eta' in doc ? doc.eta : doc.date;
                 const sm = 'shippingMethodId' in doc ? shippingMethods.find(m => m.id === doc.shippingMethodId) : null;
                 const cr = 'courierId' in doc ? couriers.find(c => c.id === doc.courierId) : null;
@@ -518,13 +518,13 @@ export function Receptions() {
                 <div>
                   <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Origen</p>
                   <p className="text-sm font-semibold text-text-primary">
-                    {stockLocations.find(b => b.id === selectedDocument.data.originId)?.name || selectedDocument.data.originId}
+                    {transferPlaces.find(b => b.id === selectedDocument.data.originId)?.name || selectedDocument.data.originId}
                   </p>
                 </div>
                 <div>
                   <p className="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-1">Destino</p>
                   <p className="text-sm font-semibold text-text-primary">
-                    {stockLocations.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId}
+                    {transferPlaces.find(b => b.id === selectedDocument.data.destinationId)?.name || selectedDocument.data.destinationId}
                   </p>
                 </div>
                 <div>

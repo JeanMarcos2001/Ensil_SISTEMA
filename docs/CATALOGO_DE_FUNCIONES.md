@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**54 funcionalidades · 192 funciones** (3 reservadas) · 27 avisos · 14 combinaciones a separar.
+**54 funcionalidades · 191 funciones** (3 reservadas) · 26 avisos · 13 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -137,9 +137,8 @@ Cómo leerlo:
 | Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
 |---|---|---|---|---|---|
 | **Ver transferencias** · menú «Transferencias»<br><code>log-transfer:view</code> | ver | — | — | Transferencia, Filial → — | — |
-| **Solicitar transferencia**<br><code>log-transfer:req_transfer</code> | crear | Ver transferencias, Ver el stock | Aprobar transferencia en cualquier sede (recomendada) | Stock, Filial → Transferencia | Transferencia solicitada |
-| **Aprobar transferencia** 🛡 control<br><code>log-transfer:approve_transfer</code> | aprobar | Ver transferencias | — | — → Transferencia | Transferencia aprobada o rechazada |
-| **Despachar transferencia**<br><code>log-transfer:dispatch</code> | operar | Ver transferencias, Ver el stock | Recepcionar transferencia en la sede destino (obligatoria) | Stock, Transferencia → Transferencia, Stock, Kardex | Transferencia en tránsito |
+| **Preparar una transferencia**<br><code>log-transfer:create</code> | crear | Ver transferencias, Ver el stock | — | Stock, Filial → Transferencia | — |
+| **Despachar transferencia**<br><code>log-transfer:dispatch</code> | operar | Ver transferencias, Ver el stock | Recepcionar transferencia en la sede destino (obligatoria) | Stock, Transferencia → Transferencia, Stock, Kardex | Transferencia en tránsito, Transferencia cancelada |
 | **Recepcionar transferencia**<br><code>log-transfer:receive</code> | operar | Ver transferencias | — | Transferencia → Transferencia, Stock, Kardex, Recepción | Transferencia recibida, Recepción con faltante o daño |
 
 ### Recepciones `log-recepciones`
@@ -504,12 +503,11 @@ El aviso llega a quien tenga la función indicada en la sede que corresponde, no
 | Envío despachado | Preparar un envío · Editar un envío · Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
 | Envío cancelado | Realizar el envío (despachar) | Confirmar la recepción de un envío (sede destino) |
 | Envío recibido | Confirmar la recepción de un envío | Realizar el envío (despachar) (sede origen) |
-| Transferencia solicitada | Solicitar transferencia | Aprobar transferencia (cualquier sede) |
-| Transferencia aprobada o rechazada | Aprobar transferencia | Quien hizo la solicitud |
 | Transferencia en tránsito | Despachar transferencia | Recepcionar transferencia (sede destino) |
+| Transferencia cancelada | Despachar transferencia | Recepcionar transferencia (sede destino) |
 | Transferencia recibida | Recepcionar transferencia | Despachar transferencia (sede origen) |
 | Recepción con faltante o daño | Recepcionar transferencia · Confirmar la recepción de un envío | Registrar un ajuste o una merma (sede origen)<br>Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
-| Stock por debajo del mínimo | La regla del sistema (por fecha o estado) | Solicitar transferencia (sede del alumno o documento)<br>Preparar un envío (cualquier sede) |
+| Stock por debajo del mínimo | La regla del sistema (por fecha o estado) | Armar un requerimiento (pedir mercadería al almacén) (sede del alumno o documento)<br>Preparar un envío (cualquier sede) |
 | Requerimiento de una sede (aviso a Logística) | Armar un requerimiento (pedir mercadería al almacén) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») (cualquier sede) |
 | Requerimiento rechazado (aviso a la sede) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») | Quien hizo la solicitud<br>Armar un requerimiento (pedir mercadería al almacén) (sede del alumno o documento) |
 | Mensaje de una sede en su requerimiento (aviso a Logística) | Escribir en un requerimiento (mensaje anclado) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») (cualquier sede) |
@@ -546,7 +544,6 @@ Si un rol reúne **todas** las funciones de la fila, el constructor avisa y pide
 | Solicitar cambio de programa o nivel + Aprobar cambio de programa o nivel | Quien pide un cambio de programa y lo aprueba no tiene quien lo revise. |
 | Solicitar traslado de sede + Aprobar traslado de sede | Quien pide un traslado y lo aprueba no tiene quien lo revise. |
 | Realizar el envío (despachar) + Confirmar la recepción de un envío | Quien despacha un envío y también lo recibe puede dar por recibida mercadería que nunca llegó. |
-| Aprobar transferencia + Despachar transferencia + Recepcionar transferencia | Quien aprueba, despacha y recepciona una transferencia controla todo el movimiento sin contrapeso. |
 | Crear ficha de personal + Crear usuario + Asignar rol | Quien crea la ficha, la cuenta y le asigna el rol puede inventar a un trabajador con acceso. |
 | Configurar permisos + Asignar rol | Quien define los permisos y también asigna los roles puede darse a sí mismo cualquier acceso. |
 

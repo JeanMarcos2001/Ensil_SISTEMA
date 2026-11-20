@@ -124,7 +124,7 @@ export function createSupabaseLogisticsRepository(client: SupabaseClient): Logis
     removeShipment: id => rpc('eliminar_envio', { p_id: id }),
     createTransfer: payload => rpc<string>('crear_transferencia', { p: payload }),
     editTransfer: (id, payload) => rpc('editar_transferencia', { p_id: id, p: payload }),
-    changeTransferStatus: (id, status) => rpc('cambiar_estado_transferencia', { p_id: id, p_estado: status }),
+    changeTransferStatus: (id, status, observation) => rpc('cambiar_estado_transferencia', { p_id: id, p_estado: status, p_observacion: observation ?? null }),
     confirmReception: (kind, docId, lines, observation) => rpc('confirmar_recepcion', { p_tipo: kind, p_doc: docId, p_lineas: lines, p_observacion: observation ?? null }),
 
     async insertCourier(courier: Courier) {

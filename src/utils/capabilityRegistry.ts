@@ -106,12 +106,12 @@ export const EVENTS: EventDef[] = [
   { id: 'shipment_dispatched', label: 'Envío despachado', trigger: 'accion', recipients: [{ capability: 'log-recepciones:confirm', where: 'destination-branch' }], fallback: FALLBACK },
   { id: 'shipment_cancelled', label: 'Envío cancelado', trigger: 'accion', recipients: [{ capability: 'log-recepciones:confirm', where: 'destination-branch' }], fallback: FALLBACK },
   { id: 'shipment_received', label: 'Envío recibido', trigger: 'accion', recipients: [{ capability: 'log-envios:dispatch', where: 'origin-branch' }], fallback: FALLBACK },
-  { id: 'transfer_requested', label: 'Transferencia solicitada', trigger: 'accion', recipients: [{ capability: 'log-transfer:approve_transfer', where: 'any' }], fallback: FALLBACK },
-  { id: 'transfer_decided', label: 'Transferencia aprobada o rechazada', trigger: 'accion', recipients: [{ person: 'requester' }], fallback: FALLBACK },
+  // Transferencias entre sedes: sin aprobación (la sede que manda responde por lo que manda); solo se avisa a la sede que recibe
   { id: 'transfer_dispatched', label: 'Transferencia en tránsito', trigger: 'accion', recipients: [{ capability: 'log-transfer:receive', where: 'destination-branch' }], fallback: FALLBACK },
+  { id: 'transfer_cancelled', label: 'Transferencia cancelada', trigger: 'accion', recipients: [{ capability: 'log-transfer:receive', where: 'destination-branch' }], fallback: FALLBACK },
   { id: 'transfer_received', label: 'Transferencia recibida', trigger: 'accion', recipients: [{ capability: 'log-transfer:dispatch', where: 'origin-branch' }], fallback: FALLBACK },
   { id: 'reception_with_differences', label: 'Recepción con faltante o daño', trigger: 'accion', recipients: [{ capability: 'log-ajustes:create', where: 'origin-branch' }, SUPERVISE], fallback: FALLBACK },
-  { id: 'stock_below_minimum', label: 'Stock por debajo del mínimo', trigger: 'sistema', recipients: [{ capability: 'log-transfer:req_transfer', where: 'subject-branch' }, { capability: 'log-envios:create', where: 'any' }], fallback: FALLBACK },
+  { id: 'stock_below_minimum', label: 'Stock por debajo del mínimo', trigger: 'sistema', recipients: [{ capability: 'log-requerimientos:create', where: 'subject-branch' }, { capability: 'log-envios:create', where: 'any' }], fallback: FALLBACK },
   // Requerimientos de las sedes: la sede pide, Logística atiende; los mensajes anclados avisan al otro lado
   { id: 'requirement_created', label: 'Requerimiento de una sede (aviso a Logística)', trigger: 'accion', recipients: [{ capability: 'log-requerimientos:attend', where: 'any' }], fallback: FALLBACK },
   { id: 'requirement_rejected', label: 'Requerimiento rechazado (aviso a la sede)', trigger: 'accion', recipients: [{ person: 'requester' }, { capability: 'log-requerimientos:create', where: 'subject-branch' }], fallback: FALLBACK },
@@ -159,7 +159,6 @@ export const INCOMPATIBILITIES: IncompatibilityDef[] = [
   { id: 'pedir-aprobar-traslado', capabilities: ['op-matriculas:req_transfer', 'op-matriculas:approve_transfer'], message: 'Quien pide un traslado y lo aprueba no tiene quien lo revise.' },
   // Mercadería
   { id: 'despachar-recibir', capabilities: ['log-envios:dispatch', 'log-recepciones:confirm'], message: 'Quien despacha un envío y también lo recibe puede dar por recibida mercadería que nunca llegó.' },
-  { id: 'transferir-aprobar-recibir', capabilities: ['log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive'], message: 'Quien aprueba, despacha y recepciona una transferencia controla todo el movimiento sin contrapeso.' },
   // Personal y planilla
   { id: 'ficha-cuenta-rol', capabilities: ['per-personal:create', 'org-usuarios:create', 'org-usuarios:assign_role'], message: 'Quien crea la ficha, la cuenta y le asigna el rol puede inventar a un trabajador con acceso.' },
   // Accesos
@@ -374,12 +373,11 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
   ]),
   f('log-transfer', 'Transferencias', 'mod-logistica', [
     { action: 'view', label: 'Ver transferencias', kind: 'ver', menu: menu('logistica', 'Transferencias'), reads: ['transfer', 'branch'] },
-    { action: 'req_transfer', label: 'Solicitar transferencia', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['transfer'], emits: ['transfer_requested'], actions: ['addTransfer', 'updateTransfer'],
-      counterparts: [cp('log-transfer:approve_transfer', 'any', 'advisory', 'Nadie podrá aprobar la solicitud de transferencia: quedará pendiente.')] },
-    { action: 'approve_transfer', label: 'Aprobar transferencia', kind: 'aprobar', requires: ['view'], sensitive: 'control', writes: ['transfer'], emits: ['transfer_decided'], actions: ['updateTransferStatus'] },
+    // Sin aprobación: la sede prepara lo que manda (a otra sede o de vuelta al almacén), lo despacha y la otra la recepciona
+    { action: 'create', label: 'Preparar una transferencia', kind: 'crear', requires: ['view', 'log-stock:view'], reads: ['stock', 'branch'], writes: ['transfer'], actions: ['addTransfer', 'updateTransfer'] },
     {
       action: 'dispatch', label: 'Despachar transferencia', kind: 'operar', requires: ['view', 'log-stock:view'], reads: ['stock', 'transfer'], writes: ['transfer', 'stock', 'kardex'],
-      emits: ['transfer_dispatched'], actions: ['updateTransferStatus'],
+      emits: ['transfer_dispatched', 'transfer_cancelled'], actions: ['updateTransferStatus'],
       counterparts: [cp('log-transfer:receive', 'destination-branch', 'required', 'Nadie podrá recepcionar la transferencia en la sede destino.')],
     },
     {

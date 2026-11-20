@@ -42,6 +42,8 @@ export interface TransferenciaRow {
   referencia_adicional: string | null; viajero_nombre: string | null; viajero_documento: string | null; observacion_envio: string | null;
   observacion_interna_logistica: string | null; eta: string | null; observacion: string | null; adjuntos: string[] | null; recepcion_observacion: string | null;
   recepcion_fecha: string | null; recibido_por: string | null; habilitar_recepcion_manual: boolean;
+  /** Cuándo y quién despachó, y el motivo si se canceló estando en tránsito (migración 0032; una base anterior no trae las columnas). */
+  despachado_en?: string | null; despachado_por?: string | null; motivo_cancelacion?: string | null;
 }
 export interface IncidenciaRow {
   id: string; fecha: string; doc_tipo: 'Envío' | 'Transferencia'; doc_id: string; articulo_id: string; tipo: ReceptionIncident['type']; cantidad: number;
@@ -157,6 +159,7 @@ export const transferFromRow = (r: TransferenciaRow): Transfer => ({
   internalLogisticsObservation: opt(r.observacion_interna_logistica), eta: opt(r.eta), observation: opt(r.observacion),
   attachments: r.adjuntos && r.adjuntos.length > 0 ? r.adjuntos : undefined, receptionObservation: opt(r.recepcion_observacion), receptionDate: opt(r.recepcion_fecha),
   receivedBy: opt(r.recibido_por), manualEnable: r.habilitar_recepcion_manual || undefined,
+  dispatchedAt: opt(r.despachado_en), dispatchedBy: opt(r.despachado_por), cancelReason: opt(r.motivo_cancelacion),
 });
 
 /** Lo que se manda a la base de una transferencia (solo los campos que vienen; ver `shipmentPayload`). */

@@ -6,13 +6,15 @@
  *    Por armar → Empacando → Por despachar → En tránsito → (Listo para recepción) → Recibido (con o sin diferencias). Cada columna tiene sus datos
  *    (la lista de artículos, las cajas, el transporte y la fecha de llegada) y no se avanza sin ellos; hacia atrás se vuelve libremente hasta
  *    «Por despachar» (el stock todavía no salió). Se puede cancelar mientras no se haya recibido (si ya salió, lo despachado vuelve al origen).
- *  - Una transferencia es una solicitud con aprobación: Borrador → Solicitada → Aprobada → En tránsito → (Listo para recepción) → Recibida (con o sin
- *    diferencias); también Rechazada y Cancelada. Solo se despacha lo aprobado.
+ *  - Una transferencia es lo que una sede manda a otra sede (un préstamo) o devuelve al almacén central. No lleva aprobación: cada sede es responsable
+ *    de lo que manda. Borrador → En tránsito → (Listo para recepción) → Recibida (con o sin diferencias); también Cancelada. Se prepara en el borrador
+ *    (lista, cajas, transporte y fecha de llegada) y despachar es pasar a «En tránsito».
  *  - El stock sale del origen UNA sola vez, al despachar; el destino suma al recibir. Una recepción solo se confirma sobre un documento en tránsito
  *    y **solo desde la fecha (y hora) estimada de llegada**, salvo que Logística la habilite antes (`receptionWindow`).
  *  - Las cantidades de las cajas son el detalle del envío o de la transferencia (`flattenBoxes`).
  */
-import type { Courier, Shipment, ShipmentBox, ShippingMethod, Transfer, TransferBox } from '../context/DataContext';
+import type { Courier, Shipment, ShipmentBox, ShippingMethod, StockItem, Transfer, TransferBox } from '../context/DataContext';
+import { isWarehouseId } from './logisticsRoutes';
 
 export type ShipmentStatus = Shipment['status'];
 export type TransferStatus = Transfer['status'];
@@ -29,10 +31,9 @@ export const SHIPMENT_FLOW: Record<ShipmentStatus, ShipmentStatus[]> = {
   Cancelado: [],
 };
 
+/** Los estados desde los que una transferencia puede pasar a otro: sin aprobación, el borrador se despacha directamente. La recepción es una operación aparte. */
 export const TRANSFER_FLOW: Partial<Record<TransferStatus, TransferStatus[]>> = {
-  Borrador: ['Solicitada', 'Cancelada'],
-  Solicitada: ['Aprobada', 'Rechazada', 'Cancelada'],
-  Aprobada: ['En tránsito', 'Rechazada', 'Cancelada'],
+  Borrador: ['En tránsito', 'Cancelada'],
   'En tránsito': ['Listo para recepción', 'Cancelada'],
   'Listo para recepción': ['Cancelada'],
 };
@@ -56,8 +57,37 @@ export const shipmentMovesStock = (from: ShipmentStatus, to: ShipmentStatus): bo
 export const PRE_DISPATCH_STATUSES = ['Por armar', 'Empacando', 'Por despachar'] as const;
 export type PreDispatchStatus = typeof PRE_DISPATCH_STATUSES[number];
 export const isPreDispatch = (status: string): status is PreDispatchStatus => (PRE_DISPATCH_STATUSES as readonly string[]).includes(status);
+/** Despachar una transferencia descuenta el stock de la sede de origen; cancelar una ya despachada lo devuelve. */
 export const transferMovesStock = (from: TransferStatus, to: TransferStatus): boolean =>
-  (from === 'Aprobada' && to === 'En tránsito') || (isInTransit(from) && to === 'Cancelada');
+  (from === 'Borrador' && to === 'En tránsito') || (isInTransit(from) && to === 'Cancelada');
+
+/**
+ * Cancelar una transferencia que todavía no salió no mueve nada y no pide motivo. Cancelar una que ya salió devuelve a la sede de origen lo que salió y pide
+ * su motivo (al menos 5 letras): como no hay aprobación, es lo que deja explicado el cambio. La base dice lo mismo con las mismas palabras.
+ */
+export const TRANSFER_CANCEL_REASON_MESSAGE = 'Indique el motivo de la cancelación (al menos 5 letras): lo que salió vuelve a la sede de origen.';
+export const transferCancelError = (from: TransferStatus, reason: string | undefined): string | null =>
+  isInTransit(from) && (reason ?? '').trim().length < 5 ? TRANSFER_CANCEL_REASON_MESSAGE : null;
+
+/** Los motivos que se ofrecen: a otra sede es un préstamo o una redistribución; al almacén, una devolución (la base solo exige que haya un motivo). */
+export const TRANSFER_REASONS_TO_SEDE = ['Préstamo a otra sede', 'Redistribución', 'Apoyo temporal', 'Pedido especial'] as const;
+export const TRANSFER_REASONS_TO_WAREHOUSE = ['Devolución de sobrante', 'Devolución para redistribuir', 'Devolución de material sin uso'] as const;
+export const transferReasonsFor = (destinationId: string): readonly string[] =>
+  destinationId && isWarehouseId(destinationId) ? TRANSFER_REASONS_TO_WAREHOUSE : TRANSFER_REASONS_TO_SEDE;
+
+/** Lo que advierte la lista de una transferencia sobre el stock de la sede que manda: no alcanza (la base no deja despachar) o dejaría la sede bajo su mínimo (solo se avisa). */
+export interface TransferStockNote { itemId: string; requested: number; available: number; min: number; short: boolean; belowMin: boolean }
+export function transferStockNotes(lines: Line[], originId: string, stock: Pick<StockItem, 'itemId' | 'branchId' | 'stock' | 'minStock'>[]): TransferStockNote[] {
+  return lines
+    .filter(l => l.itemId && l.quantity > 0)
+    .map(l => {
+      const row = stock.find(s => s.itemId === l.itemId && s.branchId === originId);
+      const available = Math.max(0, row?.stock ?? 0);
+      const min = row?.minStock ?? 0;
+      return { itemId: l.itemId, requested: l.quantity, available, min, short: l.quantity > available, belowMin: l.quantity <= available && min > 0 && available - l.quantity < min };
+    })
+    .filter(n => n.short || n.belowMin);
+}
 
 // ------------------------------------------------------------------------------------------------------------------ Detalle y cajas
 
@@ -262,7 +292,7 @@ export function transferRequestError(t: Pick<Transfer, 'reason' | 'items'>, item
   return detailError(t.items, [], itemIds);
 }
 
-/** Lo que exige despachar una transferencia aprobada: método de envío, fecha de llegada, transporte y cajas coherentes con el detalle. */
+/** Lo que exige despachar una transferencia: método de envío, fecha de llegada, transporte y cajas coherentes con el detalle. */
 export function transferDispatchError(
   t: Pick<Transfer, 'eta' | 'shippingMethodId' | 'courierId' | 'trackingNumber' | 'travelerName' | 'shippingObservation' | 'items' | 'boxes'>, cat: TransportCatalog,
 ): string | null {

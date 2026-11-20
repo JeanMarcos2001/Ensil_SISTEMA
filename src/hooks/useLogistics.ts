@@ -135,7 +135,7 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
     const { id: _ignored, ...fields } = patch;
     return settle(await editTransfer(repo, context(), id, { ...prev, ...fields }, transferPayload(fields)));
   }, [repo, settle]);
-  const updateTransferStatus = useCallback(async (id: string, status: Transfer['status']) => settle(await changeTransferStatus(repo, context(), id, status)), [repo, settle]);
+  const updateTransferStatus = useCallback(async (id: string, status: Transfer['status'], observation?: string) => settle(await changeTransferStatus(repo, context(), id, status, observation)), [repo, settle]);
 
   // ---- Recepción
   const receive = useCallback(async (input: ReceptionInput) => settle(await confirmReception(repo, context(), input)), [repo, settle]);

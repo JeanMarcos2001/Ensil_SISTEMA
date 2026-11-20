@@ -265,7 +265,7 @@ export function Stock() {
                           { label: 'Ver detalle', onClick: () => handleOpenDetail(row) },
                           { label: 'Registrar ingreso', hidden: !can('log-stock:entry'), onClick: () => handleOpenNewEntry(row) },
                           { label: 'Ajustar stock', hidden: !can('log-ajustes:create'), onClick: () => handleOpenAdjust(row) },
-                          { label: 'Transferir', hidden: !can('log-transfer:req_transfer'), onClick: () => { window.location.href = '/logistics/transfers'; } },
+                          { label: 'Transferir', hidden: !can('log-transfer:create'), onClick: () => { window.location.href = '/logistics/transfers'; } },
                           ...(item?.isPackage && can('log-stock:pack') ? [
                             { label: 'Empaquetar kit', onClick: () => handleOpenPack(row) }
                           ] : []),

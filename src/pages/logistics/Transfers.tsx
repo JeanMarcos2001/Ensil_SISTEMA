@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -8,8 +8,12 @@ import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCir
 import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, TransferBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
-import { centralWarehouse } from '../../utils/logisticsRoutes';
-import { etaLabel } from '../../utils/logisticsDocs';
+import { ReasonDialog } from '../../components/ui/ReasonDialog';
+import { LiveIndicator } from '../../components/logistics/LiveIndicator';
+import { useLiveShipments } from '../../hooks/useLiveShipments';
+import { isReturnToWarehouse } from '../../utils/logisticsRoutes';
+import { etaLabel, transferReasonsFor, transferStockNotes } from '../../utils/logisticsDocs';
+import { placeName } from '../../utils/placeDirectory';
 import { printHtml } from '../../utils/printTable';
 import { checklistFromShipment, shipmentChecklistHtml } from '../../utils/shipmentPrint';
 
@@ -20,15 +24,18 @@ export function Transfers() {
     couriers, 
     stockItems, 
     items, 
-    warehouses,
-    stockLocations,
+    branches,
+    transferPlaces,
     addTransfer,
     updateTransferStatus,
     updateTransfer,
+    reloadLogisticsDocuments,
     currentBranchId,
     can,
     availabilityOf
   } = useData();
+  // Lo que mandan y reciben las otras sedes aparece solo (en vivo, y cada 30 segundos si la conexión en vivo falla)
+  const { connected } = useLiveShipments(async () => { await reloadLogisticsDocuments(); });
   const [isNewTransferOpen, setIsNewTransferOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
@@ -36,8 +43,13 @@ export function Transfers() {
   const [isPreparationOpen, setIsPreparationOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  /** Lo que la base rechazó al cambiar el estado desde la lista (aprobar, cancelar…). */
+  /** Lo que la base rechazó al cambiar el estado desde la lista (cancelar, marcar listo…). */
   const [listError, setListError] = useState<string | null>(null);
+  /** El borrador que se está editando (si no, el formulario crea uno nuevo) y la transferencia que se cancela con su motivo. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Transfer | null>(null);
+  /** Al guardar un borrador nuevo «y preparar el despacho», se abre la preparación cuando la lista ya lo trae. */
+  const [prepareAfterSave, setPrepareAfterSave] = useState<string | null>(null);
 
   const changeStatus = async (id: string, status: Transfer['status']) => {
     setListError(null);
@@ -55,8 +67,6 @@ export function Transfers() {
   // Form State
   const [originId, setOriginId] = useState('');
   const [destinationId, setDestinationId] = useState('');
-  // Entre filiales todo pasa por el almacén central: si se elige una filial en un extremo, el otro extremo es el almacén
-  const warehouse = centralWarehouse(warehouses);
   const [reason, setReason] = useState('');
   const [observation, setObservation] = useState('');
   const [date, setDate] = useState(todayLocalISO());
@@ -77,6 +87,18 @@ export function Transfers() {
   const activeShippingMethods = shippingMethods.filter(m => m.status === 'Activo');
   const activeCouriers = couriers.filter(c => c.status === 'Activo');
 
+  // Una transferencia la manda una sede: el origen son las sedes que la cuenta alcanza; el destino, otra sede o el almacén central (devolución)
+  const originOptions = branches.filter(b => b.status === 'Activo');
+  const destinationSedes = transferPlaces.filter(l => l.kind === 'sede' && l.status === 'Activo' && l.id !== originId);
+  const destinationWarehouses = transferPlaces.filter(l => l.kind === 'almacén' && l.status === 'Activo');
+  const place = (id: string) => placeName(transferPlaces, id);
+  /** ¿La cuenta alcanza la sede que manda? Solo quien la alcanza prepara, despacha o cancela lo suyo (la base lo vuelve a comprobar). */
+  const canOperateOrigin = (t: Transfer) => branches.some(b => b.id === t.originId);
+  const reasonOptions = transferReasonsFor(destinationId);
+  /** Lo que advierte la lista sobre el stock de la sede que manda: no alcanza (no se podrá despachar) o la dejaría bajo su mínimo (solo se avisa). */
+  const stockNotes = originId ? transferStockNotes(formItems.filter(i => i.itemId), originId, stockItems) : [];
+  const itemName = (id: string) => items.find(i => i.id === id)?.name ?? 'Artículo desconocido';
+
   /** Imprime la lista de verificación de la transferencia (cajas y artículos, cada uno con su casilla para marcar a mano). */
   const handlePrintChecklist = () => {
     const checklist = checklistFromShipment({
@@ -86,7 +108,7 @@ export function Transfers() {
       shippingMethodId: selectedShippingMethod || undefined, courierId: selectedCourier || undefined, trackingNumber: trackingNumber || undefined,
       travelerName: travelerName || undefined, observation: observation || undefined,
     }, {
-      place: id => stockLocations.find(l => l.id === id)?.name ?? id,
+      place,
       item: id => items.find(i => i.id === id)?.name ?? 'Artículo desconocido',
       method: id => shippingMethods.find(m => m.id === id)?.name ?? '',
       courier: id => couriers.find(c => c.id === id)?.name,
@@ -166,7 +188,7 @@ export function Transfers() {
       return false;
     }
     if (originId === destinationId) {
-      setFormError('La sede de origen y destino no pueden ser la misma.');
+      setFormError('El origen y el destino deben ser distintos.');
       return false;
     }
     for (const item of formItems) {
@@ -224,48 +246,93 @@ export function Transfers() {
 
   /** ¿Habrá quien recepcione en la sede destino? (contraparte obligatoria de despachar) */
   const dispatchAvailability = (t: Transfer) => {
-    const destination = stockLocations.find(b => b.id === t.destinationId);
-    return availabilityOf('log-transfer:dispatch', { branchId: t.destinationId, branchName: destination?.name ?? t.destinationId });
+    return availabilityOf('log-transfer:dispatch', { branchId: t.destinationId, branchName: place(t.destinationId) });
   };
 
-  const handleSaveRequest = async (status: 'Borrador' | 'Solicitada') => {
+  /** Guarda el borrador (nuevo o editado). Sin aprobación: lo prepara la sede que manda y después lo despacha. */
+  const handleSaveDraft = async (thenPrepare: boolean) => {
     if (saving || !validateRequestForm()) return;
 
-    const newTransfer: Omit<Transfer, 'id'> = {
-      date,
-      originId,
-      destinationId,
-      status,
-      items: formItems,
-      reason,
-      observation
-    };
-
-    // La base de datos asigna el código (TRF-AAAA-NNN) y guarda la solicitud
     setSaving(true);
-    const created = await addTransfer(newTransfer);
-    setSaving(false);
-    if (!created.ok) {
-      setFormError(created.error ?? 'No se pudo guardar la transferencia.');
-      return;
+    if (editingId) {
+      // Al cambiar la lista las cajas se vuelven a armar al preparar el despacho
+      const saved = await updateTransfer(editingId, { originId, destinationId, items: formItems, reason, observation });
+      setSaving(false);
+      if (!saved.ok) {
+        setFormError(saved.error ?? 'No se pudo guardar la transferencia.');
+        return;
+      }
+      if (thenPrepare) setPrepareAfterSave(editingId);
+    } else {
+      // La base de datos asigna el código (TRF-AAAA-NNN) y guarda el borrador
+      const created = await addTransfer({ date, originId, destinationId, status: 'Borrador', items: formItems, reason, observation });
+      setSaving(false);
+      if (!created.ok) {
+        setFormError(created.error ?? 'No se pudo guardar la transferencia.');
+        return;
+      }
+      if (thenPrepare && created.id) setPrepareAfterSave(created.id);
     }
     setIsNewTransferOpen(false);
+    setEditingId(null);
     resetForm();
+  };
+
+  const handleOpenNew = () => {
+    resetForm();
+    setEditingId(null);
+    setFormError(null);
+    // Quien trabaja en una sola sede manda desde ella
+    const mine = currentBranchId !== 'all' && originOptions.some(b => b.id === currentBranchId) ? currentBranchId : originOptions.length === 1 ? originOptions[0].id : '';
+    setOriginId(mine);
+    setIsNewTransferOpen(true);
+  };
+
+  const handleOpenEdit = (transfer: Transfer) => {
+    resetForm();
+    setEditingId(transfer.id);
+    setFormError(null);
+    setDate(transfer.date);
+    setOriginId(transfer.originId);
+    setDestinationId(transfer.destinationId);
+    setReason(transfer.reason);
+    setObservation(transfer.observation || '');
+    setFormItems(transfer.items.map(i => ({ ...i })));
+    setIsNewTransferOpen(true);
   };
 
   const handleOpenPreparation = (transfer: Transfer) => {
     setSelectedTransfer(transfer);
+    setFormError(null);
     setOriginId(transfer.originId);
     setDestinationId(transfer.destinationId);
     setReason(transfer.reason);
     setObservation(transfer.observation || '');
     setFormItems(transfer.items);
-    
-    // Pre-fill boxes with items from the request if possible, or just start fresh
-    setBoxes([{ id: 'box-1', boxNumber: '1', items: transfer.items.map(i => ({ itemId: i.itemId, quantity: i.quantity })) }]);
-    
+    setEta(transfer.eta ?? '');
+    setSelectedShippingMethod(transfer.shippingMethodId ?? '');
+    setSelectedCourier(transfer.courierId ?? '');
+    setTrackingNumber(transfer.trackingNumber ?? '');
+    setAdditionalReference(transfer.additionalReference ?? '');
+    setTravelerName(transfer.travelerName ?? '');
+    setTravelerDocument(transfer.travelerDocument ?? '');
+    setShippingObservation(transfer.shippingObservation ?? '');
+
+    // Si ya tenía cajas se conservan; si no, se empieza con una caja con toda la lista
+    setBoxes(transfer.boxes && transfer.boxes.length > 0
+      ? transfer.boxes.map(b => ({ ...b, items: b.items.map(i => ({ ...i })) }))
+      : [{ id: 'box-1', boxNumber: '1', items: transfer.items.map(i => ({ itemId: i.itemId, quantity: i.quantity })) }]);
+
     setIsPreparationOpen(true);
   };
+
+  // Después de guardar un borrador «y preparar el despacho», se abre la preparación en cuanto la lista ya lo trae
+  useEffect(() => {
+    if (!prepareAfterSave) return;
+    const created = transfers.find(t => t.id === prepareAfterSave);
+    if (created) { setPrepareAfterSave(null); handleOpenPreparation(created); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepareAfterSave, transfers]);
 
   const handleConfirmDispatch = () => {
     if (!validateDispatchForm()) return;
@@ -345,13 +412,10 @@ export function Transfers() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'Borrador': return 'neutral';
-      case 'Solicitada': return 'info';
-      case 'Aprobada': return 'success';
       case 'En tránsito': return 'warning';
       case 'Listo para recepción': return 'info';
       case 'Recibida': return 'success';
       case 'Recibida con diferencias': return 'warning';
-      case 'Rechazada': return 'danger';
       case 'Cancelada': return 'danger';
       default: return 'neutral';
     }
@@ -469,13 +533,14 @@ export function Transfers() {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Transferencias</h2>
-          <p className="text-sm text-text-secondary">Movimiento de stock entre filiales</p>
+          <p className="text-sm text-text-secondary">Lo que una sede manda a otra sede o devuelve al almacén central. No lleva aprobación: cada sede responde por lo que manda.</p>
+          <LiveIndicator connected={connected} />
         </div>
         <div className="flex items-center gap-3">
-          {can('log-transfer:req_transfer') && (
-            <Button variant="primary" className="flex items-center gap-2" onClick={() => setIsNewTransferOpen(true)}>
+          {can('log-transfer:create') && (
+            <Button variant="primary" className="flex items-center gap-2" onClick={handleOpenNew}>
               <Plus size={16} />
-              Nueva Solicitud
+              Nueva transferencia
             </Button>
           )}
         </div>
@@ -510,7 +575,7 @@ export function Transfers() {
                 onChange={(e) => setFilterOrigin(e.target.value)}
               >
                 <option value="">Sede origen</option>
-                {stockLocations.map(b => (
+                {transferPlaces.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -520,7 +585,7 @@ export function Transfers() {
                 onChange={(e) => setFilterDestination(e.target.value)}
               >
                 <option value="">Sede destino</option>
-                {stockLocations.map(b => (
+                {transferPlaces.map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
@@ -531,12 +596,10 @@ export function Transfers() {
               >
                 <option value="">Todos los estados</option>
                 <option value="borrador">Borrador</option>
-                <option value="solicitada">Solicitada</option>
-                <option value="aprobada">Aprobada</option>
                 <option value="en tránsito">En tránsito</option>
                 <option value="listo para recepción">Listo para recepción</option>
                 <option value="recibida">Recibida</option>
-                <option value="rechazada">Rechazada</option>
+                <option value="recibida con diferencias">Recibida con diferencias</option>
                 <option value="cancelada">Cancelada</option>
               </select>
               <DateInput 
@@ -558,6 +621,7 @@ export function Transfers() {
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Fecha</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Origen</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Destino</th>
+                <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Tipo</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Artículos</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider">Estado</th>
                 <th className="py-3 px-4 text-xs font-medium text-text-muted uppercase tracking-wider text-right">Acciones</th>
@@ -565,8 +629,8 @@ export function Transfers() {
             </thead>
             <tbody className="divide-y divide-border-soft">
               {filteredTransfers.map((transfer) => {
-                const origin = stockLocations.find(b => b.id === transfer.originId)?.name || transfer.originId;
-                const destination = stockLocations.find(b => b.id === transfer.destinationId)?.name || transfer.destinationId;
+                const origin = place(transfer.originId);
+                const destination = place(transfer.destinationId);
                 const totalItems = transfer.items.reduce((sum, item) => sum + item.quantity, 0);
 
                 return (
@@ -580,6 +644,7 @@ export function Transfers() {
                     <td className="py-3 px-4 text-sm text-text-secondary">{transfer.date}</td>
                     <td className="py-3 px-4 text-sm text-text-secondary">{origin}</td>
                     <td className="py-3 px-4 text-sm text-text-secondary">{destination}</td>
+                    <td className="py-3 px-4"><Badge variant={isReturnToWarehouse(transfer.destinationId) ? 'info' : 'neutral'}>{isReturnToWarehouse(transfer.destinationId) ? 'Devolución' : 'Préstamo'}</Badge></td>
                     <td className="py-3 px-4 text-sm text-text-secondary">{totalItems} unid.</td>
                     <td className="py-3 px-4">
                       <Badge variant={getStatusBadge(transfer.status)}>{transfer.status}</Badge>
@@ -588,22 +653,19 @@ export function Transfers() {
                       <ActionMenu 
                         items={[
                           { label: 'Ver detalles', onClick: () => handleOpenDetail(transfer) },
+                          // Sin aprobación: la sede que manda prepara, despacha y, si hace falta, cancela; solo quien alcanza esa sede ve estas opciones
                           ...(transfer.status === 'Borrador' ? [
-                            { label: 'Enviar solicitud', hidden: !can('log-transfer:req_transfer'), onClick: () => changeStatus(transfer.id, 'Solicitada') },
-                            { label: 'Cancelar', hidden: !can('log-transfer:req_transfer'), onClick: () => changeStatus(transfer.id, 'Cancelada'), danger: true }
-                          ] : []),
-                          ...(transfer.status === 'Solicitada' ? [
-                            { label: 'Aprobar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Aprobada') },
-                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Rechazada'), danger: true }
-                          ] : []),
-                          ...(transfer.status === 'Aprobada' ? [
-                            { label: 'Preparar despacho', hidden: !can('log-transfer:dispatch'), disabled: !dispatchAvailability(transfer).available, reason: dispatchAvailability(transfer).reason, onClick: () => handleOpenPreparation(transfer) },
-                            { label: 'Rechazar', hidden: !can('log-transfer:approve_transfer'), onClick: () => changeStatus(transfer.id, 'Rechazada'), danger: true }
+                            { label: 'Editar borrador', hidden: !can('log-transfer:create') || !canOperateOrigin(transfer), onClick: () => handleOpenEdit(transfer) },
+                            { label: 'Preparar despacho', hidden: !can('log-transfer:dispatch') || !canOperateOrigin(transfer), disabled: !dispatchAvailability(transfer).available, reason: dispatchAvailability(transfer).reason, onClick: () => handleOpenPreparation(transfer) },
+                            { label: 'Cancelar', hidden: !(can('log-transfer:create') || can('log-transfer:dispatch')) || !canOperateOrigin(transfer), onClick: () => changeStatus(transfer.id, 'Cancelada'), danger: true }
                           ] : []),
                           ...(transfer.status === 'En tránsito' ? [
-                            { label: 'Marcar listo para recepción', hidden: !can('log-transfer:dispatch'), onClick: () => changeStatus(transfer.id, 'Listo para recepción') },
-                            { label: 'Habilitar recepción manual', hidden: !can('log-transfer:dispatch'), onClick: async () => { setListError(null); const r = await updateTransfer(transfer.id, { manualEnable: true }); if (!r.ok) setListError(r.error ?? 'No se pudo habilitar la recepción manual.'); } },
-                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch'), onClick: () => changeStatus(transfer.id, 'Cancelada'), danger: true }
+                            { label: 'Marcar listo para recepción', hidden: !can('log-transfer:dispatch') || !canOperateOrigin(transfer), onClick: () => changeStatus(transfer.id, 'Listo para recepción') },
+                            { label: 'Habilitar recepción manual', hidden: !can('log-transfer:dispatch') || !canOperateOrigin(transfer), onClick: async () => { setListError(null); const r = await updateTransfer(transfer.id, { manualEnable: true }); if (!r.ok) setListError(r.error ?? 'No se pudo habilitar la recepción manual.'); } },
+                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch') || !canOperateOrigin(transfer), onClick: () => setCancelTarget(transfer), danger: true }
+                          ] : []),
+                          ...(transfer.status === 'Listo para recepción' ? [
+                            { label: 'Cancelar', hidden: !can('log-transfer:dispatch') || !canOperateOrigin(transfer), onClick: () => setCancelTarget(transfer), danger: true }
                           ] : []),
                         ]}
                       />
@@ -613,7 +675,7 @@ export function Transfers() {
               })}
               {filteredTransfers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-text-muted">
+                  <td colSpan={8} className="py-8 text-center text-text-muted">
                     No se encontraron transferencias.
                   </td>
                 </tr>
@@ -626,8 +688,8 @@ export function Transfers() {
       {/* New Request Modal */}
       <Modal
         isOpen={isNewTransferOpen}
-        onClose={() => setIsNewTransferOpen(false)}
-        title="Nueva Solicitud de Transferencia"
+        onClose={() => { setIsNewTransferOpen(false); setEditingId(null); }}
+        title={editingId ? `Editar borrador ${editingId}` : 'Nueva transferencia'}
         size="5xl"
         footer={
           <div className="flex flex-col gap-3 w-full">
@@ -638,11 +700,13 @@ export function Transfers() {
               </div>
             )}
             <div className="flex justify-end gap-3">
-              <Button variant="ghost" onClick={() => setIsNewTransferOpen(false)}>Cancelar</Button>
-              {can('log-transfer:req_transfer') && (
+              <Button variant="ghost" onClick={() => { setIsNewTransferOpen(false); setEditingId(null); }}>Cancelar</Button>
+              {can('log-transfer:create') && (
                 <>
-                  <Button variant="secondary" onClick={() => handleSaveRequest('Borrador')} disabled={saving}>{saving ? 'Guardando…' : 'Guardar Borrador'}</Button>
-                  <Button variant="primary" onClick={() => handleSaveRequest('Solicitada')} disabled={saving}>{saving ? 'Guardando…' : 'Enviar Solicitud'}</Button>
+                  <Button variant="secondary" onClick={() => handleSaveDraft(false)} disabled={saving}>{saving ? 'Guardando…' : 'Guardar borrador'}</Button>
+                  {can('log-transfer:dispatch') && (
+                    <Button variant="primary" onClick={() => handleSaveDraft(true)} disabled={saving}>{saving ? 'Guardando…' : 'Guardar y preparar despacho'}</Button>
+                  )}
                 </>
               )}
             </div>
@@ -659,49 +723,58 @@ export function Transfers() {
                 <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Configuración</h3>
               </div>
               
+              <div className="bg-primary-accent/5 p-3 rounded-xl border border-primary-accent/20 flex gap-3 text-xs text-primary-accent leading-relaxed">
+                <ArrowRightLeft size={16} className="shrink-0 mt-0.5" aria-hidden />
+                <p>Una transferencia la manda una sede a otra sede (un préstamo) o de vuelta al almacén central (una devolución). <strong>No necesita aprobación</strong>: la sede que manda responde por lo que manda. Lo que el almacén le manda a una sede es un envío, y la sede lo pide con un requerimiento.</p>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Sede Origen <span className="text-error">*</span></label>
-                  <select 
+                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Sede que manda <span className="text-error">*</span></label>
+                  <select
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={originId}
-                    onChange={(e) => { setOriginId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setDestinationId(warehouse.id); }}
+                    onChange={(e) => { setOriginId(e.target.value); if (e.target.value === destinationId) setDestinationId(''); }}
                   >
-                    <option value="">Seleccionar sede origen</option>
-                    {stockLocations.filter(b => b.status === 'Activo').map(b => (
+                    <option value="">Seleccionar la sede que manda</option>
+                    {originOptions.map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Sede Destino <span className="text-error">*</span></label>
-                  <select 
+                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Destino <span className="text-error">*</span></label>
+                  <select
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={destinationId}
-                    onChange={(e) => { setDestinationId(e.target.value); if (warehouse && e.target.value && e.target.value !== warehouse.id) setOriginId(warehouse.id); }}
+                    onChange={(e) => { setDestinationId(e.target.value); setReason(''); }}
                   >
-                    <option value="">Seleccionar sede destino</option>
-                    {stockLocations.filter(b => b.status === 'Activo').map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
+                    <option value="">Seleccionar el destino</option>
+                    {destinationWarehouses.length > 0 && (
+                      <optgroup label="Devolución al almacén">
+                        {destinationWarehouses.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                      </optgroup>
+                    )}
+                    <optgroup label="Préstamo a otra sede">
+                      {destinationSedes.map(b => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                    </optgroup>
                   </select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Motivo <span className="text-error">*</span></label>
-                  <select 
+                  <select
                     className="w-full h-10 bg-surface border border-border-soft rounded-lg px-3 text-sm text-text-primary focus:outline-none focus:border-primary-accent transition-all focus:ring-2 focus:ring-primary-accent/10"
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
+                    disabled={!destinationId}
                   >
-                    <option value="">Seleccionar motivo</option>
-                    <option value="Reposición de stock">Reposición de stock</option>
-                    <option value="Pedido especial">Pedido especial</option>
-                    <option value="Redistribución">Redistribución</option>
-                    <option value="Apoyo temporal">Apoyo temporal</option>
+                    <option value="">{destinationId ? 'Seleccionar motivo' : 'Elija primero el destino'}</option>
+                    {reason && !reasonOptions.includes(reason) && <option value={reason}>{reason}</option>}
+                    {reasonOptions.map(r => (<option key={r} value={r}>{r}</option>))}
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha Solicitud</label>
+                  <label className="text-xs font-medium text-text-secondary uppercase tracking-wide">Fecha</label>
                   <DateInput 
                     
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
@@ -717,7 +790,7 @@ export function Transfers() {
                   className="w-full bg-surface border border-border-soft rounded-lg p-3 text-sm focus:outline-none focus:border-primary-accent resize-none h-24 transition-all focus:ring-2 focus:ring-primary-accent/10"
                   value={observation}
                   onChange={(e) => setObservation(e.target.value)}
-                  placeholder="Notas adicionales sobre la solicitud..."
+                  placeholder="Notas adicionales sobre la transferencia..."
                 />
               </div>
             </section>
@@ -730,7 +803,7 @@ export function Transfers() {
               <div className="flex justify-between items-center pb-2 border-b border-border-soft">
                 <div className="flex items-center gap-2">
                   <div className="w-1 h-4 bg-primary-accent rounded-full" />
-                  <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Artículos Solicitados</h3>
+                  <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Artículos que se mandan</h3>
                 </div>
                 <Button variant="ghost" size="sm" onClick={handleAddItem} className="h-8 text-primary-accent hover:bg-primary-accent/5 gap-2 border border-primary-accent/20">
                   <Plus size={14} />
@@ -781,6 +854,20 @@ export function Transfers() {
                   </p>
                 )}
               </div>
+              {stockNotes.length > 0 && (
+                <ul className="space-y-1.5" aria-label="Avisos sobre el stock de la sede que manda">
+                  {stockNotes.map(n => (
+                    <li key={n.itemId} className={`text-xs rounded-lg px-3 py-2 border flex gap-2 items-start ${n.short ? 'bg-danger-tint/40 border-danger-text/20 text-danger-text' : 'bg-warning-tint/30 border-warning-text/20 text-warning-text'}`}>
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden />
+                      <span>
+                        {n.short
+                          ? `${itemName(n.itemId)}: pide ${n.requested} y ${place(originId)} tiene ${n.available}. No se podrá despachar con esa cantidad.`
+                          : `${itemName(n.itemId)}: ${place(originId)} quedaría con ${n.available - n.requested}, por debajo de su mínimo (${n.min}).`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </div>
         </div>
@@ -814,7 +901,7 @@ export function Transfers() {
               <Package size={20} className="shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium mb-1 uppercase tracking-wider text-[10px]">Fase de Preparación</p>
-                <p className="text-xs opacity-90 leading-relaxed">Estás preparando el envío para la solicitud {selectedTransfer?.id}. Define las cajas y el método de envío.</p>
+                <p className="text-xs opacity-90 leading-relaxed">Estás preparando el despacho de la transferencia {selectedTransfer?.id}. Define las cajas, el método de envío y la fecha de llegada.</p>
               </div>
             </div>
 
@@ -831,7 +918,7 @@ export function Transfers() {
                   <input 
                     type="text" 
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={stockLocations.find(b => b.id === originId)?.name || ''}
+                    value={place(originId)}
                     disabled
                   />
                 </div>
@@ -840,7 +927,7 @@ export function Transfers() {
                   <input 
                     type="text" 
                     className="w-full h-10 bg-surface-muted border border-border-soft rounded-lg px-3 text-sm text-text-muted cursor-not-allowed"
-                    value={stockLocations.find(b => b.id === destinationId)?.name || ''}
+                    value={place(destinationId)}
                     disabled
                   />
                 </div>
@@ -988,11 +1075,11 @@ export function Transfers() {
           <div className="bg-surface-muted p-4 rounded-xl border border-border-soft grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-text-secondary block mb-1">Origen:</span>
-              <span className="font-medium text-text-primary">{stockLocations.find(b => b.id === originId)?.name}</span>
+              <span className="font-medium text-text-primary">{place(originId)}</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Destino:</span>
-              <span className="font-medium text-text-primary">{stockLocations.find(b => b.id === destinationId)?.name}</span>
+              <span className="font-medium text-text-primary">{place(destinationId)}</span>
             </div>
             <div>
               <span className="text-text-secondary block mb-1">Método de Envío:</span>
@@ -1030,7 +1117,7 @@ export function Transfers() {
             <AlertTriangle size={20} className="shrink-0 mt-0.5" />
             <div className="text-sm">
               <p className="font-medium mb-1">Confirmación de Salida de Stock</p>
-              <p>Al confirmar, el stock será descontado de la sede origen ({stockLocations.find(b => b.id === originId)?.name}) y el documento pasará a estado "En tránsito".</p>
+              <p>Al confirmar, el stock sale de {place(originId)} y la transferencia pasa a «En tránsito»: {place(destinationId)} la verá en sus Recepciones. <strong>No hay marcha atrás</strong>: si después hay un problema, solo se puede cancelar con su motivo y lo que salió vuelve a {place(originId)}.</p>
             </div>
           </div>
 
@@ -1048,6 +1135,20 @@ export function Transfers() {
         </div>
       </Modal>
 
+      {/* Cancelar algo que ya salió: pide su motivo y devuelve lo despachado a la sede que manda */}
+      <ReasonDialog
+        isOpen={!!cancelTarget} onClose={() => setCancelTarget(null)} title={`Cancelar la transferencia ${cancelTarget?.id ?? ''}`} size="lg"
+        confirmLabel="Cancelar transferencia" danger detailLabel="Motivo de la cancelación" detailPlaceholder="Qué pasó y por qué se cancela…"
+        onSubmit={async ({ detail }) => {
+          if (!cancelTarget) return;
+          if (detail.trim().length < 5) return 'Indique el motivo de la cancelación (al menos 5 letras): lo que salió vuelve a la sede de origen.';
+          const res = await updateTransferStatus(cancelTarget.id, 'Cancelada', detail.trim());
+          return res.ok ? undefined : res.error ?? 'No se pudo cancelar la transferencia.';
+        }}
+      >
+        <p className="text-sm text-text-secondary">La transferencia ya salió de {cancelTarget ? place(cancelTarget.originId) : 'la sede de origen'}. Al cancelarla, lo que salió vuelve al stock de esa sede y {cancelTarget ? place(cancelTarget.destinationId) : 'la sede destino'} verá que se canceló. El motivo queda anotado en la transferencia.</p>
+      </ReasonDialog>
+
       {/* Detail Modal */}
       <Modal
         isOpen={isDetailOpen}
@@ -1060,7 +1161,7 @@ export function Transfers() {
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="text-lg font-semibold text-text-primary">{selectedTransfer.id}</h3>
-                <p className="text-sm text-text-secondary">Solicitada el {selectedTransfer.date}</p>
+                <p className="text-sm text-text-secondary">Preparada el {selectedTransfer.date}{selectedTransfer.requestedBy ? ` por ${selectedTransfer.requestedBy}` : ''}</p>
               </div>
               <Badge variant={getStatusBadge(selectedTransfer.status)}>{selectedTransfer.status}</Badge>
             </div>
@@ -1071,11 +1172,15 @@ export function Transfers() {
                 <div className="space-y-2">
                   <div>
                     <span className="text-xs text-text-muted block">Origen</span>
-                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedTransfer.originId)?.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{place(selectedTransfer.originId)}</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">Destino</span>
-                    <span className="text-sm font-medium text-text-primary">{stockLocations.find(b => b.id === selectedTransfer.destinationId)?.name}</span>
+                    <span className="text-sm font-medium text-text-primary">{place(selectedTransfer.destinationId)}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-text-muted block">Motivo</span>
+                    <span className="text-sm font-medium text-text-primary">{selectedTransfer.reason}</span>
                   </div>
                   <div>
                     <span className="text-xs text-text-muted block">Fecha de llegada</span>
@@ -1149,6 +1254,16 @@ export function Transfers() {
                 </div>
               )}
             </div>
+
+            {selectedTransfer.dispatchedAt && (
+              <p className="text-xs text-text-secondary">Despachada el {new Date(selectedTransfer.dispatchedAt).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}{selectedTransfer.dispatchedBy ? ` por ${selectedTransfer.dispatchedBy}` : ''}</p>
+            )}
+            {selectedTransfer.cancelReason && (
+              <div role="note" className="bg-danger-tint/40 border border-danger-text/20 rounded-xl p-3 text-sm text-danger-text">
+                <p className="font-medium mb-0.5">Cancelada</p>
+                <p>{selectedTransfer.cancelReason}</p>
+              </div>
+            )}
 
             {selectedTransfer.observation && (
               <div>

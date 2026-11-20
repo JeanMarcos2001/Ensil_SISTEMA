@@ -270,8 +270,8 @@ function screens() {
   check('El gancho escucha los cambios de la tabla de envíos, avisa si la conexión está arriba, se desconecta al salir y respalda con el motor (30 s)',
     /\.on\('postgres_changes', \{ event: '\*', schema: 'public', table: 'envios' \}/.test(hook) && /status === 'SUBSCRIBED'/.test(hook) && /removeChannel\(channel\)/.test(hook)
     && /createLiveRefresher\(/.test(hook) && /supabaseConfigured/.test(hook) && /controller\.stop\(\)/.test(hook));
-  check('Se escuchan tres tablas en un solo canal (envíos, requerimientos y sus mensajes); las transferencias de Recepciones se actualizan con el respaldo de 30 segundos',
-    (hook.match(/table: '/g) ?? []).length === 3 && /table: 'requerimientos'/.test(hook) && /table: 'requerimiento_mensajes'/.test(hook) && (hook.match(/\.channel\(/g) ?? []).length === 1);
+  check('Se escuchan cuatro tablas en un solo canal (envíos, transferencias, requerimientos y sus mensajes): lo que manda otra sede aparece solo',
+    (hook.match(/table: '/g) ?? []).length === 4 && /table: 'transferencias'/.test(hook) && /table: 'requerimientos'/.test(hook) && /table: 'requerimiento_mensajes'/.test(hook) && (hook.match(/\.channel\(/g) ?? []).length === 1);
   check('La relectura es una consulta del contexto (no una acción con permiso) y no vuelve a dibujar el tablero si no cambió nada',
     /reloadLogisticsDocuments: \(\) => Promise<void>;/.test(ctx) && /reloadLogisticsDocuments: log\.refreshDocuments/.test(ctx) && /reloadLogisticsDocuments: 'Consulta/.test(registry)
     && /JSON\.stringify\(a\) === JSON\.stringify\(b\)/.test(logistics) && /if \(!same\(shipmentsRef\.current, res\.data\.shipments\)\) setShipments/.test(logistics));

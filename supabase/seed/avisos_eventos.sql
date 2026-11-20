@@ -2,19 +2,18 @@
 -- NO es una migración: son datos de configuración que se cargan después de la migración 0026 (avisos) y cada vez que cambia un evento del registro.
 --
 -- Cargar: pegar este script en el SQL Editor del proyecto `ensil-sistema` (NO el de la web).
--- Es seguro repetirlo: cada evento se inserta o se actualiza. Carga 27 eventos.
+-- Es seguro repetirlo: cada evento se inserta o se actualiza. Carga 26 eventos.
 
 insert into public.aviso_eventos (id, etiqueta, disparo, destinatarios, respaldo, emiten)
 values
     ('shipment_dispatched', 'Envío despachado', 'accion', '[{"capability":"log-recepciones:confirm","where":"destination-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-envios:create', 'log-envios:dispatch', 'log-envios:edit']),
     ('shipment_cancelled', 'Envío cancelado', 'accion', '[{"capability":"log-recepciones:confirm","where":"destination-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-envios:dispatch']),
     ('shipment_received', 'Envío recibido', 'accion', '[{"capability":"log-envios:dispatch","where":"origin-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-recepciones:confirm']),
-    ('transfer_requested', 'Transferencia solicitada', 'accion', '[{"capability":"log-transfer:approve_transfer","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:req_transfer']),
-    ('transfer_decided', 'Transferencia aprobada o rechazada', 'accion', '[{"person":"requester"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:approve_transfer']),
     ('transfer_dispatched', 'Transferencia en tránsito', 'accion', '[{"capability":"log-transfer:receive","where":"destination-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:dispatch']),
+    ('transfer_cancelled', 'Transferencia cancelada', 'accion', '[{"capability":"log-transfer:receive","where":"destination-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:dispatch']),
     ('transfer_received', 'Transferencia recibida', 'accion', '[{"capability":"log-transfer:dispatch","where":"origin-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:receive']),
     ('reception_with_differences', 'Recepción con faltante o daño', 'accion', '[{"capability":"log-ajustes:create","where":"origin-branch"},{"capability":"sis-avisos:supervise","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-recepciones:confirm', 'log-transfer:receive']),
-    ('stock_below_minimum', 'Stock por debajo del mínimo', 'sistema', '[{"capability":"log-transfer:req_transfer","where":"subject-branch"},{"capability":"log-envios:create","where":"any"}]'::jsonb, 'sis-avisos:fallback', array[]::text[]),
+    ('stock_below_minimum', 'Stock por debajo del mínimo', 'sistema', '[{"capability":"log-requerimientos:create","where":"subject-branch"},{"capability":"log-envios:create","where":"any"}]'::jsonb, 'sis-avisos:fallback', array[]::text[]),
     ('requirement_created', 'Requerimiento de una sede (aviso a Logística)', 'accion', '[{"capability":"log-requerimientos:attend","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:create']),
     ('requirement_rejected', 'Requerimiento rechazado (aviso a la sede)', 'accion', '[{"person":"requester"},{"capability":"log-requerimientos:create","where":"subject-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:attend']),
     ('requirement_message_to_logistics', 'Mensaje de una sede en su requerimiento (aviso a Logística)', 'accion', '[{"capability":"log-requerimientos:attend","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:message']),

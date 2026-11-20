@@ -38,7 +38,7 @@ export const capabilitiesOfAction = (action: string): string[] => BY_ACTION.get(
 
 type Resolver = (args: any[]) => Requirement;
 
-const TRANSFER_ANY = ['log-transfer:req_transfer', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive'];
+const TRANSFER_ANY = ['log-transfer:create', 'log-transfer:dispatch', 'log-transfer:receive'];
 const SCHEDULE_EDIT_KEYS = ['date', 'time', 'responsible', 'observations', 'duration', 'branchId'];
 /** Datos que solo completa quien despacha la transferencia (cajas, transporte, recepción manual). */
 const TRANSFER_DISPATCH_KEYS = ['boxes', 'shippingMethodId', 'courierId', 'trackingNumber', 'additionalReference', 'travelerName', 'travelerDocument', 'shippingObservation', 'internalLogisticsObservation', 'eta', 'manualEnable', 'attachments'];
@@ -57,14 +57,13 @@ const RESOLVERS: Record<string, Resolver> = {
   // Un envío nuevo nace en «Por armar»: no despacha (despachar es pasar de «Por despachar» a «En tránsito», con «Realizar el envío»)
   addShipment: () => [['log-envios:create']],
   updateShipment: ([, patch]) => [[patch?.status === 'En tránsito' ? 'log-envios:dispatch' : 'log-envios:edit']],
-  updateTransfer: ([, patch]) => [[TRANSFER_DISPATCH_KEYS.some(k => k in (patch ?? {})) ? 'log-transfer:dispatch' : 'log-transfer:req_transfer']],
+  updateTransfer: ([, patch]) => [[TRANSFER_DISPATCH_KEYS.some(k => k in (patch ?? {})) ? 'log-transfer:dispatch' : 'log-transfer:create']],
   updateTransferStatus: ([, status]) => {
     switch (status) {
-      case 'Solicitada': return [['log-transfer:req_transfer']];
-      case 'Aprobada': case 'Rechazada': return [['log-transfer:approve_transfer']];
-      case 'En tránsito': case 'Listo para recepción': case 'Despachada': return [['log-transfer:dispatch']];
-      case 'Recibida': case 'Recibida con diferencias': case 'Recepcionada': return [['log-transfer:receive']];
-      case 'Cancelada': return [['log-transfer:req_transfer', 'log-transfer:dispatch', 'log-transfer:approve_transfer']];
+      case 'En tránsito': case 'Listo para recepción': return [['log-transfer:dispatch']];
+      case 'Recibida': case 'Recibida con diferencias': return [['log-transfer:receive']];
+      // Cancelar un borrador lo hace quien lo prepara o quien lo despacha; cancelar uno ya despachado pide además despachar (la base lo comprueba)
+      case 'Cancelada': return [['log-transfer:create', 'log-transfer:dispatch']];
       default: return [TRANSFER_ANY];
     }
   },

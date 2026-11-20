@@ -63,7 +63,7 @@ const shipment = (extra: Partial<Shipment> = {}): Shipment => ({
   shippingMethodId: 'SM-001', courierId: 'COUR-001', trackingNumber: 'TRK-1', eta: '2026-11-12', etaTime: '15:00', ...extra,
 });
 const transfer = (extra: Partial<Transfer> = {}): Transfer => ({
-  id: 'TRF-2026-001', date: '2026-11-09', originId: 'ALM-001', destinationId: 'FIL-002', status: 'Borrador', items: [{ itemId: 'ITM-HER-02', quantity: 4 }], reason: 'Reposición', ...extra,
+  id: 'TRF-2026-001', date: '2026-11-09', originId: 'FIL-002', destinationId: 'FIL-003', status: 'Borrador', items: [{ itemId: 'ITM-HER-02', quantity: 4 }], reason: 'Préstamo a otra sede', ...extra,
 });
 
 // ------------------------------------------------------------------------------------------------------------------ Ajustes, mínimo y paquetes
@@ -95,16 +95,19 @@ check('Un envío avanza de a una columna: Por armar → Empacando → Por despac
   && !!shipmentTransitionError('En tránsito', 'Por despachar') && !!shipmentTransitionError('En tránsito', 'Empacando') && !!shipmentTransitionError('Por armar', 'Recibido')
   && !!shipmentTransitionError('Recibido', 'Cancelado') && !!shipmentTransitionError('Cancelado', 'Por armar') && !!shipmentTransitionError('En tránsito', 'En tránsito'));
 check('Ningún estado terminal de un envío tiene salida', SHIPMENT_FLOW.Recibido.length === 0 && SHIPMENT_FLOW['Recibido con diferencias'].length === 0 && SHIPMENT_FLOW.Cancelado.length === 0);
-check('Una transferencia: borrador → solicitada; solicitada → aprobada o rechazada; solo lo aprobado se despacha',
-  transferTransitionError('Borrador', 'Solicitada') === null && transferTransitionError('Solicitada', 'Aprobada') === null && transferTransitionError('Solicitada', 'Rechazada') === null
-  && transferTransitionError('Aprobada', 'En tránsito') === null && transferTransitionError('En tránsito', 'Listo para recepción') === null && transferTransitionError('En tránsito', 'Cancelada') === null
-  && !!transferTransitionError('Solicitada', 'En tránsito') && !!transferTransitionError('Borrador', 'Aprobada') && !!transferTransitionError('Rechazada', 'Aprobada') && !!transferTransitionError('Cancelada', 'Solicitada'));
-check('Lo rechazado, lo cancelado y lo recibido no tienen salida', !TRANSFER_FLOW.Rechazada && !TRANSFER_FLOW.Cancelada && !TRANSFER_FLOW.Recibida && !TRANSFER_FLOW['Recibida con diferencias']);
+check('Una transferencia no lleva aprobación: borrador → en tránsito (al despachar) → listo para recepción; se cancela antes o después de salir',
+  transferTransitionError('Borrador', 'En tránsito') === null && transferTransitionError('En tránsito', 'Listo para recepción') === null && transferTransitionError('En tránsito', 'Cancelada') === null
+  && transferTransitionError('Listo para recepción', 'Cancelada') === null && transferTransitionError('Borrador', 'Cancelada') === null
+  && !!transferTransitionError('Borrador', 'Listo para recepción') && !!transferTransitionError('Borrador', 'Recibida') && !!transferTransitionError('En tránsito', 'Borrador')
+  && !!transferTransitionError('Cancelada', 'Borrador') && !!transferTransitionError('Recibida', 'Cancelada') && !!transferTransitionError('En tránsito', 'En tránsito'));
+check('Lo cancelado y lo recibido no tienen salida, y ya no existen los estados de aprobación', !TRANSFER_FLOW.Cancelada && !TRANSFER_FLOW.Recibida && !TRANSFER_FLOW['Recibida con diferencias']
+  && !('Solicitada' in TRANSFER_FLOW) && !('Aprobada' in TRANSFER_FLOW) && !('Rechazada' in TRANSFER_FLOW));
 check('Solo despachar (de «Por despachar» a «En tránsito») y cancelar algo ya despachado mueven stock del origen; moverse entre las columnas de preparación y cancelarlas, no',
   shipmentMovesStock('Por despachar', 'En tránsito') && shipmentMovesStock('En tránsito', 'Cancelado') && shipmentMovesStock('Listo para recepción', 'Cancelado')
   && !shipmentMovesStock('Por armar', 'Cancelado') && !shipmentMovesStock('Empacando', 'Por despachar') && !shipmentMovesStock('Por despachar', 'Empacando') && !shipmentMovesStock('Por despachar', 'Cancelado')
   && !shipmentMovesStock('En tránsito', 'Listo para recepción')
-  && transferMovesStock('Aprobada', 'En tránsito') && transferMovesStock('En tránsito', 'Cancelada') && !transferMovesStock('Borrador', 'Cancelada') && !transferMovesStock('Solicitada', 'Aprobada'));
+  && transferMovesStock('Borrador', 'En tránsito') && transferMovesStock('En tránsito', 'Cancelada') && transferMovesStock('Listo para recepción', 'Cancelada')
+  && !transferMovesStock('Borrador', 'Cancelada') && !transferMovesStock('En tránsito', 'Listo para recepción'));
 check('«En tránsito» es lo que ya salió y todavía no se recibió', isInTransit('En tránsito') && isInTransit('Listo para recepción') && !isInTransit('Por despachar') && !isInTransit('Recibido'));
 
 // ------------------------------------------------------------------------------------------------------------------ Detalle, cajas y transporte
@@ -126,9 +129,9 @@ check('Un envío válido no tiene error de contenido', shipmentContentError(ship
 check('Un envío pide fecha y hora de llegada, método, transporte, detalle y al menos una caja',
   !!shipmentContentError(shipment({ eta: undefined }), cat) && !!shipmentContentError(shipment({ etaTime: undefined }), cat) && !!shipmentContentError(shipment({ shippingMethodId: undefined }), cat)
   && !!shipmentContentError(shipment({ courierId: undefined }), cat) && !!shipmentContentError(shipment({ items: [], boxes: [] }), cat) && /al menos una caja/.test(shipmentContentError(shipment({ boxes: [] }), cat) ?? ''));
-check('Una solicitud de transferencia pide motivo y detalle', transferRequestError(transfer(), ids) === null && !!transferRequestError(transfer({ reason: ' ' }), ids) && !!transferRequestError(transfer({ items: [] }), ids));
-const ready = transfer({ status: 'Aprobada', shippingMethodId: 'SM-003', eta: '2026-11-12', boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] });
-check('Despachar una transferencia pide método, ETA y cajas que sumen el detalle (la observación no se exige)',
+check('Un borrador de transferencia pide motivo y detalle', transferRequestError(transfer(), ids) === null && !!transferRequestError(transfer({ reason: ' ' }), ids) && !!transferRequestError(transfer({ items: [] }), ids));
+const ready = transfer({ status: 'Borrador', shippingMethodId: 'SM-003', eta: '2026-11-12', boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] });
+check('Despachar una transferencia pide método, fecha de llegada y cajas que sumen el detalle (la observación no se exige)',
   transferDispatchError(ready, cat) === null && !!transferDispatchError({ ...ready, eta: undefined }, cat) && !!transferDispatchError({ ...ready, shippingMethodId: undefined }, cat)
   && !!transferDispatchError({ ...ready, shippingMethodId: 'SM-001' }, cat) && !!transferDispatchError({ ...ready, boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 9 }])] }, cat));
 
@@ -185,7 +188,7 @@ check('Editar solo la recepción manual manda solo ese campo', JSON.stringify(sh
 check('Los nombres de los artículos no viajan a la base (ni en el detalle ni en las cajas)', !JSON.stringify(p1).includes('Libro') && !JSON.stringify(p1).includes('name'));
 
 const trfRow: TransferenciaRow = {
-  id: 'TRF-2026-001', fecha: '2026-11-09', origen_id: 'FIL-002', destino_id: 'ALM-001', estado: 'Solicitada', lineas: [{ articulo_id: 'ITM-HER-01', cantidad: 2 }], cajas: [], motivo: 'Devolución',
+  id: 'TRF-2026-001', fecha: '2026-11-09', origen_id: 'FIL-002', destino_id: 'ALM-001', estado: 'Borrador', lineas: [{ articulo_id: 'ITM-HER-01', cantidad: 2 }], cajas: [], motivo: 'Devolución',
   solicitada_por: 'Pía', solicitada_por_id: '00000000-0000-0000-0000-000000000042', metodo_envio_id: null, courier_id: null, numero_guia: null, referencia_adicional: null, viajero_nombre: null,
   viajero_documento: null, observacion_envio: null, observacion_interna_logistica: 'Vehículo propio', eta: null, observacion: 'Urgente', adjuntos: null, recepcion_observacion: null, recepcion_fecha: null,
   recibido_por: null, habilitar_recepcion_manual: false,
@@ -194,10 +197,13 @@ const t1 = transferFromRow(trfRow);
 check('Una transferencia de la base es el modelo del sistema (origen y destino pueden ser el almacén o una sede)',
   t1.originId === 'FIL-002' && t1.destinationId === 'ALM-001' && t1.items[0].itemId === 'ITM-HER-01' && t1.reason === 'Devolución' && t1.requestedBy === 'Pía' && t1.requestedById === trfRow.solicitada_por_id
   && t1.boxes === undefined && t1.internalLogisticsObservation === 'Vehículo propio' && t1.manualEnable === undefined);
-const p2 = transferPayload({ date: '2026-11-09', originId: 'FIL-002', destinationId: 'ALM-001', status: 'Solicitada', items: t1.items, reason: 'Devolución', observation: undefined });
+const p2 = transferPayload({ date: '2026-11-09', originId: 'FIL-002', destinationId: 'ALM-001', status: 'Borrador', items: t1.items, reason: 'Devolución', observation: undefined });
 check('Lo que se manda de una transferencia: ruta, detalle y motivo; lo que no viene no se toca',
-  p2.origen_id === 'FIL-002' && p2.destino_id === 'ALM-001' && p2.estado === 'Solicitada' && p2.motivo === 'Devolución' && p2.observacion === null && JSON.stringify(p2.lineas) === JSON.stringify([{ articulo_id: 'ITM-HER-01', cantidad: 2 }])
+  p2.origen_id === 'FIL-002' && p2.destino_id === 'ALM-001' && p2.estado === 'Borrador' && p2.motivo === 'Devolución' && p2.observacion === null && JSON.stringify(p2.lineas) === JSON.stringify([{ articulo_id: 'ITM-HER-01', cantidad: 2 }])
   && !('cajas' in p2) && !('eta' in p2));
+const t1d = transferFromRow({ ...trfRow, estado: 'Cancelada', despachado_en: '2026-11-10T10:00:00.000Z', despachado_por: 'Pía', motivo_cancelacion: 'La sede ya no la necesita' });
+check('Una transferencia trae cuándo y quién la despachó y el motivo si se canceló estando en tránsito (una base anterior no trae las columnas)',
+  t1d.dispatchedAt === '2026-11-10T10:00:00.000Z' && t1d.dispatchedBy === 'Pía' && t1d.cancelReason === 'La sede ya no la necesita' && t1.dispatchedAt === undefined && t1.cancelReason === undefined);
 const inc = incidentFromRow({ id: 'INC-001', fecha: '2026-11-09T10:00:00-05:00', doc_tipo: 'Envío', doc_id: 'ENV-2026-001', articulo_id: 'ITM-HER-01', tipo: 'missing', cantidad: 2, observacion: 'faltan', ubicacion_id: 'FIL-002' });
 check('Una incidencia de recepción se traduce al modelo del sistema', inc.docId === 'ENV-2026-001' && inc.docType === 'Envío' && inc.type === 'missing' && inc.quantity === 2 && inc.branchId === 'FIL-002');
 const c1 = couriers[0];
@@ -414,38 +420,55 @@ check('Eliminar un envío que no existe se rechaza', !r.ok);
 
 // Transferencias
 reset();
-const { id: _tid, ...trNew } = transfer({ status: 'Solicitada' });
+const { id: _tid, ...trNew } = transfer();
 r = await createTransfer(repo, ctx(), trNew, transferPayload(trNew));
-check('Una solicitud válida llega a la base y devuelve su código', r.ok && r.id === 'TRF-2026-009' && r.affects === 'documents');
+check('Un borrador válido (una sede le manda a otra) llega a la base y devuelve su código', r.ok && r.id === 'TRF-2026-009' && r.affects === 'documents');
 reset();
-r = await createTransfer(repo, ctx(), { ...trNew, originId: 'FIL-002', destinationId: 'FIL-003' }, {});
-check('Entre dos sedes no hay transferencia: no llega a la base', !r.ok && /almacén central/.test(r.error ?? '') && calls.length === 0);
+r = await createTransfer(repo, ctx(), { ...trNew, destinationId: 'ALM-001' }, transferPayload({ ...trNew, destinationId: 'ALM-001' }));
+check('…y también uno que devuelve al almacén', r.ok && names2() === 'createTransfer');
+reset();
+r = await createTransfer(repo, ctx(), { ...trNew, originId: 'ALM-001', destinationId: 'FIL-003' }, {});
+check('Una transferencia no sale del almacén: no llega a la base y explica qué hacer', !r.ok && /sale de una sede/.test(r.error ?? '') && /requerimiento/.test(r.error ?? '') && calls.length === 0);
 r = await createTransfer(repo, ctx(), { ...trNew, reason: '' }, {});
-check('Una solicitud sin motivo no llega a la base', !r.ok && calls.length === 0);
+check('Un borrador sin motivo no llega a la base', !r.ok && calls.length === 0);
 r = await createTransfer(repo, ctx(), { ...trNew, items: [] }, {});
-check('Una solicitud sin artículos no llega a la base', !r.ok && calls.length === 0);
-const approved = transfer({ status: 'Aprobada' });
-r = await changeTransferStatus(repo, ctx({ transfers: [approved] }), approved.id, 'En tránsito');
+check('Un borrador sin artículos no llega a la base', !r.ok && calls.length === 0);
+const draftT = transfer();
+r = await changeTransferStatus(repo, ctx({ transfers: [draftT] }), draftT.id, 'En tránsito');
 check('Despachar sin método de envío ni fecha de llegada no llega a la base', !r.ok && /método de envío y la fecha de llegada/.test(r.error ?? '') && calls.length === 0);
-const full = { ...approved, shippingMethodId: 'SM-003', eta: '2026-11-12', boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] };
+const full = { ...draftT, shippingMethodId: 'SM-003', eta: '2026-11-12', boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] };
 r = await changeTransferStatus(repo, ctx({ transfers: [full] }), full.id, 'En tránsito');
 check('Despachar con todo completo llega a la base y relee stock y documentos', r.ok && r.affects === 'both' && names2() === 'changeTransferStatus');
 reset();
-const requested = transfer({ status: 'Solicitada' });
-r = await changeTransferStatus(repo, ctx({ transfers: [requested] }), requested.id, 'Aprobada');
-check('Aprobar no pide datos de despacho', r.ok && names2() === 'changeTransferStatus');
-r = await changeTransferStatus(repo, ctx(), 'TRF-NO-EXISTE', 'Aprobada');
+r = await changeTransferStatus(repo, ctx({ transfers: [draftT] }), draftT.id, 'Cancelada');
+check('Cancelar un borrador no pide motivo (no salió nada)', r.ok && names2() === 'changeTransferStatus');
+reset();
+const moving = { ...full, status: 'En tránsito' as const };
+r = await changeTransferStatus(repo, ctx({ transfers: [moving] }), moving.id, 'Cancelada');
+check('Cancelar una que ya salió sin motivo no llega a la base', !r.ok && /motivo de la cancelación/.test(r.error ?? '') && calls.length === 0);
+r = await changeTransferStatus(repo, ctx({ transfers: [moving] }), moving.id, 'Cancelada', 'ab');
+check('…ni con un motivo de menos de 5 letras', !r.ok && calls.length === 0);
+r = await changeTransferStatus(repo, ctx({ transfers: [moving] }), moving.id, 'Cancelada', 'La sede ya no la necesita');
+check('Con su motivo llega a la base, que lo guarda y devuelve lo que salió', r.ok && r.affects === 'both' && calls[0].args[1] === 'Cancelada' && calls[0].args[2] === 'La sede ya no la necesita');
+reset();
+r = await changeTransferStatus(repo, ctx({ transfers: [draftT] }), draftT.id, 'Recibida');
+check('Una transición que no existe no llega a la base (recibir es otra operación)', !r.ok && /no puede pasar/.test(r.error ?? '') && calls.length === 0);
+r = await changeTransferStatus(repo, ctx(), 'TRF-NO-EXISTE', 'En tránsito');
 check('Cambiar el estado de una transferencia que no existe se rechaza', !r.ok);
 reset();
 const draft = transfer();
 r = await editTransfer(repo, ctx({ transfers: [draft] }), draft.id, { ...draft, reason: '' }, { motivo: '' });
 check('Editar un borrador sin motivo no llega a la base', !r.ok && calls.length === 0);
-r = await editTransfer(repo, ctx({ transfers: [draft] }), draft.id, { ...draft, originId: 'FIL-002', destinationId: 'FIL-003' }, {});
-check('Cambiar la ruta de una transferencia a dos sedes no llega a la base', !r.ok && calls.length === 0);
-r = await editTransfer(repo, ctx({ transfers: [approved] }), approved.id, { ...approved, boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 9 }])] }, { cajas: [] });
-check('Guardar cajas que no suman el detalle de una transferencia aprobada no llega a la base', !r.ok && /no coinciden/.test(r.error ?? '') && calls.length === 0);
-r = await editTransfer(repo, ctx({ transfers: [full] }), full.id, { ...full, manualEnable: true }, transferPayload({ manualEnable: true }));
-check('Habilitar la recepción manual de una transferencia llega a la base', r.ok && names2() === 'editTransfer');
+r = await editTransfer(repo, ctx({ transfers: [draft] }), draft.id, { ...draft, originId: 'ALM-001' }, {});
+check('Cambiar el origen de una transferencia al almacén no llega a la base', !r.ok && /sale de una sede/.test(r.error ?? '') && calls.length === 0);
+r = await editTransfer(repo, ctx({ transfers: [draftT] }), draftT.id, { ...draftT, boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 9 }])] }, { cajas: [] });
+check('Guardar cajas que no suman el detalle del borrador no llega a la base', !r.ok && /no coinciden/.test(r.error ?? '') && calls.length === 0);
+const withBoxes = transfer({ boxes: [box(1, [{ itemId: 'ITM-HER-02', quantity: 4 }])] });
+r = await editTransfer(repo, ctx({ transfers: [withBoxes] }), withBoxes.id, { ...withBoxes, items: [{ itemId: 'ITM-HER-02', quantity: 6 }] }, { lineas: [] });
+check('Cambiar la lista de un borrador sin mandar cajas llega a la base (las cajas se vuelven a armar al preparar el despacho)', r.ok && names2() === 'editTransfer');
+reset();
+r = await editTransfer(repo, ctx({ transfers: [moving] }), moving.id, { ...moving, manualEnable: true }, transferPayload({ manualEnable: true }));
+check('Habilitar la recepción manual de una transferencia que ya salió llega a la base', r.ok && names2() === 'editTransfer');
 
 // Recepción
 reset();
@@ -559,8 +582,11 @@ check('Las funciones de la base que llama el repositorio existen en las migracio
 check('Toda función pública de las migraciones la usa el repositorio (no quedan sin usar)', [...publicFns].every(n => rpcNames.includes(n)), [...publicFns].filter(n => !rpcNames.includes(n)).join());
 const tables = ['stock', 'kardex', 'ajustes', 'envios', 'transferencias', 'incidencias_recepcion', 'couriers', 'metodos_envio'];
 check('Las tablas que lee o escribe el repositorio existen en las migraciones', tables.every(t => new RegExp(`create table public\\.${t} \\(`).test(mig12 + mig13) && repoSrc.includes(`'${t}'`)));
-const required = [...new Set([...(mig12 + mig13).matchAll(/(?:exigir|tiene_funcion|permite)\('([a-z-]+:[a-z_]+)'/g)].map(x => x[1]))];
+// La 0032 retiró «solicitar» y «aprobar» transferencia (la 0013 todavía las nombra): las que piden las migraciones, sin las retiradas, existen en el registro
+const RETIRED = ['log-transfer:req_transfer', 'log-transfer:approve_transfer'];
+const required = [...new Set([...(mig12 + mig13).matchAll(/(?:exigir|tiene_funcion|permite)\('([a-z-]+:[a-z_]+)'/g)].map(x => x[1]))].filter(id => !RETIRED.includes(id));
 check('Las funciones del registro que piden las migraciones existen', required.length >= 15 && required.every(id => !!capabilityById(id)), required.filter(id => !capabilityById(id)).join());
+check('Las dos funciones retiradas ya no están en el registro (una pasó a «preparar» y la otra se quitó)', RETIRED.every(id => !capabilityById(id)) && !!capabilityById('log-transfer:create'));
 check('Nadie escribe las tablas de stock, kardex, ajustes, envíos y transferencias directo (solo se leen; todo cambia por funciones)',
   /grant select on public\.stock, public\.kardex, public\.ajustes to authenticated/.test(mig12) && /grant select on public\.envios, public\.transferencias, public\.incidencias_recepcion to authenticated/.test(mig13)
   && !/\.(from)\('(stock|kardex|ajustes|envios|transferencias|incidencias_recepcion)'\)\s*\.(insert|update|delete|upsert)/.test(repoSrc));
