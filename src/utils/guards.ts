@@ -54,7 +54,8 @@ const RESOLVERS: Record<string, Resolver> = {
   saveRecipe: ([recipe]) => [[recipe?.id ? 'com-recetas:edit' : 'com-recetas:create']],
   confirmReception: ([data]) => [[data?.docType === 'Transferencia' ? 'log-transfer:receive' : 'log-recepciones:confirm']],
   // Despachar es la función que mueve el stock: un envío que nace o pasa a «En tránsito» pide despachar, no solo preparar
-  addShipment: ([shipment]) => (shipment?.status === 'En tránsito' ? [['log-envios:create'], ['log-envios:dispatch']] : [['log-envios:create']]),
+  // Un envío nuevo nace en «Por armar»: no despacha (despachar es pasar de «Por despachar» a «En tránsito», con «Realizar el envío»)
+  addShipment: () => [['log-envios:create']],
   updateShipment: ([, patch]) => [[patch?.status === 'En tránsito' ? 'log-envios:dispatch' : 'log-envios:edit']],
   updateTransfer: ([, patch]) => [[TRANSFER_DISPATCH_KEYS.some(k => k in (patch ?? {})) ? 'log-transfer:dispatch' : 'log-transfer:req_transfer']],
   updateTransferStatus: ([, status]) => {

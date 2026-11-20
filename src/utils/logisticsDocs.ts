@@ -2,8 +2,10 @@
  * Reglas de los envíos, las transferencias y las recepciones (funciones puras, sin estado). La base de datos las vuelve a comprobar
  * (migración 0013); aquí están para que la pantalla avise antes de guardar y para verificarlas sin conexión.
  *
- *  - Un envío sale del almacén central hacia una sede: Borrador → En tránsito → (Listo para recepción) → Recibido (con o sin diferencias); se puede
- *    cancelar mientras no se haya recibido (si ya salió, lo despachado vuelve al origen).
+ *  - Un envío sale del almacén central hacia una sede y avanza por las columnas del tablero de Logística:
+ *    Por armar → Empacando → Por despachar → En tránsito → (Listo para recepción) → Recibido (con o sin diferencias). Cada columna tiene sus datos
+ *    (la lista de artículos, las cajas, el transporte y la fecha de llegada) y no se avanza sin ellos; hacia atrás se vuelve libremente hasta
+ *    «Por despachar» (el stock todavía no salió). Se puede cancelar mientras no se haya recibido (si ya salió, lo despachado vuelve al origen).
  *  - Una transferencia es una solicitud con aprobación: Borrador → Solicitada → Aprobada → En tránsito → (Listo para recepción) → Recibida (con o sin
  *    diferencias); también Rechazada y Cancelada. Solo se despacha lo aprobado.
  *  - El stock sale del origen UNA sola vez, al despachar; el destino suma al recibir. Una recepción solo se confirma sobre un documento en tránsito
@@ -17,7 +19,9 @@ export type TransferStatus = Transfer['status'];
 
 /** Los estados desde los que se puede pasar a otro (los terminales no tienen salida). La recepción es una operación aparte. */
 export const SHIPMENT_FLOW: Record<ShipmentStatus, ShipmentStatus[]> = {
-  Borrador: ['En tránsito', 'Cancelado'],
+  'Por armar': ['Empacando', 'Cancelado'],
+  Empacando: ['Por despachar', 'Por armar', 'Cancelado'],
+  'Por despachar': ['En tránsito', 'Empacando', 'Por armar', 'Cancelado'],
   'En tránsito': ['Listo para recepción', 'Cancelado'],
   'Listo para recepción': ['Cancelado'],
   Recibido: [],
@@ -46,7 +50,12 @@ export function transferTransitionError(from: TransferStatus, to: TransferStatus
 
 /** ¿Este cambio de estado mueve stock del origen? Despachar lo descuenta; cancelar algo ya despachado lo devuelve. */
 export const shipmentMovesStock = (from: ShipmentStatus, to: ShipmentStatus): boolean =>
-  (from === 'Borrador' && to === 'En tránsito') || (isInTransit(from) && to === 'Cancelado');
+  (from === 'Por despachar' && to === 'En tránsito') || (isInTransit(from) && to === 'Cancelado');
+
+/** Los estados de un envío que todavía no salió del almacén: el stock no se ha movido y la tarjeta puede cambiar y volver atrás. */
+export const PRE_DISPATCH_STATUSES = ['Por armar', 'Empacando', 'Por despachar'] as const;
+export type PreDispatchStatus = typeof PRE_DISPATCH_STATUSES[number];
+export const isPreDispatch = (status: string): status is PreDispatchStatus => (PRE_DISPATCH_STATUSES as readonly string[]).includes(status);
 export const transferMovesStock = (from: TransferStatus, to: TransferStatus): boolean =>
   (from === 'Aprobada' && to === 'En tránsito') || (isInTransit(from) && to === 'Cancelada');
 
@@ -126,16 +135,116 @@ export function transportError(
 
 export interface TransportCatalog { methods: Pick<ShippingMethod, 'id' | 'name'>[]; couriers?: Pick<Courier, 'id'>[]; itemIds?: string[] }
 
-/** Lo que el formulario de un envío exige antes de guardarlo (borrador o para despachar). La ruta se comprueba aparte (`shipmentRouteError`). */
-export function shipmentContentError(s: Pick<Shipment, 'eta' | 'etaTime' | 'shippingMethodId' | 'courierId' | 'trackingNumber' | 'travelerName' | 'shippingObservation' | 'items' | 'boxes'>, cat: TransportCatalog): string | null {
-  if (!s.eta || !s.etaTime || !s.shippingMethodId) return 'Por favor complete los campos obligatorios (*) en Datos Generales y Método de Envío.';
-  const method = cat.methods.find(m => m.id === s.shippingMethodId);
-  const transport = transportError(method, s, true);
-  if (transport) return transport;
-  const detail = detailError(s.items, s.boxes, cat.itemIds);
-  if (detail) return detail;
-  if (s.boxes.length === 0) return 'Debe agregar al menos una caja con sus artículos.';
+// ------------------------------------------------------------------------------------------------------------------ Datos de cada columna del tablero
+
+type StageShipment = Pick<Shipment, 'destinationId' | 'eta' | 'etaTime' | 'shippingMethodId' | 'courierId' | 'trackingNumber' | 'travelerName' | 'shippingObservation' | 'items' | 'boxes'>;
+
+/** Lo que todavía no se repartió en cajas, por artículo (solo los que tienen unidades sin caja). */
+export function boxesRemaining(lines: Line[], boxes: { items: Line[] }[]): Line[] {
+  const packed = flattenBoxes(boxes);
+  return lines
+    .map(l => ({ itemId: l.itemId, quantity: l.quantity - (packed.find(p => p.itemId === l.itemId)?.quantity ?? 0) }))
+    .filter(l => l.quantity > 0);
+}
+
+/**
+ * Mientras se arman las cajas (avance que se guarda a medias): cada caja con sus artículos, cada artículo de la lista y nunca más unidades en las cajas
+ * que en la lista. Que las cajas sumen justo la lista se exige recién al pasar a «Por despachar» (`shipmentStageMissing`).
+ */
+export function boxesProgressError(lines: Line[], boxes: { boxNumber?: string; items: Line[] }[]): string | null {
+  for (let i = 0; i < boxes.length; i++) {
+    const box = boxes[i];
+    const label = box.boxNumber || String(i + 1);
+    if (box.items.length === 0) return `La caja ${label} no puede estar vacía.`;
+    for (const it of box.items) {
+      if (!it.itemId) return `Hay un artículo sin seleccionar en la caja ${label}.`;
+      if (!Number.isInteger(it.quantity) || it.quantity < 1) return `La cantidad debe ser mayor a 0 en la caja ${label}.`;
+    }
+  }
+  for (const p of flattenBoxes(boxes)) {
+    const line = lines.find(l => l.itemId === p.itemId);
+    if (!line) return 'Hay un artículo en las cajas que no está en la lista del envío.';
+    if (p.quantity > line.quantity) return 'Hay más unidades en las cajas que en la lista del envío.';
+  }
   return null;
+}
+
+/**
+ * Lo que falta para SALIR de una columna del tablero (vacío = completa); la base repite estas mismas comprobaciones (migración 0029).
+ *  - «Por armar»: la filial de destino y la lista de artículos.
+ *  - «Empacando»: todo repartido en cajas (las cajas suman justo la lista).
+ *  - «Por despachar»: el método de envío con su transporte y la fecha y hora de llegada.
+ * Para una tarjeta que está en esa columna, lo que falta es lo que muestra su marca de «datos pendientes» (se calcula, no se guarda).
+ */
+export function shipmentStageMissing(s: StageShipment, stage: PreDispatchStatus, cat: TransportCatalog): string[] {
+  const missing: string[] = [];
+  if (stage === 'Por armar') {
+    if (!s.destinationId) missing.push('Indique la filial de destino.');
+    const detail = detailError(s.items, [], cat.itemIds);
+    if (detail) missing.push(detail);
+  } else if (stage === 'Empacando') {
+    if (s.boxes.length === 0) missing.push('Debe agregar al menos una caja con sus artículos.');
+    else {
+      const detail = detailError(s.items, s.boxes, cat.itemIds);
+      if (detail) missing.push(detail);
+    }
+  } else {
+    if (!s.eta || !s.etaTime) missing.push('Indique la fecha y la hora de llegada.');
+    const transport = transportError(cat.methods.find(m => m.id === s.shippingMethodId), s, true);
+    if (transport) missing.push(transport);
+  }
+  return missing;
+}
+
+/** Lo primero que falta para pasar a la columna siguiente (o `null` si ya se puede). */
+export const shipmentStageError = (s: StageShipment, stage: PreDispatchStatus, cat: TransportCatalog): string | null => shipmentStageMissing(s, stage, cat)[0] ?? null;
+
+/** Lo que falta para despachar: los datos de las tres columnas. La ruta se comprueba aparte (`shipmentRouteError`). */
+export function shipmentContentError(s: StageShipment, cat: TransportCatalog): string | null {
+  for (const stage of PRE_DISPATCH_STATUSES) {
+    const error = shipmentStageError(s, stage, cat);
+    if (error) return error;
+  }
+  return null;
+}
+
+/** Los datos que se pueden cambiar en cada columna (la base lo exige igual): la lista en «Por armar», las cajas en «Empacando» y el transporte en «Por despachar». */
+export const SHIPMENT_EDITABLE_FIELDS: Record<PreDispatchStatus, (keyof Shipment)[]> = {
+  'Por armar': ['originId', 'destinationId', 'items', 'observation', 'attachments', 'status'],
+  Empacando: ['boxes', 'observation', 'attachments', 'status'],
+  'Por despachar': ['shippingMethodId', 'courierId', 'trackingNumber', 'additionalReference', 'travelerName', 'travelerDocument', 'shippingObservation', 'eta', 'etaTime', 'observation', 'attachments', 'status'],
+};
+
+const FIELD_COLUMN: Partial<Record<keyof Shipment, PreDispatchStatus>> = {
+  originId: 'Por armar', destinationId: 'Por armar', items: 'Por armar',
+  boxes: 'Empacando',
+  shippingMethodId: 'Por despachar', courierId: 'Por despachar', trackingNumber: 'Por despachar', additionalReference: 'Por despachar', travelerName: 'Por despachar',
+  travelerDocument: 'Por despachar', shippingObservation: 'Por despachar', eta: 'Por despachar', etaTime: 'Por despachar',
+};
+const COLUMN_HINT: Record<PreDispatchStatus, string> = {
+  'Por armar': 'La lista de artículos y el destino solo se cambian en «Por armar»: devuelva la tarjeta a esa columna.',
+  Empacando: 'Las cajas solo se arman en «Empacando»: devuelva la tarjeta a esa columna.',
+  'Por despachar': 'El transporte y la fecha de llegada se registran en «Por despachar»: pase la tarjeta a esa columna.',
+};
+
+/** ¿Este cambio de datos es de la columna en que está el envío? Un envío ya despachado no se edita (solo se habilita su recepción manual). */
+export function shipmentPatchError(status: ShipmentStatus, patch: Partial<Shipment>): string | null {
+  const keys = Object.keys(patch) as (keyof Shipment)[];
+  if (isPreDispatch(status)) {
+    const allowed = SHIPMENT_EDITABLE_FIELDS[status];
+    const refused = keys.find(k => !allowed.includes(k));
+    return refused ? COLUMN_HINT[FIELD_COLUMN[refused] ?? status] : null;
+  }
+  if (status === 'En tránsito' || status === 'Listo para recepción') {
+    const changesStatus = patch.status !== undefined && patch.status !== status;
+    return changesStatus || keys.some(k => k !== 'manualEnable' && k !== 'status') ? 'Un envío despachado ya no se edita: cancélelo y prepare otro.' : null;
+  }
+  return 'Este envío ya está cerrado.';
+}
+
+/** Los artículos de la lista que no alcanzan con el stock del origen (avisa; quien decide es Logística y la base lo vuelve a comprobar al despachar). */
+export function stockShortages(lines: Line[], stockOf: (itemId: string) => number): { itemId: string; needed: number; available: number }[] {
+  return lines.map(l => ({ itemId: l.itemId, needed: l.quantity, available: Math.max(0, stockOf(l.itemId)) })).filter(l => l.needed > l.available);
 }
 
 /** Lo que exige la solicitud de una transferencia: motivo y detalle (la ruta se comprueba aparte con `transferRouteError`). */

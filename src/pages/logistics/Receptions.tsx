@@ -91,8 +91,8 @@ export function Receptions() {
   ].filter(doc => {
     // Only show documents for the current branch
     if (currentBranchId !== 'all' && doc.destinationId !== currentBranchId) return false;
-    // Hide drafts and canceled
-    return !['Borrador', 'Cancelada', 'Cancelado'].includes(doc.status);
+    // Un envío en preparación (Por armar, Empacando, Por despachar) no se ve en la sede destino hasta que sale («En tránsito»); tampoco lo cancelado
+    return !['Borrador', 'Por armar', 'Empacando', 'Por despachar', 'Cancelada', 'Cancelado'].includes(doc.status);
   });
 
   // Sort by date descending

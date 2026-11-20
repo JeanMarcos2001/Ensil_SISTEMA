@@ -118,7 +118,7 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
     const prev = shipmentsRef.current.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' } as OpResult;
     const { id: _ignored, ...fields } = patch;
-    return settle(await editShipment(repo, context(), id, { ...prev, ...fields }, shipmentPayload(fields)));
+    return settle(await editShipment(repo, context(), id, { ...prev, ...fields }, shipmentPayload(fields), fields));
   }, [repo, settle]);
   const updateShipmentStatus = useCallback(async (id: string, status: Shipment['status'], observation?: string) => settle(await changeShipmentStatus(repo, context(), id, status, observation)), [repo, settle]);
   const deleteShipment = useCallback(async (id: string) => settle(await removeShipment(repo, context(), id)), [repo, settle]);

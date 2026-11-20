@@ -15,7 +15,8 @@ import {
 } from '../utils/inventory';
 import { locationSaleError, shipmentRouteError, transferRouteError, type StockLocation } from '../utils/logisticsRoutes';
 import {
-  clockNow, courierError, detailError, methodError, receptionError, receptionWindow, shipmentContentError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
+  boxesProgressError, clockNow, courierError, detailError, isPreDispatch, methodError, PRE_DISPATCH_STATUSES, receptionError, receptionWindow, shipmentContentError, shipmentPatchError,
+  shipmentStageError, shipmentTransitionError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
 } from '../utils/logisticsDocs';
 import { nextSequentialId } from '../utils/ids';
 import type { AdjustmentLine, KardexLine } from '../utils/stockDb';
@@ -180,31 +181,76 @@ export async function restockReversedSale(
 
 const transportCatalog = (ctx: LogisticsContext) => ({ methods: ctx.methods, couriers: ctx.couriers, itemIds: itemIds(ctx) });
 
+/** Un envío nuevo nace en «Por armar», con la filial de destino y la lista de artículos (lo demás se completa en las columnas siguientes). */
 export async function createShipment(repo: LogisticsRepository, ctx: LogisticsContext, shipment: Omit<Shipment, 'id'>, payload: Record<string, unknown>): Promise<LogisticsResult> {
+  if (shipment.status !== 'Por armar') return fail('Un envío nuevo nace en «Por armar».');
   const route = shipmentRouteError(shipment.originId, shipment.destinationId, ctx.locations);
   if (route) return fail(route);
-  const invalid = shipmentContentError(shipment, transportCatalog(ctx));
+  const invalid = shipmentStageError(shipment, 'Por armar', transportCatalog(ctx));
   if (invalid) return fail(invalid);
   const res = await repo.createShipment(payload);
-  return res.ok && res.data ? done(shipment.status === 'En tránsito' ? 'both' : 'documents', res.data) : fail(res.error ?? 'No se pudo guardar el envío.');
+  return res.ok && res.data ? done('documents', res.data) : fail(res.error ?? 'No se pudo guardar el envío.');
 }
 
-export async function editShipment(repo: LogisticsRepository, ctx: LogisticsContext, id: string, next: Shipment, payload: Record<string, unknown>): Promise<LogisticsResult> {
+/**
+ * Guarda los datos de la columna en que está el envío (la lista en «Por armar», las cajas en «Empacando», el transporte en «Por despachar») y, si
+ * trae un `status` distinto, lo pasa de columna: hacia adelante pide que la columna de la que sale esté completa; hacia atrás es libre.
+ * Pasar a «En tránsito» (despachar) pide todos los datos y mueve el stock en la base.
+ */
+export async function editShipment(
+  repo: LogisticsRepository, ctx: LogisticsContext, id: string, next: Shipment, payload: Record<string, unknown>, patch: Partial<Shipment> = {},
+): Promise<LogisticsResult> {
   const prev = ctx.shipments.find(s => s.id === id);
   if (!prev) return fail('Envío no encontrado.');
-  if (prev.status === 'Borrador') {
-    const route = shipmentRouteError(next.originId, next.destinationId, ctx.locations);
-    if (route) return fail(route);
-    const invalid = shipmentContentError(next, transportCatalog(ctx));
-    if (invalid) return fail(invalid);
+  const notHere = shipmentPatchError(prev.status, patch);
+  if (notHere) return fail(notHere);
+  let affects: Affects = 'documents';
+  if (isPreDispatch(prev.status)) {
+    const cat = transportCatalog(ctx);
+    if ('originId' in patch || 'destinationId' in patch || 'items' in patch) {
+      const route = shipmentRouteError(next.originId, next.destinationId, ctx.locations);
+      if (route) return fail(route);
+      const list = shipmentStageError(next, 'Por armar', cat);
+      if (list) return fail(list);
+    }
+    if ('boxes' in patch) {
+      const progress = boxesProgressError(next.items, next.boxes);
+      if (progress) return fail(progress);
+    }
+    const to = patch.status && patch.status !== prev.status ? patch.status : null;
+    if (to) {
+      const flow = shipmentTransitionError(prev.status, to);
+      if (flow) return fail(flow);
+      if (to !== 'En tránsito' && !isPreDispatch(to)) return fail('Para cancelar un envío use «Cancelar envío».');
+      const forward = PRE_DISPATCH_STATUSES.indexOf(prev.status) < PRE_DISPATCH_STATUSES.indexOf(to as never);
+      if (to === 'En tránsito') {
+        const route = shipmentRouteError(next.originId, next.destinationId, ctx.locations);
+        if (route) return fail(route);
+        const missing = shipmentContentError(next, cat);
+        if (missing) return fail(missing);
+        affects = 'both';
+      } else if (forward) {
+        const missing = shipmentStageError(next, prev.status, cat);
+        if (missing) return fail(missing);
+      }
+    }
   }
   const res = await repo.editShipment(id, payload);
-  return res.ok ? done(next.status === 'En tránsito' && prev.status === 'Borrador' ? 'both' : 'documents') : fail(res.error ?? 'No se pudo guardar el envío.');
+  return res.ok ? done(affects) : fail(res.error ?? 'No se pudo guardar el envío.');
 }
 
+/** Despachar, marcar «Listo para recepción» o cancelar (desde una columna de preparación no mueve stock; desde «En tránsito» devuelve lo que salió). */
 export async function changeShipmentStatus(repo: LogisticsRepository, ctx: LogisticsContext, id: string, status: Shipment['status'], observation?: string): Promise<LogisticsResult> {
   const prev = ctx.shipments.find(s => s.id === id);
   if (!prev) return fail('Envío no encontrado.');
+  const flow = shipmentTransitionError(prev.status, status);
+  if (flow) return fail(flow);
+  if (status === 'En tránsito') {
+    const route = shipmentRouteError(prev.originId, prev.destinationId, ctx.locations);
+    if (route) return fail(route);
+    const missing = shipmentContentError(prev, transportCatalog(ctx));
+    if (missing) return fail(missing);
+  }
   const res = await repo.changeShipmentStatus(id, status, observation);
   return res.ok ? done('both') : fail(res.error ?? 'No se pudo cambiar el estado del envío.');
 }

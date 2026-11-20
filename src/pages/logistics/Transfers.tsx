@@ -4,12 +4,14 @@ import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { ActionMenu } from '../../components/ui/ActionMenu';
-import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2 } from 'lucide-react';
+import { Search, Filter, Plus, ArrowRightLeft, AlertTriangle, CheckCircle2, XCircle, FileText, Package, Truck, Trash2, Printer } from 'lucide-react';
 import { useData, ShippingMethod, Courier, TransferItem, Transfer, TransferBox, TransferBoxItem } from '../../context/DataContext';
 import { DateInput } from '../../components/ui/DateInput';
 import { todayLocalISO } from '../../utils/schedule';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
 import { etaLabel } from '../../utils/logisticsDocs';
+import { printHtml } from '../../utils/printTable';
+import { checklistFromShipment, shipmentChecklistHtml } from '../../utils/shipmentPrint';
 
 export function Transfers() {
   const { 
@@ -74,6 +76,24 @@ export function Transfers() {
 
   const activeShippingMethods = shippingMethods.filter(m => m.status === 'Activo');
   const activeCouriers = couriers.filter(c => c.status === 'Activo');
+
+  /** Imprime la lista de verificación de la transferencia (cajas y artículos, cada uno con su casilla para marcar a mano). */
+  const handlePrintChecklist = () => {
+    const checklist = checklistFromShipment({
+      id: selectedTransfer?.id,
+      date: selectedTransfer?.date ?? date,
+      originId, destinationId, items: formItems.filter(i => i.itemId), boxes, eta: eta || undefined,
+      shippingMethodId: selectedShippingMethod || undefined, courierId: selectedCourier || undefined, trackingNumber: trackingNumber || undefined,
+      travelerName: travelerName || undefined, observation: observation || undefined,
+    }, {
+      place: id => stockLocations.find(l => l.id === id)?.name ?? id,
+      item: id => items.find(i => i.id === id)?.name ?? 'Artículo desconocido',
+      method: id => shippingMethods.find(m => m.id === id)?.name ?? '',
+      courier: id => couriers.find(c => c.id === id)?.name,
+    });
+    const html = shipmentChecklistHtml({ ...checklist, kind: 'Transferencia', boxes: checklist.boxes.filter(b => b.items.length > 0) }, new Date().toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }));
+    if (!printHtml(html)) setFormError('El navegador no abrió la ventana de impresión. Intente de nuevo.');
+  };
 
   const handleAddItem = () => {
     setFormItems([...formItems, { itemId: '', quantity: 1, observation: '' }]);
@@ -1014,7 +1034,8 @@ export function Transfers() {
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-border-soft">
+          <div className="flex justify-end items-center gap-3 pt-4 border-t border-border-soft">
+            <Button variant="secondary" onClick={handlePrintChecklist} className="gap-2"><Printer size={16} />Imprimir lista</Button>
             {selectedTransfer && !dispatchAvailability(selectedTransfer).available && (
               <p className="mr-auto text-sm text-danger-text">{dispatchAvailability(selectedTransfer).reason}</p>
             )}

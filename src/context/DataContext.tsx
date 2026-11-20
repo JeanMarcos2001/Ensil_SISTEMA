@@ -717,7 +717,8 @@ export interface Shipment {
   date: string;
   originId: string;
   destinationId: string;
-  status: 'Borrador' | 'En tránsito' | 'Listo para recepción' | 'Recibido' | 'Recibido con diferencias' | 'Cancelado';
+  /** Las tres primeras son las columnas de preparación del tablero (el stock todavía no salió); «Listo para recepción» es una etiqueta dentro de «En tránsito». */
+  status: 'Por armar' | 'Empacando' | 'Por despachar' | 'En tránsito' | 'Listo para recepción' | 'Recibido' | 'Recibido con diferencias' | 'Cancelado';
   boxes: ShipmentBox[];
   items: ShipmentItem[]; // Flattened list for easy querying
   shippingMethodId?: string;
@@ -736,6 +737,8 @@ export interface Shipment {
   receptionDate?: string;
   receivedBy?: string;
   manualEnable?: boolean;
+  /** Cuándo salió del almacén (pasó a «En tránsito»); vacío mientras se prepara. */
+  dispatchedAt?: string;
 }
 
 export interface ReceptionIncident {
@@ -3028,13 +3031,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
     scope: { originBranchId: s.originId, destinationBranchId: s.destinationId },
   });
 
+  /** Un envío nuevo nace en «Por armar»: todavía no mueve stock ni avisa a nadie (el aviso sale al despachar). */
   const addShipment: DataContextType['addShipment'] = async shipment => {
-    // El stock del almacén solo lo mueve quien trabaja en él (despachar lo mueve)
-    const denied = shipment.status === 'En tránsito' ? warehouseProblem(shipment.originId) : null;
-    if (denied) return { ok: false, error: denied };
     const res = await log.addShipment(shipment);
     if (!res.ok) return { ok: false, error: res.error };
-    if (shipment.status === 'En tránsito') notifyShipmentDispatched({ id: res.id ?? '', originId: shipment.originId, destinationId: shipment.destinationId });
     return { ok: true, id: res.id };
   };
 
@@ -3054,7 +3054,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   const updateShipment: DataContextType['updateShipment'] = async (id, shipment) => {
     const prev = log.shipments.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
-    const dispatching = prev.status === 'Borrador' && shipment.status === 'En tránsito';
+    const dispatching = prev.status === 'Por despachar' && shipment.status === 'En tránsito';
     const denied = dispatching ? warehouseProblem(shipment.originId ?? prev.originId) : null;
     if (denied) return { ok: false, error: denied };
     const res = await log.updateShipment(id, shipment);

@@ -57,7 +57,7 @@ const stockOf = (branchId: string, itemId: string) => stock.find(s => s.branchId
 
 const box = (n: number, lines: { itemId: string; quantity: number }[]) => ({ id: `box-${n}`, boxNumber: String(n), items: lines });
 const shipment = (extra: Partial<Shipment> = {}): Shipment => ({
-  id: 'ENV-2026-001', date: '2026-11-09', originId: 'ALM-001', destinationId: 'FIL-002', status: 'Borrador',
+  id: 'ENV-2026-001', date: '2026-11-09', originId: 'ALM-001', destinationId: 'FIL-002', status: 'Por despachar',
   boxes: [box(1, [{ itemId: 'ITM-LIB-K1', quantity: 5 }]), box(2, [{ itemId: 'ITM-HER-01', quantity: 3 }])],
   items: [{ itemId: 'ITM-LIB-K1', quantity: 5 }, { itemId: 'ITM-HER-01', quantity: 3 }],
   shippingMethodId: 'SM-001', courierId: 'COUR-001', trackingNumber: 'TRK-1', eta: '2026-11-12', etaTime: '15:00', ...extra,
@@ -86,21 +86,26 @@ check('Un ingreso de stock sigue pidiendo sede, artículo, cantidad entera y doc
   && !!stockEntryError({ branchId: '', itemId: 'x', qty: 5, doc: 'F' }) && !!stockEntryError({ branchId: 'a', itemId: 'x', qty: 0, doc: 'F' }) && !!stockEntryError({ branchId: 'a', itemId: 'x', qty: 5, doc: ' ' }));
 
 // ------------------------------------------------------------------------------------------------------------------ Estados de envíos y transferencias
-check('Un envío: borrador → en tránsito o cancelado; en tránsito → listo para recepción o cancelado; lo recibido y lo cancelado no tienen salida',
-  shipmentTransitionError('Borrador', 'En tránsito') === null && shipmentTransitionError('Borrador', 'Cancelado') === null && shipmentTransitionError('En tránsito', 'Listo para recepción') === null
-  && shipmentTransitionError('En tránsito', 'Cancelado') === null && shipmentTransitionError('Listo para recepción', 'Cancelado') === null
-  && !!shipmentTransitionError('Borrador', 'Recibido') && !!shipmentTransitionError('Recibido', 'Cancelado') && !!shipmentTransitionError('Cancelado', 'Borrador') && !!shipmentTransitionError('En tránsito', 'En tránsito'));
+check('Un envío avanza de a una columna: Por armar → Empacando → Por despachar → En tránsito; hacia atrás vuelve hasta «Por despachar»; en tránsito → listo para recepción o cancelado',
+  shipmentTransitionError('Por armar', 'Empacando') === null && shipmentTransitionError('Empacando', 'Por despachar') === null && shipmentTransitionError('Por despachar', 'En tránsito') === null
+  && shipmentTransitionError('Por despachar', 'Empacando') === null && shipmentTransitionError('Por despachar', 'Por armar') === null && shipmentTransitionError('Empacando', 'Por armar') === null
+  && shipmentTransitionError('Por armar', 'Cancelado') === null && shipmentTransitionError('Por despachar', 'Cancelado') === null
+  && shipmentTransitionError('En tránsito', 'Listo para recepción') === null && shipmentTransitionError('En tránsito', 'Cancelado') === null && shipmentTransitionError('Listo para recepción', 'Cancelado') === null
+  && !!shipmentTransitionError('Por armar', 'Por despachar') && !!shipmentTransitionError('Por armar', 'En tránsito') && !!shipmentTransitionError('Empacando', 'En tránsito')
+  && !!shipmentTransitionError('En tránsito', 'Por despachar') && !!shipmentTransitionError('En tránsito', 'Empacando') && !!shipmentTransitionError('Por armar', 'Recibido')
+  && !!shipmentTransitionError('Recibido', 'Cancelado') && !!shipmentTransitionError('Cancelado', 'Por armar') && !!shipmentTransitionError('En tránsito', 'En tránsito'));
 check('Ningún estado terminal de un envío tiene salida', SHIPMENT_FLOW.Recibido.length === 0 && SHIPMENT_FLOW['Recibido con diferencias'].length === 0 && SHIPMENT_FLOW.Cancelado.length === 0);
 check('Una transferencia: borrador → solicitada; solicitada → aprobada o rechazada; solo lo aprobado se despacha',
   transferTransitionError('Borrador', 'Solicitada') === null && transferTransitionError('Solicitada', 'Aprobada') === null && transferTransitionError('Solicitada', 'Rechazada') === null
   && transferTransitionError('Aprobada', 'En tránsito') === null && transferTransitionError('En tránsito', 'Listo para recepción') === null && transferTransitionError('En tránsito', 'Cancelada') === null
   && !!transferTransitionError('Solicitada', 'En tránsito') && !!transferTransitionError('Borrador', 'Aprobada') && !!transferTransitionError('Rechazada', 'Aprobada') && !!transferTransitionError('Cancelada', 'Solicitada'));
 check('Lo rechazado, lo cancelado y lo recibido no tienen salida', !TRANSFER_FLOW.Rechazada && !TRANSFER_FLOW.Cancelada && !TRANSFER_FLOW.Recibida && !TRANSFER_FLOW['Recibida con diferencias']);
-check('Solo despachar y cancelar algo ya despachado mueven stock del origen',
-  shipmentMovesStock('Borrador', 'En tránsito') && shipmentMovesStock('En tránsito', 'Cancelado') && shipmentMovesStock('Listo para recepción', 'Cancelado')
-  && !shipmentMovesStock('Borrador', 'Cancelado') && !shipmentMovesStock('En tránsito', 'Listo para recepción')
+check('Solo despachar (de «Por despachar» a «En tránsito») y cancelar algo ya despachado mueven stock del origen; moverse entre las columnas de preparación y cancelarlas, no',
+  shipmentMovesStock('Por despachar', 'En tránsito') && shipmentMovesStock('En tránsito', 'Cancelado') && shipmentMovesStock('Listo para recepción', 'Cancelado')
+  && !shipmentMovesStock('Por armar', 'Cancelado') && !shipmentMovesStock('Empacando', 'Por despachar') && !shipmentMovesStock('Por despachar', 'Empacando') && !shipmentMovesStock('Por despachar', 'Cancelado')
+  && !shipmentMovesStock('En tránsito', 'Listo para recepción')
   && transferMovesStock('Aprobada', 'En tránsito') && transferMovesStock('En tránsito', 'Cancelada') && !transferMovesStock('Borrador', 'Cancelada') && !transferMovesStock('Solicitada', 'Aprobada'));
-check('«En tránsito» es lo que ya salió y todavía no se recibió', isInTransit('En tránsito') && isInTransit('Listo para recepción') && !isInTransit('Borrador') && !isInTransit('Recibido'));
+check('«En tránsito» es lo que ya salió y todavía no se recibió', isInTransit('En tránsito') && isInTransit('Listo para recepción') && !isInTransit('Por despachar') && !isInTransit('Recibido'));
 
 // ------------------------------------------------------------------------------------------------------------------ Detalle, cajas y transporte
 check('Las cajas se suman por artículo', JSON.stringify(flattenBoxes([box(1, [{ itemId: 'a', quantity: 2 }, { itemId: 'b', quantity: 1 }]), box(2, [{ itemId: 'a', quantity: 3 }])])) === JSON.stringify([{ itemId: 'a', quantity: 5 }, { itemId: 'b', quantity: 1 }]));
@@ -171,9 +176,9 @@ check('Un envío de la base es el modelo del sistema (cajas, detalle, transporte
   s1.id === 'ENV-2026-001' && s1.originId === 'ALM-001' && s1.destinationId === 'FIL-002' && s1.status === 'En tránsito' && s1.boxes[0].boxNumber === '1' && s1.boxes[0].observation === 'frágil'
   && s1.boxes[0].items[0].itemId === 'ITM-LIB-K1' && s1.items[0].quantity === 5 && s1.shippingMethodId === 'SM-001' && s1.courierId === 'COUR-001' && s1.trackingNumber === 'TRK-1'
   && s1.etaTime === '15:00' && s1.manualEnable === true && s1.travelerName === undefined && s1.attachments === undefined);
-const p1 = shipmentPayload({ date: '2026-11-09', originId: 'ALM-001', destinationId: 'FIL-002', status: 'Borrador', boxes: s1.boxes, items: s1.items, courierId: undefined, etaTime: '15:00', attachments: ['guia.pdf'] });
+const p1 = shipmentPayload({ date: '2026-11-09', originId: 'ALM-001', destinationId: 'FIL-002', status: 'Por armar', boxes: s1.boxes, items: s1.items, courierId: undefined, etaTime: '15:00', attachments: ['guia.pdf'] });
 check('Lo que se manda de un envío son solo los campos que vienen; uno vacío se limpia; cajas y detalle van por id de artículo',
-  p1.fecha === '2026-11-09' && p1.almacen_origen_id === 'ALM-001' && p1.sede_destino_id === 'FIL-002' && p1.estado === 'Borrador' && p1.courier_id === null && p1.eta_hora === '15:00'
+  p1.fecha === '2026-11-09' && p1.almacen_origen_id === 'ALM-001' && p1.sede_destino_id === 'FIL-002' && p1.estado === 'Por armar' && p1.courier_id === null && p1.eta_hora === '15:00'
   && JSON.stringify(p1.cajas) === JSON.stringify([{ id: 'box-1', numero: '1', observacion: 'frágil', items: [{ articulo_id: 'ITM-LIB-K1', cantidad: 5 }] }]) && JSON.stringify(p1.lineas) === JSON.stringify([{ articulo_id: 'ITM-LIB-K1', cantidad: 5 }])
   && JSON.stringify(p1.adjuntos) === JSON.stringify(['guia.pdf']) && !('metodo_envio_id' in p1) && !('numero_guia' in p1) && !('habilitar_recepcion_manual' in p1));
 check('Editar solo la recepción manual manda solo ese campo', JSON.stringify(shipmentPayload({ manualEnable: true })) === JSON.stringify({ habilitar_recepcion_manual: true }));
@@ -304,38 +309,106 @@ reset();
 r = await restockReversedSale(repo, { branchId: 'FIL-002', itemId: 'ITM-LIB-K1', qty: 2, movementId: 'CJ-014' });
 check('Reponer una venta reversada llega a la base', r.ok && names2() === 'restockSale');
 
-// Envíos
+// Envíos: el tablero (Por armar → Empacando → Por despachar → En tránsito)
 reset();
-let sh = shipment();
-const { id: _id, ...shNew } = sh;
+const sh = shipment(); // completo, en «Por despachar»
+const { id: _id, ...shFull } = sh;
+const shNew: Omit<Shipment, 'id'> = { ...shFull, status: 'Por armar', boxes: [] }; // nace con destino y lista
+const inColumn = (status: Shipment['status'], extra: Partial<Shipment> = {}) => shipment({ status, ...extra });
 r = await createShipment(repo, ctx(), shNew, shipmentPayload(shNew));
-check('Un envío válido en borrador llega a la base, devuelve su código y solo se vuelven a leer los documentos', r.ok && r.id === 'ENV-2026-009' && r.affects === 'documents' && names2() === 'createShipment');
+check('Un envío nuevo (destino y lista) llega a la base, devuelve su código y solo se vuelven a leer los documentos', r.ok && r.id === 'ENV-2026-009' && r.affects === 'documents' && names2() === 'createShipment');
 reset();
-r = await createShipment(repo, ctx(), { ...shNew, status: 'En tránsito' }, shipmentPayload({ ...shNew, status: 'En tránsito' }));
-check('Un envío creado ya despachado mueve stock: se vuelve a leer también el stock', r.ok && r.affects === 'both');
-reset();
+r = await createShipment(repo, ctx(), { ...shNew, status: 'En tránsito' }, {});
+check('Un envío nuevo no nace despachado: nace en «Por armar»', !r.ok && /nace en «Por armar»/.test(r.error ?? '') && calls.length === 0);
+r = await createShipment(repo, ctx(), { ...shNew, items: [] }, {});
+check('Un envío nuevo sin artículos no llega a la base', !r.ok && /al menos un artículo/.test(r.error ?? '') && calls.length === 0);
 r = await createShipment(repo, ctx(), { ...shNew, originId: 'FIL-002' }, {});
 check('Un envío que no sale del almacén no llega a la base', !r.ok && /salen del almacén central/.test(r.error ?? '') && calls.length === 0);
-r = await createShipment(repo, ctx(), { ...shNew, courierId: undefined }, {});
-check('Un envío por courier sin courier no llega a la base', !r.ok && /Courier/.test(r.error ?? '') && calls.length === 0);
 r = await createShipment(repo, ctx(), { ...shNew, destinationId: 'ALM-001' }, {});
 check('Un envío cuyo destino es el almacén no llega a la base', !r.ok && calls.length === 0);
-r = await editShipment(repo, ctx({ shipments: [sh] }), 'ENV-NO-EXISTE', sh, {});
+r = await createShipment(repo, ctx(), { ...shNew, destinationId: '' }, {});
+check('Un envío sin filial de destino no llega a la base', !r.ok && calls.length === 0);
+
+const edit = (cur: Shipment, patch: Partial<Shipment>) => editShipment(repo, ctx({ shipments: [cur] }), cur.id, { ...cur, ...patch }, shipmentPayload(patch), patch);
+const armar = inColumn('Por armar', { boxes: [] });
+const empacando = inColumn('Empacando'); // lista y cajas completas
+const despachar = inColumn('Por despachar'); // todo completo
+r = await editShipment(repo, ctx({ shipments: [sh] }), 'ENV-NO-EXISTE', sh, {}, {});
 check('Editar un envío que no existe se rechaza', !r.ok && /no encontrado/.test(r.error ?? ''));
-r = await editShipment(repo, ctx({ shipments: [sh] }), sh.id, { ...sh, items: [{ itemId: 'ITM-LIB-K1', quantity: 9 }] }, {});
-check('Editar un borrador con cajas que no suman el detalle no llega a la base', !r.ok && /no coinciden/.test(r.error ?? '') && calls.length === 0);
 reset();
-r = await editShipment(repo, ctx({ shipments: [sh] }), sh.id, { ...sh, status: 'En tránsito' }, shipmentPayload({ status: 'En tránsito' }));
-check('Despachar un borrador desde la edición mueve stock', r.ok && r.affects === 'both' && names2() === 'editShipment');
+r = await edit(armar, { items: [{ itemId: 'ITM-LIB-K1', quantity: 9 }] });
+check('En «Por armar» se cambia la lista y se guarda (solo se vuelven a leer los documentos)', r.ok && r.affects === 'documents' && names2() === 'editShipment');
 reset();
+r = await edit(armar, { items: [] });
+check('La lista de «Por armar» no puede quedar vacía', !r.ok && /al menos un artículo/.test(r.error ?? '') && calls.length === 0);
+r = await edit(armar, { boxes: [box(1, [{ itemId: 'ITM-LIB-K1', quantity: 1 }])] });
+check('Las cajas no se arman en «Por armar»: se explica sin llamar a la base', !r.ok && /solo se arman en «Empacando»/.test(r.error ?? '') && calls.length === 0);
+r = await edit(armar, { eta: '2026-11-20' });
+check('El transporte y la fecha de llegada tampoco: son de «Por despachar»', !r.ok && /Por despachar/.test(r.error ?? '') && calls.length === 0);
+r = await edit(armar, { status: 'Por despachar' });
+check('No se salta «Empacando»', !r.ok && /no puede pasar/.test(r.error ?? '') && calls.length === 0);
+r = await edit(armar, { destinationId: '' });
+check('Sin filial de destino no se guarda', !r.ok && calls.length === 0);
+r = await edit(armar, { status: 'Empacando' });
+check('De «Por armar» a «Empacando» con la lista completa llega a la base', r.ok && r.affects === 'documents' && names2() === 'editShipment');
+reset();
+r = await edit(empacando, { boxes: [box(1, [{ itemId: 'ITM-LIB-K1', quantity: 6 }])] });
+check('En «Empacando» no se empaca más de lo que dice la lista', !r.ok && /más unidades en las cajas/.test(r.error ?? '') && calls.length === 0);
+r = await edit(empacando, { boxes: [box(1, [{ itemId: 'ITM-LIB-K1', quantity: 2 }])] });
+check('En «Empacando» el avance a medias se guarda', r.ok && names2() === 'editShipment');
+reset();
+r = await edit(inColumn('Empacando', { boxes: [box(1, [{ itemId: 'ITM-LIB-K1', quantity: 2 }])] }), { status: 'Por despachar' });
+check('Para pasar a «Por despachar» todo debe estar repartido en cajas', !r.ok && /no coinciden/.test(r.error ?? '') && calls.length === 0);
+r = await edit(inColumn('Empacando', { boxes: [] }), { status: 'Por despachar' });
+check('Sin cajas tampoco pasa', !r.ok && /al menos una caja/.test(r.error ?? '') && calls.length === 0);
+r = await edit(empacando, { items: [] });
+check('La lista ya no se cambia en «Empacando»: hay que devolver la tarjeta', !r.ok && /solo se cambian en «Por armar»/.test(r.error ?? '') && calls.length === 0);
+r = await edit(empacando, { status: 'Por armar' });
+check('Se vuelve de «Empacando» a «Por armar» sin pedir datos', r.ok && names2() === 'editShipment');
+reset();
+r = await edit(empacando, { status: 'Por despachar' });
+check('Con todo en cajas pasa a «Por despachar»', r.ok && r.affects === 'documents' && names2() === 'editShipment');
+reset();
+r = await edit(despachar, { boxes: [] });
+check('Las cajas ya no se cambian en «Por despachar»', !r.ok && /solo se arman en «Empacando»/.test(r.error ?? '') && calls.length === 0);
+r = await edit(despachar, { trackingNumber: 'TRK-2' });
+check('El transporte sí se guarda en «Por despachar» (a medias también)', r.ok && names2() === 'editShipment');
+reset();
+r = await edit(inColumn('Por despachar', { eta: undefined, etaTime: undefined }), { status: 'En tránsito' });
+check('No se despacha sin fecha y hora de llegada', !r.ok && /fecha y la hora de llegada/.test(r.error ?? '') && calls.length === 0);
+r = await edit(inColumn('Por despachar', { courierId: undefined }), { status: 'En tránsito' });
+check('Ni por courier sin courier', !r.ok && /Courier/.test(r.error ?? '') && calls.length === 0);
+r = await edit(despachar, { status: 'En tránsito' });
+check('Despachar desde la edición mueve stock: se vuelve a leer también el stock', r.ok && r.affects === 'both' && names2() === 'editShipment');
+reset();
+r = await edit(despachar, { status: 'Empacando' });
+check('De «Por despachar» se puede volver a «Empacando» (el stock no salió)', r.ok && r.affects === 'documents');
+reset();
+r = await edit(despachar, { status: 'Cancelado' });
+check('Cancelar no va por la edición: tiene su propia operación', !r.ok && /Cancelar envío/.test(r.error ?? '') && calls.length === 0);
 const sent = shipment({ status: 'En tránsito' });
-r = await editShipment(repo, ctx({ shipments: [sent] }), sent.id, { ...sent, manualEnable: true }, shipmentPayload({ manualEnable: true }));
+r = await edit(sent, { manualEnable: true });
 check('Habilitar la recepción manual de un envío despachado no revalida el contenido y solo relee los documentos', r.ok && r.affects === 'documents' && names2() === 'editShipment');
 reset();
+r = await edit(sent, { status: 'Empacando' });
+check('Un envío en tránsito no vuelve a una columna de preparación', !r.ok && /ya no se edita/.test(r.error ?? '') && calls.length === 0);
+r = await edit(sent, { items: [] });
+check('Ni se editan sus datos', !r.ok && /ya no se edita/.test(r.error ?? '') && calls.length === 0);
 r = await changeShipmentStatus(repo, ctx({ shipments: [sent] }), sent.id, 'Cancelado', 'Se canceló');
 check('Cancelar un envío despachado llega a la base y relee stock y documentos', r.ok && r.affects === 'both' && JSON.stringify(calls[0].args) === JSON.stringify([sent.id, 'Cancelado', 'Se canceló']));
-r = await removeShipment(repo, ctx({ shipments: [sh] }), sh.id);
-check('Eliminar un borrador llega a la base', r.ok && r.affects === 'documents');
+reset();
+r = await changeShipmentStatus(repo, ctx({ shipments: [despachar] }), despachar.id, 'En tránsito');
+check('Despachar con el cambio de estado también pide todo completo y llega a la base', r.ok && r.affects === 'both' && names2() === 'changeShipmentStatus');
+reset();
+r = await changeShipmentStatus(repo, ctx({ shipments: [inColumn('Por despachar', { eta: undefined })] }), 'ENV-2026-001', 'En tránsito');
+check('Despachar sin fecha de llegada no llega a la base', !r.ok && calls.length === 0);
+r = await changeShipmentStatus(repo, ctx({ shipments: [armar] }), armar.id, 'En tránsito');
+check('Desde «Por armar» no se despacha', !r.ok && /no puede pasar/.test(r.error ?? '') && calls.length === 0);
+r = await changeShipmentStatus(repo, ctx({ shipments: [armar] }), armar.id, 'Cancelado');
+check('Cancelar antes de salir llega a la base (no mueve stock)', r.ok && names2() === 'changeShipmentStatus');
+reset();
+r = await removeShipment(repo, ctx({ shipments: [armar] }), armar.id);
+check('Eliminar un envío en «Por armar» llega a la base', r.ok && r.affects === 'documents');
 r = await removeShipment(repo, ctx(), 'ENV-NO-EXISTE');
 check('Eliminar un envío que no existe se rechaza', !r.ok);
 
@@ -522,7 +595,7 @@ check('El Kardex muestra el historial que entrega el contexto (el de la base, co
 
 // Las pantallas esperan la respuesta de la base (no leen .ok de una promesa)
 const pages = ['Stock', 'Adjustments', 'Receptions', 'Shipments', 'Transfers', 'Shipping'].map(n => [n, read(`src/pages/logistics/${n}.tsx`)] as const);
-check('Las pantallas de Logística esperan (await) las acciones que guardan y apagan el botón mientras guardan', pages.every(([name, src]) => /await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy)/.test(src))), pages.filter(([name, src]) => !(/await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy)/.test(src)))).map(([n]) => n).join());
+check('Las pantallas de Logística esperan (await) las acciones que guardan y apagan el botón mientras guardan', pages.every(([name, src]) => /await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy|dispatching)/.test(src))), pages.filter(([name, src]) => !(/await /.test(src) && (name === 'Shipping' || /disabled=\{[^}]*(saving|busy|dispatching)/.test(src)))).map(([n]) => n).join());
 check('Caja y Verificación esperan la respuesta de la base antes de seguir', /await registerItemSale/.test(read('src/pages/Cash.tsx')) && /await reverseCashMovement/.test(read('src/pages/Cash.tsx')) && /await updateEnrollmentVerification/.test(read('src/pages/Verification.tsx')));
 check('Ajustes y Stock dejan que el tipo defina el signo del ajuste (antes, en Stock, una merma con cantidad positiva sumaba stock)', /signedAdjustment/.test(read('src/pages/logistics/Stock.tsx')) && /signedAdjustment/.test(read('src/pages/logistics/Adjustments.tsx')));
 
@@ -568,13 +641,14 @@ check('Ninguna pantalla de Logística muestra la sigla «ETA»: se llama «fecha
 check('Los textos de las reglas de Logística tampoco dicen «ETA» (se ven en pantalla)',
   !/\bETA\b/.test(RECEPTION_NO_ETA) && !/\bETA\b/.test(receptionTooEarlyMessage('x')) && !/\bETA\b/.test(transferDispatchError({ items: [], boxes: [] } as never, {} as never) ?? ''));
 
-// Crear un envío: las fechas y la hora caben en su columna y la hora se elige de una lista (de 6 a. m. a 10 p. m., sin minutos)
-const identity = shipSrc.slice(shipSrc.indexOf('uppercase tracking-wider">Identidad</h3>'), shipSrc.indexOf('Observación General'));
-check('El formulario del envío tiene tres campos en una fila (fecha de creación, fecha de llegada y hora de llegada), cada uno dentro de su columna y con el nombre claro',
-  /<div className="grid grid-cols-3 gap-3">/.test(identity) && (identity.match(/space-y-1\.5 min-w-0/g) ?? []).length === 5 && /Fecha de creación/.test(identity) && /Fecha de llegada/.test(identity) && /Hora de llegada/.test(identity)
-  && !/<div className="flex gap-2">/.test(identity) && !/w-32/.test(identity));
+// Despachar un envío: la fecha y la hora de llegada caben en su fila y la hora se elige de una lista (de 6 a. m. a 10 p. m., sin minutos)
+const dispatchEditor = read('src/components/logistics/ShipmentDispatchEditor.tsx');
+check('El despacho tiene la fecha y la hora de llegada en una fila de dos columnas, cada una dentro de la suya y con su nombre claro',
+  /<div className="grid grid-cols-2 gap-3">/.test(dispatchEditor) && (dispatchEditor.match(/space-y-1\.5 min-w-0/g) ?? []).length === 2 && /Fecha de llegada/.test(dispatchEditor) && /Hora de llegada/.test(dispatchEditor));
 check('La hora de llegada es una lista de horas en punto (no el reloj del navegador con minutos): arrivalHourOptions, sin type="time"',
-  /arrivalHourOptions\(etaTime\)/.test(identity) && !/type="time"/.test(shipSrc) && /<select[\s\S]*?aria-label="Hora de llegada"/.test(identity));
+  /arrivalHourOptions\(d\.etaTime\)/.test(dispatchEditor) && !/type="time"/.test(dispatchEditor) && /<select[\s\S]*?aria-label="Hora de llegada"/.test(dispatchEditor));
+check('Los editores de cada columna apagan sus botones mientras guardan',
+  ['ShipmentListEditor', 'ShipmentBoxesEditor', 'ShipmentDispatchEditor'].every(n => /disabled=\{[^}]*saving/.test(read(`src/components/logistics/${n}.tsx`))));
 check('Las transferencias también dicen «Fecha de llegada» (solo fecha, sin hora) y avisan con las mismas palabras si falta',
   /Fecha de llegada <span className="text-error">\*<\/span>/.test(trfSrc) && /método de envío y la fecha de llegada/.test(trfSrc));
 

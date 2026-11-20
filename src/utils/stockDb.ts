@@ -29,6 +29,8 @@ export interface EnvioRow {
   viajero_documento: string | null; observacion_envio: string | null; eta: string | null; eta_hora: string | null; borrador_vence: string | null;
   observacion: string | null; adjuntos: string[] | null; recepcion_observacion: string | null; recepcion_fecha: string | null; recibido_por: string | null;
   habilitar_recepcion_manual: boolean;
+  /** Cuándo salió del almacén (migración 0029; una base sin ella no trae la columna). */
+  despachado_en?: string | null;
 }
 export interface TransferenciaRow {
   id: string; fecha: string; origen_id: string; destino_id: string; estado: Transfer['status']; lineas: LineaRow[]; cajas: CajaRow[]; motivo: string;
@@ -107,6 +109,7 @@ export const shipmentFromRow = (r: EnvioRow): Shipment => ({
   travelerName: opt(r.viajero_nombre), travelerDocument: opt(r.viajero_documento), shippingObservation: opt(r.observacion_envio), eta: opt(r.eta), etaTime: opt(r.eta_hora),
   draftExpiry: opt(r.borrador_vence), observation: opt(r.observacion), attachments: r.adjuntos && r.adjuntos.length > 0 ? r.adjuntos : undefined,
   receptionObservation: opt(r.recepcion_observacion), receptionDate: opt(r.recepcion_fecha), receivedBy: opt(r.recibido_por), manualEnable: r.habilitar_recepcion_manual || undefined,
+  dispatchedAt: opt(r.despachado_en),
 });
 
 /**
