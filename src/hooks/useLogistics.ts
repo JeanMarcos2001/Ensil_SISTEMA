@@ -72,7 +72,11 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
   const refreshDocuments = useCallback(async () => {
     const res = await repo.loadDocuments();
     if (!res.ok || !res.data) return;
-    setShipments(res.data.shipments); setTransfers(res.data.transfers); setIncidents(res.data.incidents);
+    // Si la lectura trae lo mismo que ya se muestra no se cambia nada: así la lectura periódica no vuelve a dibujar el tablero (ni interrumpe un arrastre)
+    const same = <T,>(a: T, b: T) => JSON.stringify(a) === JSON.stringify(b);
+    if (!same(shipmentsRef.current, res.data.shipments)) setShipments(res.data.shipments);
+    if (!same(transfersRef.current, res.data.transfers)) setTransfers(res.data.transfers);
+    setIncidents(prev => (same(prev, res.data!.incidents) ? prev : res.data!.incidents));
   }, [repo]);
   const refreshTransport = useCallback(async () => {
     const res = await repo.loadTransport();
@@ -162,6 +166,8 @@ export function useLogistics(initial: LogisticsData, refs: LogisticsRefs) {
     stockItems: stock, kardex, adjustments, shipments, transfers, incidents, couriers, shippingMethods: methods, reload,
     /** Vuelve a leer el stock y el kardex (lo usa quien movió stock dentro de otra operación de la base, como la venta en caja o la reversa). */
     refreshStock: refreshLedger,
+    /** Vuelve a leer los envíos, las transferencias y las incidencias (lo usa la actualización en vivo de Envíos y Recepciones). */
+    refreshDocuments,
     registerStockEntry: entry, addAdjustment: adjust, packPackage: pack, unpackPackage: unpack, updateMinStock: minStock,
     sellFromStock: sell, deliverFromStock: deliver, restockReversedSale: restock,
     addShipment, updateShipment, updateShipmentStatus, deleteShipment,

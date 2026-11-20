@@ -24,6 +24,8 @@ import {
   Eye
 } from 'lucide-react';
 import { useData, Shipment, Transfer, Item } from '../../context/DataContext';
+import { LiveIndicator } from '../../components/logistics/LiveIndicator';
+import { useLiveShipments } from '../../hooks/useLiveShipments';
 import { clockNow, etaLabel, isInTransit, receptionError as receptionCheck, receptionOutcome, receptionWindow, type ReceivedLine } from '../../utils/logisticsDocs';
 
 interface ReceivedItem {
@@ -62,8 +64,11 @@ export function Receptions() {
     sessionScope,
     currentUser,
     confirmReception,
-    can
+    can,
+    reloadLogisticsDocuments
   } = useData();
+  // Un envío que sale del almacén aparece solo en la bandeja (Supabase Realtime); si la conexión en vivo falla, se vuelve a leer cada 30 segundos
+  const { connected } = useLiveShipments(reloadLogisticsDocuments);
   
   const [isReceptionOpen, setIsReceptionOpen] = useState(false);
   const [mode, setMode] = useState<TicketMode>('view');
@@ -279,6 +284,7 @@ export function Receptions() {
           <p className="text-sm text-text-secondary">
             Bandeja única de recepción para <span className="font-medium text-primary-accent">{stockLocations.find(b => b.id === currentBranchId)?.name}</span>
           </p>
+          <LiveIndicator connected={connected} />
         </div>
       </div>
 

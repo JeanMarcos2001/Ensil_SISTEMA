@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
-import { Printer, TriangleAlert } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Printer, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { useData, type Shipment, type ShipmentBox, type ShipmentItem } from '../../context/DataContext';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
-import { etaLabel, shipmentStageMissing, type TransportCatalog } from '../../utils/logisticsDocs';
+import { etaLabel, SHIPMENT_STALE_MESSAGE, shipmentStageMissing, type TransportCatalog } from '../../utils/logisticsDocs';
 import { checklistFromShipment, shipmentChecklistHtml, shipmentShareText, whatsappShareUrl, type ChecklistNames } from '../../utils/shipmentPrint';
 import { printHtml } from '../../utils/printTable';
 import { localStamp } from '../../utils/stockDb';
@@ -49,6 +49,10 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
   const shipment = shipmentId ? d.shipments.find(s => s.id === shipmentId) : undefined;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Cuántas veces se pidió «Actualizar» (vuelve a armar el editor con lo que quedó guardado). */
+  const [reloads, setReloads] = useState(0);
+  /** La versión de la tarjeta que se vio al abrir el editor de su columna: es la que se manda al guardar (si alguien la cambió en el medio, la base no guarda). */
+  const seen = useRef<{ key: string; version?: number }>({ key: '' });
 
   const open = creating || !!shipment;
   const warehouse = centralWarehouse(d.warehouses);
@@ -69,7 +73,11 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
     setSaving(true); setError(null);
     const res = await operation;
     setSaving(false);
-    if (!res.ok) { setError(res.error ?? 'No se pudo guardar.'); return; }
+    if (!res.ok) {
+      setError(res.error ?? 'No se pudo guardar.');
+      if (res.error === SHIPMENT_STALE_MESSAGE) void d.reloadLogisticsDocuments();
+      return;
+    }
     onOk();
   };
   const close = () => { setError(null); onClose(); };
@@ -108,7 +116,19 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
   }
   if (!shipment) return null;
 
-  const moveTo = (status: Shipment['status']) => finish(d.updateShipment(shipment.id, { status }), () => {});
+  const editorKey = `${shipment.id}-${shipment.status}-${reloads}`;
+  if (seen.current.key !== editorKey) seen.current = { key: editorKey, version: shipment.version };
+  const seenVersion = seen.current.version;
+  const stale = seenVersion !== undefined && shipment.version !== undefined && shipment.version > seenVersion;
+  /** Todo cambio de la tarjeta lleva la versión que se vio al abrir su editor (solo si se conoce: una base anterior a la 0030 no la tiene). */
+  const withVersion = (patch: Partial<Shipment>): Partial<Shipment> => (seenVersion !== undefined ? { ...patch, version: seenVersion } : patch);
+  const staleBanner = stale && (
+    <div role="status" className="mb-4 p-3 bg-warning-tint text-warning-text border border-warning/30 rounded-lg text-sm flex flex-wrap items-center justify-between gap-3">
+      <span className="flex items-start gap-2"><TriangleAlert size={16} className="shrink-0 mt-0.5" />Otra persona cambió esta tarjeta mientras la tenía abierta. Actualice para ver lo nuevo (se pierde lo que no guardó).</span>
+      <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => { setError(null); setReloads(n => n + 1); }}><RefreshCw size={13} />Actualizar</Button>
+    </div>
+  );
+  const moveTo = (status: Shipment['status']) => finish(d.updateShipment(shipment.id, withVersion({ status })), () => {});
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3 mb-5 pb-4 border-b border-border-soft">
       <div className="text-sm text-text-secondary space-y-0.5">
@@ -125,8 +145,9 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
     return (
       <Modal isOpen onClose={close} title={title} size="2xl">
         {header}
+        {staleBanner}
         <ShipmentListEditor
-          key={`${shipment.id}-${shipment.status}`}
+          key={editorKey}
           initial={{ destinationId: shipment.destinationId, items: shipment.items, observation: shipment.observation ?? '' }}
           originName={originName}
           destinations={d.branches.filter(b => b.status === 'Activo' || b.id === shipment.destinationId).map(b => ({ id: b.id, name: b.name }))}
@@ -134,7 +155,7 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
           stockOf={stockOf} mode="edit" saving={saving} error={error} canAdvance={canEdit}
           onCancel={close}
           onSubmit={(draft: ListDraft, advance) => finish(
-            d.updateShipment(shipment.id, { destinationId: draft.destinationId, items: draft.items, observation: draft.observation.trim() || undefined, ...(advance ? { status: 'Empacando' as const } : {}) }),
+            d.updateShipment(shipment.id, withVersion({ destinationId: draft.destinationId, items: draft.items, observation: draft.observation.trim() || undefined, ...(advance ? { status: 'Empacando' as const } : {}) })),
             advance ? () => {} : close,
           )}
         />
@@ -148,14 +169,15 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
     return (
       <Modal isOpen onClose={close} title={title} size="3xl">
         {header}
+        {staleBanner}
         <ShipmentBoxesEditor
-          key={`${shipment.id}-${shipment.status}`}
+          key={editorKey}
           lines={shipment.items} initialBoxes={shipment.boxes} itemName={itemName}
           saving={saving} error={error} canEdit={canEdit}
           onPrint={boxes => print(shipment, { boxes })}
           onBack={() => moveTo('Por armar')}
           onSave={(boxes: ShipmentBox[], advance) => finish(
-            d.updateShipment(shipment.id, { boxes, ...(advance ? { status: 'Por despachar' as const } : {}) }),
+            d.updateShipment(shipment.id, withVersion({ boxes, ...(advance ? { status: 'Por despachar' as const } : {}) })),
             advance ? () => {} : close,
           )}
         />
@@ -175,8 +197,9 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
     return (
       <Modal isOpen onClose={close} title={title} size="3xl">
         {header}
+        {staleBanner}
         <ShipmentDispatchEditor
-          key={`${shipment.id}-${shipment.status}`}
+          key={editorKey}
           initial={{
             eta: shipment.eta ?? '', etaTime: shipment.etaTime ?? '', shippingMethodId: shipment.shippingMethodId ?? '', courierId: shipment.courierId ?? '', trackingNumber: shipment.trackingNumber ?? '',
             additionalReference: shipment.additionalReference ?? '', travelerName: shipment.travelerName ?? '', travelerDocument: shipment.travelerDocument ?? '',
@@ -192,7 +215,7 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
           onShare={draft => share(shipment, asShipment(draft))}
           onBack={() => moveTo('Empacando')}
           onSave={(draft, dispatch) => finish(
-            d.updateShipment(shipment.id, asShipment(draft)),
+            d.updateShipment(shipment.id, withVersion(asShipment(draft))),
             dispatch ? () => { onClose(); onRequestDispatch(shipment.id); } : close,
           )}
         />

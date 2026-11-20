@@ -739,6 +739,8 @@ export interface Shipment {
   manualEnable?: boolean;
   /** Cuándo salió del almacén (pasó a «En tránsito»); vacío mientras se prepara. */
   dispatchedAt?: string;
+  /** Sube con cada cambio del envío (lo hace la base): quien edita manda la que vio, y si cambió en el medio no se guarda (`shipmentStaleError`). */
+  version?: number;
 }
 
 export interface ReceptionIncident {
@@ -1428,6 +1430,8 @@ interface DataContextType {
   orgPlaces: Place[];
   staffDirectory: { status: StaffDirectoryStatus; error: string };
   reloadStaffDirectory: () => Promise<void>;
+  /** Vuelve a leer los envíos, las transferencias y las incidencias de la base (Envíos y Recepciones se mantienen al día con esto). */
+  reloadLogisticsDocuments: () => Promise<void>;
   /** Contratos guardados en la base de datos, cada uno con su empresa. Quien no tiene «Ver remuneraciones» los recibe SIN sueldo (lo decide la base). */
   contracts: Contract[];
   contractsPayroll: { status: ContractsPayrollStatus; error: string };
@@ -3289,6 +3293,7 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       companies,
       orgDirectory: { status: org.status, error: org.error },
       reloadOrgDirectory: org.reload,
+      reloadLogisticsDocuments: log.refreshDocuments,
       addCompany: org.addCompany,
       // Una empresa con contratos vigentes no se inactiva ni se elimina (igual que con filiales o almacenes)
       updateCompany: (id, companyData) => org.updateCompany(id, companyData, contracts.filter(k => k.status === 'Vigente')),

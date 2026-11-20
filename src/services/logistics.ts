@@ -16,7 +16,7 @@ import {
 import { locationSaleError, shipmentRouteError, transferRouteError, type StockLocation } from '../utils/logisticsRoutes';
 import {
   boxesProgressError, clockNow, courierError, detailError, isPreDispatch, methodError, PRE_DISPATCH_STATUSES, receptionError, receptionWindow, shipmentContentError, shipmentPatchError,
-  shipmentStageError, shipmentTransitionError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
+  shipmentStageError, shipmentStaleError, shipmentTransitionError, transferRequestError, transferDispatchError, type ClockParts, type ReceivedLine,
 } from '../utils/logisticsDocs';
 import { nextSequentialId } from '../utils/ids';
 import type { AdjustmentLine, KardexLine } from '../utils/stockDb';
@@ -202,6 +202,8 @@ export async function editShipment(
 ): Promise<LogisticsResult> {
   const prev = ctx.shipments.find(s => s.id === id);
   if (!prev) return fail('Envío no encontrado.');
+  const stale = shipmentStaleError(prev.version, patch.version);
+  if (stale) return fail(stale);
   const notHere = shipmentPatchError(prev.status, patch);
   if (notHere) return fail(notHere);
   let affects: Affects = 'documents';

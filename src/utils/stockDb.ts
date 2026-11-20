@@ -31,6 +31,8 @@ export interface EnvioRow {
   habilitar_recepcion_manual: boolean;
   /** Cuándo salió del almacén (migración 0029; una base sin ella no trae la columna). */
   despachado_en?: string | null;
+  /** Sube con cada cambio (migración 0030; una base anterior no trae la columna). */
+  version?: number;
 }
 export interface TransferenciaRow {
   id: string; fecha: string; origen_id: string; destino_id: string; estado: Transfer['status']; lineas: LineaRow[]; cajas: CajaRow[]; motivo: string;
@@ -109,7 +111,7 @@ export const shipmentFromRow = (r: EnvioRow): Shipment => ({
   travelerName: opt(r.viajero_nombre), travelerDocument: opt(r.viajero_documento), shippingObservation: opt(r.observacion_envio), eta: opt(r.eta), etaTime: opt(r.eta_hora),
   draftExpiry: opt(r.borrador_vence), observation: opt(r.observacion), attachments: r.adjuntos && r.adjuntos.length > 0 ? r.adjuntos : undefined,
   receptionObservation: opt(r.recepcion_observacion), receptionDate: opt(r.recepcion_fecha), receivedBy: opt(r.recibido_por), manualEnable: r.habilitar_recepcion_manual || undefined,
-  dispatchedAt: opt(r.despachado_en),
+  dispatchedAt: opt(r.despachado_en), version: opt(r.version),
 });
 
 /**
@@ -138,6 +140,8 @@ export function shipmentPayload(s: Partial<Omit<Shipment, 'id'>>): Record<string
   set('observation', 'observacion', s.observation);
   if ('attachments' in s) out.adjuntos = s.attachments ?? [];
   if ('manualEnable' in s) out.habilitar_recepcion_manual = !!s.manualEnable;
+  // La versión que se vio al abrir la tarjeta (solo si se conoce: una base anterior a la 0030 no la tiene y no debe recibirla)
+  if (s.version !== undefined) out.version = s.version;
   return out;
 }
 

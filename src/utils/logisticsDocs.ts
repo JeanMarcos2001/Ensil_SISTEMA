@@ -229,7 +229,8 @@ const COLUMN_HINT: Record<PreDispatchStatus, string> = {
 
 /** ¿Este cambio de datos es de la columna en que está el envío? Un envío ya despachado no se edita (solo se habilita su recepción manual). */
 export function shipmentPatchError(status: ShipmentStatus, patch: Partial<Shipment>): string | null {
-  const keys = Object.keys(patch) as (keyof Shipment)[];
+  // La versión no es un dato del envío: es lo que se vio al abrir la tarjeta (ver `shipmentStaleError`)
+  const keys = (Object.keys(patch) as (keyof Shipment)[]).filter(k => k !== 'version');
   if (isPreDispatch(status)) {
     const allowed = SHIPMENT_EDITABLE_FIELDS[status];
     const refused = keys.find(k => !allowed.includes(k));
@@ -241,6 +242,14 @@ export function shipmentPatchError(status: ShipmentStatus, patch: Partial<Shipme
   }
   return 'Este envío ya está cerrado.';
 }
+
+/**
+ * Cada cambio de un envío sube su número de versión (la base lo hace con un disparador, migración 0030). Quien edita una tarjeta manda la versión que vio al abrirla; si
+ * alguien la cambió en el medio, no se guarda y se avisa, en vez de pisar el cambio ajeno sin que nadie se entere. La base dice lo mismo con las mismas palabras.
+ */
+export const SHIPMENT_STALE_MESSAGE = 'Otra persona cambió esta tarjeta mientras usted la tenía abierta: ya se actualizó en pantalla. Revise y vuelva a intentar.';
+export const shipmentStaleError = (current: number | undefined, seen: number | undefined): string | null =>
+  current !== undefined && seen !== undefined && current !== seen ? SHIPMENT_STALE_MESSAGE : null;
 
 /** Los artículos de la lista que no alcanzan con el stock del origen (avisa; quien decide es Logística y la base lo vuelve a comprobar al despachar). */
 export function stockShortages(lines: Line[], stockOf: (itemId: string) => number): { itemId: string; needed: number; available: number }[] {

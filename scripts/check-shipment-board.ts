@@ -204,7 +204,7 @@ check('Cancelar algo que ya salió pide su motivo (al menos 5 letras); antes de 
 check('Cada columna se trabaja con su propio editor y un envío que ya salió solo se ve',
   /shipment\.status === 'Por armar'/.test(work) && /shipment\.status === 'Empacando'/.test(work) && /shipment\.status === 'Por despachar'/.test(work) && /<ShipmentListEditor/.test(work) && /<ShipmentBoxesEditor/.test(work) && /<ShipmentDispatchEditor/.test(work)
   && /Ya salió \(o se cerró\): solo se ve/.test(work) && /addShipment\(\{ date: todayLocalISO\(\), originId, destinationId: draft\.destinationId, status: 'Por armar'/.test(work));
-check('Guardar y pasar de columna es UNA operación (cajas + estado; lista + estado)', /updateShipment\(shipment\.id, \{ boxes, \.\.\.\(advance \? \{ status: 'Por despachar' as const \} : \{\}\) \}\)/.test(work)
+check('Guardar y pasar de columna es UNA operación (cajas + estado; lista + estado)', /updateShipment\(shipment\.id, withVersion\(\{ boxes, \.\.\.\(advance \? \{ status: 'Por despachar' as const \} : \{\}\) \}\)\)/.test(work)
   && /status: 'Empacando' as const/.test(work));
 check('La sede destino no ve un envío en preparación: Recepciones lo oculta (y la base ya no se lo deja leer)', /'Por armar', 'Empacando', 'Por despachar'/.test(receptions));
 check('Ya no hay borradores que vencen ni el formulario de un solo paso: sin «draftExpiry» ni «Guardar Borrador» en la pantalla', !/draftExpiry|Guardar Borrador|Borrador/.test(page) && !/Guardar Borrador/.test(work));

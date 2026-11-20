@@ -8,6 +8,8 @@ import { ReasonDialog } from '../../components/ui/ReasonDialog';
 import { DateInput } from '../../components/ui/DateInput';
 import { ShipmentBoard } from '../../components/logistics/ShipmentBoard';
 import { ShipmentWorkModal, statusBadge } from '../../components/logistics/ShipmentWorkModal';
+import { LiveIndicator } from '../../components/logistics/LiveIndicator';
+import { useLiveShipments } from '../../hooks/useLiveShipments';
 import { Search, Plus, Calendar, Clock, MapPin, Package, Truck, LayoutGrid, Columns3, TriangleAlert, TrafficCone } from 'lucide-react';
 import { useData, type Shipment } from '../../context/DataContext';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
@@ -25,8 +27,10 @@ function readView(): View {
 export function Shipments() {
   const {
     shipments, shippingMethods, couriers, stockItems, items, branches, warehouses, stockLocations,
-    updateShipmentStatus, updateShipment, deleteShipment, currentBranchId, can, availabilityOf,
+    updateShipmentStatus, updateShipment, deleteShipment, currentBranchId, can, availabilityOf, reloadLogisticsDocuments,
   } = useData();
+  // Lo que hacen otras personas aparece solo (Supabase Realtime) y, si la conexión en vivo falla, se vuelve a leer cada 30 segundos
+  const { connected } = useLiveShipments(reloadLogisticsDocuments);
 
   const [view, setViewState] = useState<View>(readView);
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* sin almacenamiento: no pasa nada */ } };
@@ -91,7 +95,8 @@ export function Shipments() {
     }
     if (move.confirm === 'dispatch') { setDispatchError(null); setDispatchId(s.id); return; }
     if (!canEdit) { info('No puede mover la tarjeta', 'Su cuenta no tiene la función «Editar un envío».'); return; }
-    await runOperation(updateShipment(s.id, { status: move.to }), 'No se pudo mover la tarjeta');
+    // Con la versión que se ve: si alguien cambió la tarjeta en el medio, la base no la mueve y lo explica
+    await runOperation(updateShipment(s.id, { status: move.to, ...(s.version !== undefined ? { version: s.version } : {}) }), 'No se pudo mover la tarjeta');
   };
 
   const handleManualEnable = (shipment: Shipment) => {
@@ -160,6 +165,7 @@ export function Shipments() {
         <div>
           <h2 className="text-2xl font-semibold text-text-primary mb-1">Envíos</h2>
           <p className="text-sm text-text-secondary">Gestión de envíos desde el almacén central hacia las filiales</p>
+          <LiveIndicator connected={connected} />
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-surface-muted p-1 rounded-xl h-10" role="group" aria-label="Vista de los envíos">
