@@ -2,7 +2,7 @@
 -- NO es una migración: son datos de configuración que se cargan después de la migración 0026 (avisos) y cada vez que cambia un evento del registro.
 --
 -- Cargar: pegar este script en el SQL Editor del proyecto `ensil-sistema` (NO el de la web).
--- Es seguro repetirlo: cada evento se inserta o se actualiza. Carga 23 eventos.
+-- Es seguro repetirlo: cada evento se inserta o se actualiza. Carga 27 eventos.
 
 insert into public.aviso_eventos (id, etiqueta, disparo, destinatarios, respaldo, emiten)
 values
@@ -15,6 +15,10 @@ values
     ('transfer_received', 'Transferencia recibida', 'accion', '[{"capability":"log-transfer:dispatch","where":"origin-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-transfer:receive']),
     ('reception_with_differences', 'Recepción con faltante o daño', 'accion', '[{"capability":"log-ajustes:create","where":"origin-branch"},{"capability":"sis-avisos:supervise","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-recepciones:confirm', 'log-transfer:receive']),
     ('stock_below_minimum', 'Stock por debajo del mínimo', 'sistema', '[{"capability":"log-transfer:req_transfer","where":"subject-branch"},{"capability":"log-envios:create","where":"any"}]'::jsonb, 'sis-avisos:fallback', array[]::text[]),
+    ('requirement_created', 'Requerimiento de una sede (aviso a Logística)', 'accion', '[{"capability":"log-requerimientos:attend","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:create']),
+    ('requirement_rejected', 'Requerimiento rechazado (aviso a la sede)', 'accion', '[{"person":"requester"},{"capability":"log-requerimientos:create","where":"subject-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:attend']),
+    ('requirement_message_to_logistics', 'Mensaje de una sede en su requerimiento (aviso a Logística)', 'accion', '[{"capability":"log-requerimientos:attend","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:message']),
+    ('requirement_message_to_sede', 'Mensaje de Logística en un requerimiento (aviso a la sede)', 'accion', '[{"person":"requester"},{"capability":"log-requerimientos:create","where":"subject-branch"}]'::jsonb, 'sis-avisos:fallback', array['log-requerimientos:message']),
     ('drop_request_pending', 'Solicitud de caída pendiente', 'accion', '[{"capability":"op-matriculas:approve_drop","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['op-matriculas:req_drop']),
     ('reactivation_request_pending', 'Solicitud de reactivación pendiente', 'accion', '[{"capability":"op-matriculas:approve_reactivation","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['op-matriculas:req_reactivation']),
     ('program_change_request_pending', 'Solicitud de cambio de programa pendiente', 'accion', '[{"capability":"op-matriculas:approve_program_change","where":"any"}]'::jsonb, 'sis-avisos:fallback', array['op-matriculas:req_program_change']),

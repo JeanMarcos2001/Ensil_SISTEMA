@@ -21,10 +21,15 @@ import {
   Check,
   X,
   AlertCircle,
-  Eye
+  Eye,
+  ClipboardList
 } from 'lucide-react';
 import { useData, Shipment, Transfer, Item } from '../../context/DataContext';
 import { LiveIndicator } from '../../components/logistics/LiveIndicator';
+import { RequirementDetailModal } from '../../components/logistics/RequirementDetailModal';
+import { RequirementFormModal } from '../../components/logistics/RequirementFormModal';
+import { RequirementsInbox } from '../../components/logistics/RequirementsInbox';
+import { unreadMessages } from '../../utils/requirements';
 import { useLiveShipments } from '../../hooks/useLiveShipments';
 import { clockNow, etaLabel, isInTransit, receptionError as receptionCheck, receptionOutcome, receptionWindow, type ReceivedLine } from '../../utils/logisticsDocs';
 
@@ -65,10 +70,20 @@ export function Receptions() {
     currentUser,
     confirmReception,
     can,
-    reloadLogisticsDocuments
+    reloadLogisticsDocuments,
+    requirements,
+    requirementMessages,
+    requirementSeen,
+    reloadRequirements
   } = useData();
-  // Un envío que sale del almacén aparece solo en la bandeja (Supabase Realtime); si la conexión en vivo falla, se vuelve a leer cada 30 segundos
-  const { connected } = useLiveShipments(reloadLogisticsDocuments);
+  // Un envío que sale del almacén (y lo que pasa con los requerimientos de la sede) aparece solo en la bandeja (Supabase Realtime); si la conexión en vivo falla, se vuelve a leer cada 30 segundos
+  const { connected } = useLiveShipments(async () => { await Promise.all([reloadLogisticsDocuments(), reloadRequirements()]); });
+
+  // Requerimientos: la sede pide mercadería al almacén (solo ve la situación de los suyos, nunca la etapa en que están)
+  const [tab, setTab] = useState<'receive' | 'requirements'>('receive');
+  const [requirementFormOpen, setRequirementFormOpen] = useState(false);
+  const [requirementDetailId, setRequirementDetailId] = useState<string | null>(null);
+  const [sentNotice, setSentNotice] = useState<string | null>(null);
   
   const [isReceptionOpen, setIsReceptionOpen] = useState(false);
   const [mode, setMode] = useState<TicketMode>('view');
@@ -88,6 +103,9 @@ export function Receptions() {
   // Access Control
   // La recepción es siempre de una sede: quien alcanza todas elige primero cuál
   const isGlobalView = currentBranchId === 'all';
+  const canSeeRequirements = can('log-requerimientos:view');
+  const branchRequirements = requirements.filter(r => r.branchId === currentBranchId);
+  const unreadRequirements = branchRequirements.reduce((n, r) => n + unreadMessages(requirementMessages, r.id, requirementSeen[r.id] ?? 0, currentUser.id), 0);
 
   // Combine and format data
   const allDocuments = [
@@ -286,10 +304,40 @@ export function Receptions() {
           </p>
           <LiveIndicator connected={connected} />
         </div>
+        {can('log-requerimientos:create') && (
+          <Button variant="primary" className="flex items-center gap-2" onClick={() => setRequirementFormOpen(true)}>
+            <Plus size={16} />
+            Armar requerimiento
+          </Button>
+        )}
       </div>
+
+      {sentNotice && (
+        <div role="status" className="mb-4 p-3 bg-success-tint text-success-text border border-success-text/20 rounded-lg text-sm flex items-start justify-between gap-3">
+          <span>{sentNotice}</span>
+          <button type="button" onClick={() => setSentNotice(null)} className="shrink-0 text-success-text hover:opacity-70" aria-label="Cerrar el aviso"><X size={14} /></button>
+        </div>
+      )}
 
       {/* Main Content Card */}
       <div className="bg-surface border border-border-soft rounded-xl shadow-sm flex-1 flex flex-col overflow-hidden">
+        {canSeeRequirements && (
+          <div className="flex gap-1 px-4 pt-3 border-b border-border-soft" role="tablist" aria-label="Qué se muestra">
+            {([['receive', 'Por recibir', null], ['requirements', 'Requerimientos', branchRequirements.length]] as const).map(([id, label, count]) => (
+              <button
+                key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-2 ${tab === id ? 'border-primary-accent text-primary-accent' : 'border-transparent text-text-muted hover:text-text-primary'}`}
+              >
+                {id === 'requirements' && <ClipboardList size={14} aria-hidden />}{label}
+                {count !== null && <span className="text-xs bg-surface-muted border border-border-soft rounded-full px-2 py-0.5 text-text-secondary">{count}</span>}
+                {id === 'requirements' && unreadRequirements > 0 && <span className="w-2 h-2 rounded-full bg-primary-accent" title="Hay mensajes nuevos" aria-label="Hay mensajes nuevos" />}
+              </button>
+            ))}
+          </div>
+        )}
+        {canSeeRequirements && tab === 'requirements' ? (
+          <RequirementsInbox branchId={currentBranchId} onOpen={setRequirementDetailId} />
+        ) : (<>
         {/* Filters */}
         <div className="p-4 border-b border-border-soft">
           <div className="flex flex-col md:flex-row gap-4">
@@ -369,6 +417,9 @@ export function Receptions() {
                           <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">{doc.docType}</span>
                         </div>
                         <span className="text-sm font-bold text-text-primary">{doc.id}</span>
+                        {doc.docType === 'Envío' && (doc as Shipment).requirementId && (
+                          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-primary-accent"><ClipboardList size={11} />Pedido por la sede ({(doc as Shipment).requirementId})</span>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4 text-sm text-text-secondary">{origin}</td>
@@ -417,7 +468,17 @@ export function Receptions() {
             </tbody>
           </table>
         </div>
+        </>)}
       </div>
+
+      <RequirementFormModal
+        isOpen={requirementFormOpen} onClose={() => setRequirementFormOpen(false)} branchId={currentBranchId}
+        onCreated={id => {
+          setSentNotice(`Su requerimiento${id ? ` ${id}` : ''} se envió a Logística. Aquí verá cómo cambia su lista y si se rechaza (con su motivo); si algo cambia, escriba un mensaje desde el detalle.`);
+          if (canSeeRequirements) setTab('requirements');
+        }}
+      />
+      <RequirementDetailModal requirementId={requirementDetailId} onClose={() => setRequirementDetailId(null)} />
 
       {/* Ticket / Recepción */}
       <Modal

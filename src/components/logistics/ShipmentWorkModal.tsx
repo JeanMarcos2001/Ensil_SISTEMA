@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Printer, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ClipboardList, MessageSquare, Printer, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -13,6 +13,7 @@ import { todayLocalISO } from '../../utils/schedule';
 import { ShipmentListEditor, type ListDraft } from './ShipmentListEditor';
 import { ShipmentBoxesEditor } from './ShipmentBoxesEditor';
 import { ShipmentDispatchEditor, type DispatchDraft } from './ShipmentDispatchEditor';
+import { RequirementDetailModal } from './RequirementDetailModal';
 
 interface Props {
   /** El envío que se trabaja (su id: siempre se muestra la versión que quedó guardada). */
@@ -51,6 +52,8 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
   const [error, setError] = useState<string | null>(null);
   /** Cuántas veces se pidió «Actualizar» (vuelve a armar el editor con lo que quedó guardado). */
   const [reloads, setReloads] = useState(0);
+  /** Si el envío nació de un requerimiento de una sede: se abre su detalle con la conversación. */
+  const [requirementOpen, setRequirementOpen] = useState(false);
   /** La versión de la tarjeta que se vio al abrir el editor de su columna: es la que se manda al guardar (si alguien la cambió en el medio, la base no guarda). */
   const seen = useRef<{ key: string; version?: number }>({ key: '' });
 
@@ -136,6 +139,15 @@ export function ShipmentWorkModal({ shipmentId, creating, onClose, onRequestDisp
         <p><span className="text-text-muted">Creado el</span> {etaLabel(shipment.date)}{shipment.dispatchedAt ? <> · <span className="text-text-muted">Despachado el</span> {localStamp(shipment.dispatchedAt)}</> : null}</p>
       </div>
       <Badge variant={statusBadge(shipment.status)}>{shipment.status}</Badge>
+      {shipment.requirementId && (
+        <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-primary-accent bg-active-tint rounded-lg px-3 py-2">
+          <span className="flex items-center gap-1.5"><ClipboardList size={13} aria-hidden />Pedido por la sede en el requerimiento {shipment.requirementId}</span>
+          {d.can('log-requerimientos:view') && (
+            <Button variant="ghost" size="sm" className="gap-1.5 text-primary-accent" onClick={() => setRequirementOpen(true)}><MessageSquare size={13} />Ver el pedido y los mensajes</Button>
+          )}
+          <RequirementDetailModal requirementId={requirementOpen ? shipment.requirementId : null} onClose={() => setRequirementOpen(false)} />
+        </div>
+      )}
     </div>
   );
   const title = `Envío ${shipment.id}`;

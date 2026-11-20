@@ -9,12 +9,16 @@ import { DateInput } from '../../components/ui/DateInput';
 import { ShipmentBoard } from '../../components/logistics/ShipmentBoard';
 import { ShipmentWorkModal, statusBadge } from '../../components/logistics/ShipmentWorkModal';
 import { LiveIndicator } from '../../components/logistics/LiveIndicator';
+import { RequirementCard } from '../../components/logistics/RequirementCard';
+import { RequirementDetailModal } from '../../components/logistics/RequirementDetailModal';
+import { RequirementReviewModal } from '../../components/logistics/RequirementReviewModal';
 import { useLiveShipments } from '../../hooks/useLiveShipments';
 import { Search, Plus, Calendar, Clock, MapPin, Package, Truck, LayoutGrid, Columns3, TriangleAlert, TrafficCone } from 'lucide-react';
 import { useData, type Shipment } from '../../context/DataContext';
 import { centralWarehouse } from '../../utils/logisticsRoutes';
 import { etaLabel, isPreDispatch, stockShortages, type TransportCatalog } from '../../utils/logisticsDocs';
 import { boardMove, cardPending, type BoardColumnId } from '../../utils/shipmentBoard';
+import { boardRequirements, liveShipmentOf, requirementMatches, requirementMove, unreadMessages, type Requirement } from '../../utils/requirements';
 
 type View = 'board' | 'cards';
 const VIEW_KEY = 'ensil.envios.vista';
@@ -28,9 +32,10 @@ export function Shipments() {
   const {
     shipments, shippingMethods, couriers, stockItems, items, branches, warehouses, stockLocations,
     updateShipmentStatus, updateShipment, deleteShipment, currentBranchId, can, availabilityOf, reloadLogisticsDocuments,
+    requirements, requirementMessages, requirementSeen, reloadRequirements, moveRequirementToPacking, currentUser,
   } = useData();
-  // Lo que hacen otras personas aparece solo (Supabase Realtime) y, si la conexión en vivo falla, se vuelve a leer cada 30 segundos
-  const { connected } = useLiveShipments(reloadLogisticsDocuments);
+  // Lo que hacen otras personas aparece solo (Supabase Realtime: envíos, requerimientos y sus mensajes) y, si la conexión en vivo falla, se vuelve a leer cada 30 segundos
+  const { connected } = useLiveShipments(async () => { await Promise.all([reloadLogisticsDocuments(), reloadRequirements()]); });
 
   const [view, setViewState] = useState<View>(readView);
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* sin almacenamiento: no pasa nada */ } };
@@ -41,6 +46,9 @@ export function Shipments() {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Shipment | null>(null);
+  // Requerimientos de las sedes: «Verificar existencia» y el detalle con sus mensajes
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDestination, setFilterDestination] = useState('');
@@ -68,13 +76,44 @@ export function Shipments() {
   const canEdit = can('log-envios:edit');
 
   const filtered = shipments.filter(s => {
-    const matchesSearch = s.id.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = s.id.toLowerCase().includes(searchQuery.toLowerCase()) || (s.requirementId ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase()) && searchQuery.trim() !== '';
     const matchesDestination = filterDestination ? s.destinationId === filterDestination : true;
     const matchesStatus = view === 'cards' && filterStatus ? s.status.toLowerCase() === filterStatus.toLowerCase() : true;
     const matchesDate = filterDate ? s.date === filterDate : true;
     const matchesBranch = currentBranchId === 'all' ? true : (s.originId === currentBranchId || s.destinationId === currentBranchId);
     return matchesSearch && matchesDestination && matchesStatus && matchesDate && matchesBranch;
   });
+
+  // Requerimientos de las sedes: las tarjetas de «Por armar» (pendientes sin envío) y, en la vista de tarjetas, también los rechazados
+  const canAttend = can('log-requerimientos:attend');
+  const unreadOf = (id: string) => unreadMessages(requirementMessages, id, requirementSeen[id] ?? 0, currentUser.id);
+  const requirementVisible = (r: Requirement) =>
+    requirementMatches(r, searchQuery, placeName(r.branchId), itemName)
+    && (filterDestination ? r.branchId === filterDestination : true)
+    && (filterDate ? r.date === filterDate : true)
+    && (currentBranchId === 'all' ? true : r.branchId === currentBranchId);
+  const boardReqs = boardRequirements(requirements, shipments).filter(requirementVisible);
+  const cardReqs = requirements
+    .filter(r => (r.status === 'Pendiente' && !liveShipmentOf(r, shipments) && (!filterStatus || filterStatus === 'por armar')) || (r.status === 'Rechazado' && !filterStatus))
+    .filter(requirementVisible)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+
+  /** Se soltó un requerimiento en una columna (o se pulsó «Pasar a Empacando»): solo avanza a «Empacando», con la existencia verificada, y entonces nace el envío. */
+  const handleRequirementMove = async (r: Requirement, target: BoardColumnId) => {
+    const move = requirementMove(r, target, shipments);
+    if (!move) return;
+    if (!move.ok) {
+      const unreviewed = !r.reviewedAt && r.status === 'Pendiente';
+      openConfirm({
+        title: unreviewed ? 'Falta verificar la existencia' : 'No se puede mover el requerimiento', description: `${r.id}: ${move.error}`, variant: 'warning',
+        confirmLabel: unreviewed ? 'Verificar existencia' : 'Entendido', cancelLabel: 'Cerrar', hideCancel: !unreviewed,
+        onConfirm: () => { if (unreviewed) setReviewId(r.id); },
+      });
+      return;
+    }
+    // Con la versión que se ve: si otra persona cambió el requerimiento en el medio, la base no lo pasa y lo explica
+    await runOperation(moveRequirementToPacking(r.id, r.version), 'No se pudo pasar el requerimiento a «Empacando»');
+  };
 
   /** Se soltó una tarjeta en una columna (o se pulsó «avanzar»): las reglas dicen si se puede y la base lo vuelve a comprobar. */
   const handleMove = async (s: Shipment, target: BoardColumnId) => {
@@ -187,7 +226,7 @@ export function Shipments() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" size={16} />
               <input
-                type="text" placeholder="Buscar por ID de envío..."
+                type="text" placeholder="Buscar por código de envío o de requerimiento..."
                 className="w-full h-10 bg-surface border border-border-soft rounded-xl pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-accent focus:ring-1 focus:ring-primary-accent transition-shadow"
                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               />
@@ -230,11 +269,19 @@ export function Shipments() {
               shipments={filtered.filter(s => s.status !== 'Cancelado')}
               catalog={catalog} placeName={placeName} canMove={canEdit}
               onOpen={s => setWorkId(s.id)} onMove={handleMove}
+              requirements={boardReqs} allShipments={shipments} canAttend={canAttend} unreadOf={unreadOf}
+              onRequirementVerify={r => setReviewId(r.id)} onRequirementMessages={r => setDetailId(r.id)} onRequirementMove={handleRequirementMove}
             />
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && cardReqs.length === 0 ? (
             <div className="text-center text-text-muted py-8">No se encontraron envíos con los filtros aplicados.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+              {cardReqs.map(r => (
+                <RequirementCard
+                  key={r.id} requirement={r} branchName={placeName(r.branchId)} unread={unreadOf(r.id)} canAttend={canAttend}
+                  onVerify={() => setReviewId(r.id)} onMessages={() => setDetailId(r.id)} onAdvance={() => handleRequirementMove(r, 'Empacando')}
+                />
+              ))}
               {filtered.map(shipment => {
                 const method = shippingMethods.find(m => m.id === shipment.shippingMethodId)?.name;
                 const totalItems = shipment.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -299,6 +346,9 @@ export function Shipments() {
           )}
         </div>
       </div>
+
+      <RequirementReviewModal requirementId={reviewId} onClose={() => setReviewId(null)} />
+      <RequirementDetailModal requirementId={detailId} onClose={() => setDetailId(null)} />
 
       <ShipmentWorkModal
         shipmentId={workId} creating={creating}

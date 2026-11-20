@@ -81,6 +81,7 @@ export const ENTITIES: Record<string, string> = {
   company: 'Empresa', branch: 'Filial', warehouse: 'Almacén', program: 'Programa', level: 'Nivel', paymentType: 'Tipo de pago', tariff: 'Tarifario', promotion: 'Promoción', recipe: 'Receta de materiales',
   leadSource: 'Origen de lead', contractTemplate: 'Plantilla de contrato', notification: 'Aviso', audit: 'Auditoría',
   courier: 'Courier', shippingMethod: 'Método de envío',
+  requirement: 'Requerimiento de una sede', requirementMessage: 'Mensaje de un requerimiento',
 };
 
 export type Recipient = { capability: string; where: RecipientWhere } | { person: 'requester' | 'emitter' };
@@ -111,6 +112,11 @@ export const EVENTS: EventDef[] = [
   { id: 'transfer_received', label: 'Transferencia recibida', trigger: 'accion', recipients: [{ capability: 'log-transfer:dispatch', where: 'origin-branch' }], fallback: FALLBACK },
   { id: 'reception_with_differences', label: 'Recepción con faltante o daño', trigger: 'accion', recipients: [{ capability: 'log-ajustes:create', where: 'origin-branch' }, SUPERVISE], fallback: FALLBACK },
   { id: 'stock_below_minimum', label: 'Stock por debajo del mínimo', trigger: 'sistema', recipients: [{ capability: 'log-transfer:req_transfer', where: 'subject-branch' }, { capability: 'log-envios:create', where: 'any' }], fallback: FALLBACK },
+  // Requerimientos de las sedes: la sede pide, Logística atiende; los mensajes anclados avisan al otro lado
+  { id: 'requirement_created', label: 'Requerimiento de una sede (aviso a Logística)', trigger: 'accion', recipients: [{ capability: 'log-requerimientos:attend', where: 'any' }], fallback: FALLBACK },
+  { id: 'requirement_rejected', label: 'Requerimiento rechazado (aviso a la sede)', trigger: 'accion', recipients: [{ person: 'requester' }, { capability: 'log-requerimientos:create', where: 'subject-branch' }], fallback: FALLBACK },
+  { id: 'requirement_message_to_logistics', label: 'Mensaje de una sede en su requerimiento (aviso a Logística)', trigger: 'accion', recipients: [{ capability: 'log-requerimientos:attend', where: 'any' }], fallback: FALLBACK },
+  { id: 'requirement_message_to_sede', label: 'Mensaje de Logística en un requerimiento (aviso a la sede)', trigger: 'accion', recipients: [{ person: 'requester' }, { capability: 'log-requerimientos:create', where: 'subject-branch' }], fallback: FALLBACK },
   // Matrícula
   { id: 'drop_request_pending', label: 'Solicitud de caída pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_drop', where: 'any' }], fallback: FALLBACK },
   { id: 'reactivation_request_pending', label: 'Solicitud de reactivación pendiente', trigger: 'accion', recipients: [{ capability: 'op-matriculas:approve_reactivation', where: 'any' }], fallback: FALLBACK },
@@ -388,6 +394,27 @@ export const FUNCTIONALITIES: FunctionalityDef[] = [
       emits: ['shipment_received', 'reception_with_differences'], actions: ['confirmReception'],
     },
   ]),
+  f('log-requerimientos', 'Requerimientos de las sedes', 'mod-logistica', [
+    // Se ven dentro de Recepciones (la sede, los suyos) y de Envíos (Logística, en «Por armar»): no tienen ítem de menú propio
+    { action: 'view', label: 'Ver requerimientos', kind: 'ver', reads: ['requirement', 'requirementMessage', 'branch'] },
+    {
+      action: 'create', label: 'Armar un requerimiento (pedir mercadería al almacén)', kind: 'crear', requires: ['view', 'log-recepciones:view'], reads: ['item', 'branch'],
+      writes: ['requirement'], emits: ['requirement_created'], actions: ['addRequirement'],
+      counterparts: [cp('log-requerimientos:attend', 'any', 'advisory', 'Nadie en Logística podrá atender el requerimiento: hay que crear un usuario con «Atender requerimientos».')],
+      note: 'Una vez enviado, la sede ya no lo edita: escribe un mensaje anclado.',
+    },
+    {
+      action: 'attend', label: 'Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando»)', kind: 'operar', requires: ['view', 'log-envios:view', 'log-envios:create', 'log-stock:view'],
+      reads: ['requirement', 'stock', 'shipment'], writes: ['requirement', 'shipment'], emits: ['requirement_rejected'],
+      actions: ['openRequirementReview', 'reviewRequirement', 'rejectRequirement', 'moveRequirementToPacking'],
+      note: 'Solo reduce las cantidades pedidas (0 = sin stock) o rechaza con motivo; al pasarlo a «Empacando» nace el envío.',
+    },
+    {
+      action: 'message', label: 'Escribir en un requerimiento (mensaje anclado)', kind: 'operar', requires: ['view'], writes: ['requirementMessage'],
+      emits: ['requirement_message_to_logistics', 'requirement_message_to_sede'], actions: ['addRequirementMessage'],
+      note: 'La sede pregunta o corrige; Logística responde. Solo mientras el requerimiento está pendiente.',
+    },
+  ]),
   f('log-kardex', 'Kardex', 'mod-logistica', [
     { action: 'view', label: 'Ver el kardex', kind: 'ver', menu: menu('logistica', 'Kardex'), reads: ['kardex', 'stock', 'item'] },
   ]),
@@ -617,6 +644,8 @@ export const NON_CAPABILITY_ACTIONS: Record<string, string> = {
   reloadOrgDirectory: 'Consulta (vuelve a leer las empresas y filiales de la base de datos).',
   reloadStaffDirectory: 'Consulta (vuelve a leer el personal y las asignaciones de la base de datos).',
   reloadLogisticsDocuments: 'Consulta (vuelve a leer los envíos, las transferencias y las incidencias que la cuenta puede ver).',
+  reloadRequirements: 'Consulta (vuelve a leer los requerimientos, sus mensajes y las marcas de lectura que la cuenta puede ver).',
+  markRequirementMessagesSeen: 'Marca de lectura propia (cada cuenta marca como vistos los mensajes de un requerimiento que ya puede leer; no cambia nada de nadie más).',
   reloadContractsPayroll: 'Consulta (vuelve a leer los contratos y las planillas de la base de datos).',
   selectBranch: 'Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).',
 };

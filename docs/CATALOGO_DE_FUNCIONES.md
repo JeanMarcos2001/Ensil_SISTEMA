@@ -3,7 +3,7 @@
 > **Generado** desde `src/utils/capabilityRegistry.ts` con `npx tsx scripts/doc-capabilities.ts`. No se edita a mano: para cambiar algo, se cambia el registro y se vuelve a generar.
 > Es el cuadro de referencia del constructor de roles: qué función existe, qué necesita, qué otra persona debe poder hacer, qué datos toca y qué avisos dispara.
 
-**53 funcionalidades · 188 funciones** (3 reservadas) · 23 avisos · 14 combinaciones a separar.
+**54 funcionalidades · 192 funciones** (3 reservadas) · 27 avisos · 14 combinaciones a separar.
 
 Cómo leerlo:
 - **Requiere:** lo que el mismo usuario necesita; al marcar la función se marca solo.
@@ -148,6 +148,15 @@ Cómo leerlo:
 |---|---|---|---|---|---|
 | **Ver recepciones** · menú «Recepciones»<br><code>log-recepciones:view</code> | ver | — | — | Envío, Transferencia, Recepción → — | — |
 | **Confirmar la recepción de un envío**<br><code>log-recepciones:confirm</code> | operar | Ver recepciones | — | Envío → Recepción, Envío, Stock, Kardex | Envío recibido, Recepción con faltante o daño |
+
+### Requerimientos de las sedes `log-requerimientos`
+
+| Función | Tipo | Requiere | Contraparte | Lee → Escribe | Avisos |
+|---|---|---|---|---|---|
+| **Ver requerimientos**<br><code>log-requerimientos:view</code> | ver | — | — | Requerimiento de una sede, Mensaje de un requerimiento, Filial → — | — |
+| **Armar un requerimiento (pedir mercadería al almacén)**<br><code>log-requerimientos:create</code> | crear | Ver requerimientos, Ver recepciones | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») en cualquier sede (recomendada) | Artículo, Filial → Requerimiento de una sede | Requerimiento de una sede (aviso a Logística) |
+| **Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando»)**<br><code>log-requerimientos:attend</code> | operar | Ver requerimientos, Ver envíos, Preparar un envío, Ver el stock | — | Requerimiento de una sede, Stock, Envío → Requerimiento de una sede, Envío | Requerimiento rechazado (aviso a la sede) |
+| **Escribir en un requerimiento (mensaje anclado)**<br><code>log-requerimientos:message</code> | operar | Ver requerimientos | — | — → Mensaje de un requerimiento | Mensaje de una sede en su requerimiento (aviso a Logística), Mensaje de Logística en un requerimiento (aviso a la sede) |
 
 ### Kardex `log-kardex`
 
@@ -501,6 +510,10 @@ El aviso llega a quien tenga la función indicada en la sede que corresponde, no
 | Transferencia recibida | Recepcionar transferencia | Despachar transferencia (sede origen) |
 | Recepción con faltante o daño | Recepcionar transferencia · Confirmar la recepción de un envío | Registrar un ajuste o una merma (sede origen)<br>Recibir copia de los avisos de control (reversas, cierres reabiertos, diferencias de recepción, cambios de permisos) (cualquier sede) |
 | Stock por debajo del mínimo | La regla del sistema (por fecha o estado) | Solicitar transferencia (sede del alumno o documento)<br>Preparar un envío (cualquier sede) |
+| Requerimiento de una sede (aviso a Logística) | Armar un requerimiento (pedir mercadería al almacén) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») (cualquier sede) |
+| Requerimiento rechazado (aviso a la sede) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») | Quien hizo la solicitud<br>Armar un requerimiento (pedir mercadería al almacén) (sede del alumno o documento) |
+| Mensaje de una sede en su requerimiento (aviso a Logística) | Escribir en un requerimiento (mensaje anclado) | Atender requerimientos (verificar la existencia, rechazar y pasar a «Empacando») (cualquier sede) |
+| Mensaje de Logística en un requerimiento (aviso a la sede) | Escribir en un requerimiento (mensaje anclado) | Quien hizo la solicitud<br>Armar un requerimiento (pedir mercadería al almacén) (sede del alumno o documento) |
 | Solicitud de caída pendiente | Solicitar caída | Aprobar caída (cualquier sede) |
 | Solicitud de reactivación pendiente | Solicitar reactivación | Aprobar reactivación (cualquier sede) |
 | Solicitud de cambio de programa pendiente | Solicitar cambio de programa o nivel | Aprobar cambio de programa o nivel (cualquier sede) |
@@ -552,6 +565,9 @@ Acciones del contexto que no pertenecen a una persona (consultas, ayudas interna
 - `setIsEnrollmentWizardOpen`: Estado de la interfaz (abrir el asistente de matrícula).
 - `reloadOrgDirectory`: Consulta (vuelve a leer las empresas y filiales de la base de datos).
 - `reloadStaffDirectory`: Consulta (vuelve a leer el personal y las asignaciones de la base de datos).
+- `reloadLogisticsDocuments`: Consulta (vuelve a leer los envíos, las transferencias y las incidencias que la cuenta puede ver).
+- `reloadRequirements`: Consulta (vuelve a leer los requerimientos, sus mensajes y las marcas de lectura que la cuenta puede ver).
+- `markRequirementMessagesSeen`: Marca de lectura propia (cada cuenta marca como vistos los mensajes de un requerimiento que ya puede leer; no cambia nada de nadie más).
 - `reloadContractsPayroll`: Consulta (vuelve a leer los contratos y las planillas de la base de datos).
 - `selectBranch`: Sesión: cambia la sede que se ve, solo entre las que alcanza la cuenta (no es una función que se reparta).
 

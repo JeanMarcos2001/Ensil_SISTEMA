@@ -3,9 +3,11 @@ import { supabase, supabaseConfigured } from '../lib/supabase';
 import { createLiveRefresher } from '../services/liveRefresh';
 
 /**
- * Mantiene al día los envíos de una pantalla (Envíos y Recepciones): escucha los cambios de la tabla `envios` con Supabase Realtime (la base solo avisa de lo que la
- * cuenta puede leer: la sede destino no recibe avisos de lo que se prepara) y vuelve a leer con `refresh`. Si la conexión en vivo no funciona o se cae, se
- * sigue leyendo cada 30 segundos. Solo está activo mientras la pantalla está abierta (una conexión por pestaña). Devuelve si la conexión en vivo está arriba.
+ * Mantiene al día los envíos y los requerimientos de una pantalla (Envíos y Recepciones): escucha los cambios de las tablas `envios`, `requerimientos` y
+ * `requerimiento_mensajes` con Supabase Realtime (la base solo avisa de lo que la cuenta puede leer: la sede destino no recibe avisos de lo que se prepara y
+ * una sede solo recibe los de sus propios requerimientos) y vuelve a leer con `refresh`. Si la conexión en vivo no funciona o se cae, se sigue leyendo cada
+ * 30 segundos. Solo está activo mientras la pantalla está abierta (una conexión por pestaña, un solo canal para las tres tablas). Devuelve si la conexión en
+ * vivo está arriba.
  */
 export function useLiveShipments(refresh: () => Promise<void>, enabled = true): { connected: boolean } {
   const [connected, setConnected] = useState(false);
@@ -19,6 +21,8 @@ export function useLiveShipments(refresh: () => Promise<void>, enabled = true): 
         const channel = supabase
           .channel(`envios-${Math.random().toString(36).slice(2, 10)}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'envios' }, () => onChange())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'requerimientos' }, () => onChange())
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'requerimiento_mensajes' }, () => onChange())
           .subscribe(status => onStatus(status === 'SUBSCRIBED'));
         return () => { void supabase.removeChannel(channel); };
       },

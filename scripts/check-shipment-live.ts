@@ -264,13 +264,14 @@ function screens() {
   const ctx = read('src/context/DataContext.tsx');
   const registry = read('src/utils/capabilityRegistry.ts');
   check('Envíos y Recepciones se mantienen al día solos y lo muestran (En vivo / cada 30 segundos)',
-    /useLiveShipments\(reloadLogisticsDocuments\)/.test(shipments) && /<LiveIndicator connected=\{connected\} \/>/.test(shipments)
-    && /useLiveShipments\(reloadLogisticsDocuments\)/.test(receptions) && /<LiveIndicator connected=\{connected\} \/>/.test(receptions)
+    /useLiveShipments\(async \(\) => \{ await Promise\.all\(\[reloadLogisticsDocuments\(\), reloadRequirements\(\)\]\); \}\)/.test(shipments) && /<LiveIndicator connected=\{connected\} \/>/.test(shipments)
+    && /useLiveShipments\(async \(\) => \{ await Promise\.all\(\[reloadLogisticsDocuments\(\), reloadRequirements\(\)\]\); \}\)/.test(receptions) && /<LiveIndicator connected=\{connected\} \/>/.test(receptions)
     && /En vivo/.test(read('src/components/logistics/LiveIndicator.tsx')) && /Se actualiza cada 30 segundos/.test(read('src/components/logistics/LiveIndicator.tsx')));
   check('El gancho escucha los cambios de la tabla de envíos, avisa si la conexión está arriba, se desconecta al salir y respalda con el motor (30 s)',
     /\.on\('postgres_changes', \{ event: '\*', schema: 'public', table: 'envios' \}/.test(hook) && /status === 'SUBSCRIBED'/.test(hook) && /removeChannel\(channel\)/.test(hook)
     && /createLiveRefresher\(/.test(hook) && /supabaseConfigured/.test(hook) && /controller\.stop\(\)/.test(hook));
-  check('Solo se escucha una tabla (envíos); Recepciones recibe lo demás con el respaldo de 30 segundos', (hook.match(/table: '/g) ?? []).length === 1);
+  check('Se escuchan tres tablas en un solo canal (envíos, requerimientos y sus mensajes); las transferencias de Recepciones se actualizan con el respaldo de 30 segundos',
+    (hook.match(/table: '/g) ?? []).length === 3 && /table: 'requerimientos'/.test(hook) && /table: 'requerimiento_mensajes'/.test(hook) && (hook.match(/\.channel\(/g) ?? []).length === 1);
   check('La relectura es una consulta del contexto (no una acción con permiso) y no vuelve a dibujar el tablero si no cambió nada',
     /reloadLogisticsDocuments: \(\) => Promise<void>;/.test(ctx) && /reloadLogisticsDocuments: log\.refreshDocuments/.test(ctx) && /reloadLogisticsDocuments: 'Consulta/.test(registry)
     && /JSON\.stringify\(a\) === JSON\.stringify\(b\)/.test(logistics) && /if \(!same\(shipmentsRef\.current, res\.data\.shipments\)\) setShipments/.test(logistics));

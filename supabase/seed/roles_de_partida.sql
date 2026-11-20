@@ -3,7 +3,7 @@
 --
 -- Cargar: pegar este script en el SQL Editor del proyecto `ensil-sistema` (NO el de la web).
 -- Es seguro repetirlo: un rol que ya existe (mismo id o mismo nombre) se omite junto con sus funciones.
--- Crea 5 roles (ROL-002, ROL-003, ROL-004, ROL-005, ROL-006) con 201 funciones en total.
+-- Crea 5 roles (ROL-002, ROL-003, ROL-004, ROL-005, ROL-006) con 207 funciones en total.
 
 with nuevos as (
   insert into public.roles (id, nombre, descripcion, estado, plantilla_id, limite_cuentas_por_sede, riesgos_aceptados)
@@ -24,6 +24,9 @@ from (values
     ('ROL-002', 'log-kardex:view'),
     ('ROL-002', 'log-recepciones:confirm'),
     ('ROL-002', 'log-recepciones:view'),
+    ('ROL-002', 'log-requerimientos:create'),
+    ('ROL-002', 'log-requerimientos:message'),
+    ('ROL-002', 'log-requerimientos:view'),
     ('ROL-002', 'log-stock:view'),
     ('ROL-002', 'log-transfer:receive'),
     ('ROL-002', 'log-transfer:req_transfer'),
@@ -102,6 +105,9 @@ from (values
     ('ROL-004', 'log-envios:edit'),
     ('ROL-004', 'log-envios:view'),
     ('ROL-004', 'log-kardex:view'),
+    ('ROL-004', 'log-requerimientos:attend'),
+    ('ROL-004', 'log-requerimientos:message'),
+    ('ROL-004', 'log-requerimientos:view'),
     ('ROL-004', 'log-stock:edit_min'),
     ('ROL-004', 'log-stock:entry'),
     ('ROL-004', 'log-stock:pack'),

@@ -92,6 +92,8 @@ import { deriveAlerts, type SystemAlert } from '../utils/systemAlerts';
 import { isWarehouseId, locationSaleError, shipmentRouteError, stockLocations, transferRouteError, warehouseDefinitionError, warehouseInactivationError, type StockLocation } from '../utils/logisticsRoutes';
 import { availableStock, getCurrentPrice, itemSaleError } from '../utils/inventory';
 import { receptionOutcome, shipmentMovesStock, transferMovesStock } from '../utils/logisticsDocs';
+import { useRequirements } from '../hooks/useRequirements';
+import type { Requirement, RequirementDraft, RequirementMessage } from '../utils/requirements';
 
 // Types
 export interface Guardian {
@@ -741,6 +743,8 @@ export interface Shipment {
   dispatchedAt?: string;
   /** Sube con cada cambio del envío (lo hace la base): quien edita manda la que vio, y si cambió en el medio no se guarda (`shipmentStaleError`). */
   version?: number;
+  /** El requerimiento de una sede del que nació este envío (migración 0031); vacío si lo armó Logística por su cuenta. No cambia. */
+  requirementId?: string;
 }
 
 export interface ReceptionIncident {
@@ -1432,6 +1436,31 @@ interface DataContextType {
   reloadStaffDirectory: () => Promise<void>;
   /** Vuelve a leer los envíos, las transferencias y las incidencias de la base (Envíos y Recepciones se mantienen al día con esto). */
   reloadLogisticsDocuments: () => Promise<void>;
+  /**
+   * Requerimientos de las sedes (migración 0031): una sede PIDE mercadería al almacén central. La sede ve los suyos; Logística, todos. Cae como tarjeta en
+   * «Por armar»; en «Verificar existencia» Logística solo reduce las cantidades o rechaza con motivo; al pasarlo a «Empacando» nace el envío.
+   */
+  requirements: Requirement[];
+  /** Los mensajes anclados a cada requerimiento (la sede pregunta o corrige, Logística responde). */
+  requirementMessages: RequirementMessage[];
+  /** Hasta qué mensaje leyó esta cuenta cada requerimiento (código del requerimiento → número del último mensaje visto). */
+  requirementSeen: Record<string, number>;
+  /** Vuelve a leer los requerimientos, sus mensajes y las marcas de lectura (Envíos y Recepciones se mantienen al día con esto). */
+  reloadRequirements: () => Promise<void>;
+  /** La sede arma su requerimiento; la base le asigna el código. */
+  addRequirement: (draft: RequirementDraft) => Promise<StockResult & { id?: string }>;
+  /** Alguien abre «Verificar existencia»: la tarjeta deja de parpadear para todos. */
+  openRequirementReview: (id: string) => Promise<StockResult>;
+  /** Logística fija cuánto enviará de cada artículo pedido (solo reduce; 0 = sin stock). `version`: la que se vio al abrir. */
+  reviewRequirement: (id: string, sends: Record<string, number>, version?: number) => Promise<StockResult>;
+  /** Logística rechaza el requerimiento con su motivo (la sede lo verá). */
+  rejectRequirement: (id: string, reason: string, version?: number) => Promise<StockResult>;
+  /** Pasa el requerimiento a «Empacando»: nace el envío (devuelve su código). */
+  moveRequirementToPacking: (id: string, version?: number) => Promise<StockResult & { id?: string }>;
+  /** Un mensaje anclado al requerimiento (solo mientras está pendiente). */
+  addRequirementMessage: (id: string, text: string) => Promise<StockResult>;
+  /** Marca como vistos los mensajes de un requerimiento (la marca de «mensaje nuevo» desaparece). */
+  markRequirementMessagesSeen: (id: string) => Promise<StockResult>;
   /** Contratos guardados en la base de datos, cada uno con su empresa. Quien no tiene «Ver remuneraciones» los recibe SIN sueldo (lo decide la base). */
   contracts: Contract[];
   contractsPayroll: { status: ContractsPayrollStatus; error: string };
@@ -2009,6 +2038,10 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
   // (se cargan con `supabase/seed/logistica_inicial.sql`).
   const log = useLogistics(logisticsData, { items, locations });
   const { stockItems, kardex, transfers, shipments, couriers, shippingMethods, adjustments, incidents } = log;
+  // Requerimientos de las sedes (migración 0031): no pasan por `AccessGate`; se leen al abrir Envíos o Recepciones y se mantienen al día en vivo.
+  const reqs = useRequirements({
+    items: items.map(i => ({ id: i.id, name: i.name, status: i.status })), shipments, itemName: id => items.find(i => i.id === id)?.name ?? id,
+  });
 
   // Matrículas, planes, cuotas, pagos, caja, notas de crédito, grupos promocionales, solicitudes (caída, reactivación, cambio de programa y traslado) y
   // registro de correcciones: de la base de datos (`AccessGate` los lee al iniciar sesión).
@@ -3055,6 +3088,60 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
 
   const deleteShipment: DataContextType['deleteShipment'] = async id => log.deleteShipment(id);
 
+  // ---- Requerimientos de las sedes. Los avisos son una consecuencia: si fallan no deshacen la acción que los causó (se anotan en la consola).
+  const requirementScope = (r: Pick<Requirement, 'branchId' | 'warehouseId' | 'createdById'>): NoticeScope => ({
+    destinationBranchId: r.branchId, subjectBranchId: r.branchId, originBranchId: r.warehouseId, ...(r.createdById ? { requesterId: r.createdById } : {}),
+  });
+
+  /** La sede arma su requerimiento: la base le asigna el código y avisa a Logística. */
+  const addRequirement: DataContextType['addRequirement'] = async draft => {
+    const res = await reqs.add(draft);
+    if (!res.ok) return { ok: false, error: res.error };
+    notify('requirement_created', {
+      title: 'Requerimiento de una sede',
+      message: `${locationName(draft.branchId) || 'Una sede'} pidió ${draft.lines.length} artículo${draft.lines.length === 1 ? '' : 's'}${res.id ? ` (${res.id})` : ''}. Revíselo en «Por armar», dentro de Envíos.`,
+      type: 'info', scope: { destinationBranchId: draft.branchId, subjectBranchId: draft.branchId, originBranchId: draft.warehouseId }, reference: res.id,
+    });
+    return { ok: true, id: res.id };
+  };
+
+  const rejectRequirement: DataContextType['rejectRequirement'] = async (id, reason, version) => {
+    const prev = reqs.requirements.find(r => r.id === id);
+    const res = await reqs.reject(id, reason, version);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (prev) {
+      notify('requirement_rejected', {
+        title: 'Requerimiento rechazado', message: `Logística rechazó el requerimiento ${id}. Motivo: ${reason.trim()}`, type: 'warning', scope: requirementScope(prev), reference: id,
+      });
+    }
+    return { ok: true };
+  };
+
+  /** Pasa el requerimiento a «Empacando»: nace el envío, que se vuelve a leer para que aparezca en el tablero. */
+  const moveRequirementToPacking: DataContextType['moveRequirementToPacking'] = async (id, version) => {
+    const res = await reqs.moveToPacking(id, version);
+    if (!res.ok) return { ok: false, error: res.error };
+    await log.refreshDocuments();
+    return { ok: true, id: res.id };
+  };
+
+  /** Un mensaje anclado: quien atiende requerimientos escribe del lado de Logística (avisa a la sede); la sede, del suyo (avisa a Logística). */
+  const addRequirementMessage: DataContextType['addRequirementMessage'] = async (id, text) => {
+    const prev = reqs.requirements.find(r => r.id === id);
+    const res = await reqs.sendMessage(id, text);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (prev) {
+      const fromLogistics = can('log-requerimientos:attend');
+      const clean = text.trim();
+      notify(fromLogistics ? 'requirement_message_to_sede' : 'requirement_message_to_logistics', {
+        title: `Mensaje en el requerimiento ${id}`,
+        message: `${currentUser.name}: «${clean.length > 300 ? `${clean.slice(0, 297)}…` : clean}»`,
+        type: 'info', scope: requirementScope(prev), reference: id,
+      });
+    }
+    return { ok: true };
+  };
+
   const updateShipment: DataContextType['updateShipment'] = async (id, shipment) => {
     const prev = log.shipments.find(s => s.id === id);
     if (!prev) return { ok: false, error: 'Envío no encontrado.' };
@@ -3294,6 +3381,17 @@ export function DataProvider({ children, access, accountId, org: orgData, catalo
       orgDirectory: { status: org.status, error: org.error },
       reloadOrgDirectory: org.reload,
       reloadLogisticsDocuments: log.refreshDocuments,
+      requirements: reqs.requirements,
+      requirementMessages: reqs.messages,
+      requirementSeen: reqs.seen,
+      reloadRequirements: reqs.reload,
+      addRequirement,
+      openRequirementReview: reqs.openReview,
+      reviewRequirement: reqs.review,
+      rejectRequirement,
+      moveRequirementToPacking,
+      addRequirementMessage,
+      markRequirementMessagesSeen: reqs.markSeen,
       addCompany: org.addCompany,
       // Una empresa con contratos vigentes no se inactiva ni se elimina (igual que con filiales o almacenes)
       updateCompany: (id, companyData) => org.updateCompany(id, companyData, contracts.filter(k => k.status === 'Vigente')),

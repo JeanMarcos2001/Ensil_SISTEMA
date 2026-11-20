@@ -33,6 +33,8 @@ export interface EnvioRow {
   despachado_en?: string | null;
   /** Sube con cada cambio (migración 0030; una base anterior no trae la columna). */
   version?: number;
+  /** El requerimiento de una sede del que nació el envío (migración 0031; una base anterior no trae la columna). */
+  requerimiento_id?: string | null;
 }
 export interface TransferenciaRow {
   id: string; fecha: string; origen_id: string; destino_id: string; estado: Transfer['status']; lineas: LineaRow[]; cajas: CajaRow[]; motivo: string;
@@ -111,7 +113,7 @@ export const shipmentFromRow = (r: EnvioRow): Shipment => ({
   travelerName: opt(r.viajero_nombre), travelerDocument: opt(r.viajero_documento), shippingObservation: opt(r.observacion_envio), eta: opt(r.eta), etaTime: opt(r.eta_hora),
   draftExpiry: opt(r.borrador_vence), observation: opt(r.observacion), attachments: r.adjuntos && r.adjuntos.length > 0 ? r.adjuntos : undefined,
   receptionObservation: opt(r.recepcion_observacion), receptionDate: opt(r.recepcion_fecha), receivedBy: opt(r.recibido_por), manualEnable: r.habilitar_recepcion_manual || undefined,
-  dispatchedAt: opt(r.despachado_en), version: opt(r.version),
+  dispatchedAt: opt(r.despachado_en), version: opt(r.version), requirementId: opt(r.requerimiento_id),
 });
 
 /**

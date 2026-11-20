@@ -42,6 +42,8 @@ const ADMIN_SEDE: string[] = [
   'op-verificacion:view', 'op-verificacion:deliver',
   'log-stock:view', 'log-recepciones:view', 'log-recepciones:confirm', 'log-kardex:view',
   'log-transfer:view', 'log-transfer:req_transfer', 'log-transfer:receive',
+  // Pide mercadería al almacén (requerimientos) y conversa con Logística
+  'log-requerimientos:view', 'log-requerimientos:create', 'log-requerimientos:message',
   // Asesorías y cronogramas (el alumno fija su horario en secretaría)
   'psi-prog:view', 'psi-prog:create', 'psi-prog:reschedule', 'psi-prog:export_schedule',
   'psi-cronogramas:view', 'psi-cronogramas:create', 'psi-cronogramas:edit', 'psi-historial:view', 'psi-recordatorios:view', 'psi-recordatorios:remind',
@@ -62,6 +64,8 @@ const ALMACEN: string[] = [
   'log-catalogo:view', 'log-catalogo:create', 'log-catalogo:edit',
   'log-stock:view', 'log-stock:edit_min', 'log-stock:pack', 'log-stock:unpack', 'log-stock:entry',
   'log-envios:view', 'log-envios:create', 'log-envios:edit', 'log-envios:dispatch',
+  // Atiende los requerimientos de las sedes (verifica la existencia, rechaza o los pasa a «Empacando») y conversa con ellas
+  'log-requerimientos:view', 'log-requerimientos:attend', 'log-requerimientos:message',
   'log-transfer:view', 'log-transfer:approve_transfer', 'log-transfer:dispatch', 'log-transfer:receive',
   'log-kardex:view', 'log-ajustes:view', 'log-ajustes:create',
   'rep-general:view', 'rep-stock:view',
